@@ -1,0 +1,88 @@
+import { Signal } from "signal-polyfill";
+
+type ValueResolver = (path: string) => unknown;
+
+export default class SignalRegistry {
+  private readonly signals = new Map<string, Signal.State<unknown>>();
+  private readonly computeds = new Map<string, Signal.Computed<unknown>>();
+
+  getOrCreate(path: string, initialValue: unknown): Signal.State<unknown> {
+    let signal = this.signals.get(path);
+    if (!signal) {
+      signal = new Signal.State(initialValue);
+      this.signals.set(path, signal);
+    }
+    return signal;
+  }
+
+  get(path: string): Signal.State<unknown> | Signal.Computed<unknown> | undefined {
+    return this.computeds.get(path) ?? this.signals.get(path);
+  }
+
+  has(path: string): boolean {
+    return this.signals.has(path) || this.computeds.has(path);
+  }
+
+  set(path: string, value: unknown): void {
+    const signal = this.signals.get(path);
+    if (signal) {
+      signal.set(value);
+    }
+  }
+
+  invalidateChildren(parentPath: string, resolver: ValueResolver): void {
+    const prefix = parentPath.endsWith("/") ? parentPath : `${parentPath}/`;
+    for (const [path, signal] of this.signals) {
+      if (path.startsWith(prefix)) {
+        signal.set(resolver(path));
+      }
+    }
+  }
+
+  invalidateAll(resolver: ValueResolver): void {
+    for (const [path, signal] of this.signals) {
+      signal.set(resolver(path));
+    }
+  }
+
+  addComputed(
+    path: string,
+    deps: string[],
+    fn: (...args: unknown[]) => unknown,
+  ): Signal.Computed<unknown> {
+    if (this.signals.has(path)) {
+      throw new TypeError(
+        `Cannot create computed signal at "${path}": path already holds raw data`,
+      );
+    }
+
+    const existing = this.computeds.get(path);
+    if (existing) {
+      this.computeds.delete(path);
+    }
+
+    const computed = new Signal.Computed(() => {
+      const values = deps.map((dep) => {
+        const s = this.get(dep);
+        return s ? s.get() : undefined;
+      });
+      return fn(...values);
+    });
+
+    this.computeds.set(path, computed);
+    return computed;
+  }
+
+  removeComputed(path: string): void {
+    this.computeds.delete(path);
+  }
+
+  isComputed(path: string): boolean {
+    return this.computeds.has(path);
+  }
+
+  destroy(): void {
+    this.signals.clear();
+    this.computeds.clear();
+  }
+}
