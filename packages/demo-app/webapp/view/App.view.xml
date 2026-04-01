@@ -1,0 +1,27 @@
+<mvc:View
+	controllerName="demo.app.controller.App"
+	xmlns:mvc="sap.ui.core"
+	xmlns="sap.m"
+	displayBlock="true">
+	<Shell>
+		<App>
+			<pages>
+				<Page title="SignalModel Demo" enableScrolling="true">
+					<headerContent>
+						<SegmentedButton id="navButton" selectedKey="propertyBinding" selectionChange=".onNavChange">
+							<items>
+								<SegmentedButtonItem key="propertyBinding" text="Properties" />
+								<SegmentedButtonItem key="listBinding" text="List" />
+								<SegmentedButtonItem key="computed" text="Computed" />
+								<SegmentedButtonItem key="programmatic" text="Programmatic" />
+								<SegmentedButtonItem key="strict" text="Strict" />
+								<SegmentedButtonItem key="comparison" text="Comparison" />
+							</items>
+						</SegmentedButton>
+					</headerContent>
+					<NavContainer id="navContainer" />
+				</Page>
+			</pages>
+		</App>
+	</Shell>
+</mvc:View>

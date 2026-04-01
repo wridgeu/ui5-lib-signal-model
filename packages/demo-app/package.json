@@ -1,0 +1,23 @@
+{
+  "name": "ui5-lib-signal-model-demo",
+  "version": "1.0.0",
+  "private": true,
+  "author": "Marco Beier",
+  "description": "Demo app for ui5-lib-signal-model library",
+  "type": "module",
+  "scripts": {
+    "clean": "rimraf dist .ui5",
+    "serve": "ui5 serve",
+    "start": "ui5 serve --open /index.html",
+    "build": "ui5 build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@ui5/cli": "^4.0.0",
+    "ui5-middleware-livereload": "^3.0.0",
+    "ui5-tooling-transpile": "^3.0.0"
+  },
+  "dependencies": {
+    "ui5-lib-signal-model": "*"
+  }
+}

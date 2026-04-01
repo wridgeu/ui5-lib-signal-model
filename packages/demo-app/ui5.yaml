@@ -1,0 +1,31 @@
+specVersion: "4.0"
+metadata:
+  name: demo.app
+type: application
+framework:
+  name: OpenUI5
+  version: "1.144.0"
+  libraries:
+    - name: sap.m
+    - name: sap.ui.core
+    - name: sap.ui.layout
+    - name: themelib_sap_horizon
+server:
+  customMiddleware:
+    - name: ui5-tooling-transpile-middleware
+      afterMiddleware: compression
+      configuration:
+        transpileDependencies: true
+        transformModulesToUI5: true
+    - name: ui5-middleware-livereload
+      afterMiddleware: compression
+resources:
+  configuration:
+    paths:
+      webapp: webapp
+builder:
+  customTasks:
+    - name: ui5-tooling-transpile-task
+      afterTask: replaceVersion
+      configuration:
+        transformModulesToUI5: true

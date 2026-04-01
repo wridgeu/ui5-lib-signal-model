@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "paths": {
+      "ui5/model/signal/*": ["../lib/src/*"],
+      "demo/app/*": ["./webapp/*"]
+    },
+    "types": ["@openui5/types"]
+  },
+  "include": ["webapp/**/*.ts", "../lib/src/**/*.ts"]
+}
