@@ -1,0 +1,24 @@
+<mvc:View
+	controllerName="demo.app.controller.ComputedSignals"
+	xmlns:mvc="sap.ui.core"
+	xmlns="sap.m"
+	xmlns:f="sap.ui.layout.form">
+	<Panel headerText="Computed Signals Demo">
+		<f:SimpleForm editable="true" layout="ResponsiveGridLayout">
+			<Label text="First Name" />
+			<Input value="{/firstName}" />
+			<Label text="Last Name" />
+			<Input value="{/lastName}" />
+			<Label text="Full Name (computed)" />
+			<Text text="{/fullName}" />
+			<Label text="Age" />
+			<Input value="{/age}" type="Number" />
+			<Label text="Birth Year (computed)" />
+			<Text text="{/birthYear}" />
+		</f:SimpleForm>
+		<MessageStrip
+			text="fullName and birthYear are computed signals -- they update automatically when their dependencies change."
+			type="Information"
+			class="sapUiSmallMargin" />
+	</Panel>
+</mvc:View>

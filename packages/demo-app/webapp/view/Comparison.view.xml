@@ -1,0 +1,35 @@
+<mvc:View
+	controllerName="demo.app.controller.Comparison"
+	xmlns:mvc="sap.ui.core"
+	xmlns="sap.m"
+	xmlns:f="sap.ui.layout.form"
+	xmlns:l="sap.ui.layout">
+	<Panel headerText="JSONModel vs SignalModel Comparison">
+		<l:Grid defaultSpan="L6 M6 S12">
+			<Panel headerText="SignalModel (default model)">
+				<f:SimpleForm editable="true" layout="ResponsiveGridLayout">
+					<Label text="First Name" />
+					<Input value="{/firstName}" />
+					<Label text="Last Name" />
+					<Input value="{/lastName}" />
+					<Label text="Value:" />
+					<Text text="{/firstName} {/lastName}" />
+				</f:SimpleForm>
+			</Panel>
+			<Panel headerText="JSONModel (named 'json')">
+				<f:SimpleForm editable="true" layout="ResponsiveGridLayout">
+					<Label text="First Name" />
+					<Input value="{json>/firstName}" />
+					<Label text="Last Name" />
+					<Input value="{json>/lastName}" />
+					<Label text="Value:" />
+					<Text text="{json>/firstName} {json>/lastName}" />
+				</f:SimpleForm>
+			</Panel>
+		</l:Grid>
+		<MessageStrip
+			text="Both models show identical behavior. Edit either side -- bindings update the same way. The difference is internal: SignalModel uses push-based signals, JSONModel uses poll-based checkUpdate."
+			type="Information"
+			class="sapUiSmallMargin" />
+	</Panel>
+</mvc:View>

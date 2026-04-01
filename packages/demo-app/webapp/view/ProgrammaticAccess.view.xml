@@ -1,0 +1,20 @@
+<mvc:View
+	controllerName="demo.app.controller.ProgrammaticAccess"
+	xmlns:mvc="sap.ui.core"
+	xmlns="sap.m">
+	<Panel headerText="Programmatic Signal Access">
+		<VBox class="sapUiSmallMargin">
+			<Label text="Current firstName signal value:" />
+			<Text id="signalValue" text="(click Read Signal)" />
+			<HBox class="sapUiSmallMarginTop">
+				<Button text="Read Signal" press=".onReadSignal" class="sapUiSmallMarginEnd" />
+				<Button text="Write Signal" press=".onWriteSignal" class="sapUiSmallMarginEnd" />
+				<Input id="writeInput" placeholder="New value..." width="200px" />
+			</HBox>
+		</VBox>
+		<MessageStrip
+			text="getSignal() returns the underlying Signal.State object for direct programmatic access, bypassing the binding layer."
+			type="Information"
+			class="sapUiSmallMargin" />
+	</Panel>
+</mvc:View>

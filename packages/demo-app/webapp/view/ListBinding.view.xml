@@ -1,0 +1,31 @@
+<mvc:View
+	controllerName="demo.app.controller.ListBinding"
+	xmlns:mvc="sap.ui.core"
+	xmlns="sap.m">
+	<Panel headerText="List Binding Demo">
+		<Toolbar>
+			<SearchField placeholder="Filter by name..." liveChange=".onFilter" width="300px" />
+			<ToolbarSpacer />
+			<Button text="Sort by Name" press=".onSortName" />
+			<Button text="Sort by Price" press=".onSortPrice" />
+			<Button text="Clear Sort" press=".onClearSort" />
+		</Toolbar>
+		<Table id="itemsTable" items="{/items}">
+			<columns>
+				<Column><Text text="ID" /></Column>
+				<Column><Text text="Name" /></Column>
+				<Column><Text text="Price" /></Column>
+				<Column><Text text="Active" /></Column>
+			</columns>
+			<items>
+				<ColumnListItem>
+					<Text text="{id}" />
+					<Text text="{name}" />
+					<ObjectNumber number="{price}" unit="EUR" />
+					<Switch state="{active}" />
+				</ColumnListItem>
+			</items>
+		</Table>
+		<Button text="Add Item" press=".onAddItem" class="sapUiSmallMargin" />
+	</Panel>
+</mvc:View>

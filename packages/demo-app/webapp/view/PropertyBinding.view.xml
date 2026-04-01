@@ -1,0 +1,39 @@
+<mvc:View
+	controllerName="demo.app.controller.PropertyBinding"
+	xmlns:mvc="sap.ui.core"
+	xmlns="sap.m"
+	xmlns:f="sap.ui.layout.form">
+	<Panel headerText="Property Binding Demo">
+		<f:SimpleForm editable="true" layout="ResponsiveGridLayout">
+			<Label text="First Name" />
+			<Input value="{/firstName}" />
+			<Label text="Last Name" />
+			<Input value="{/lastName}" />
+			<Label text="Age" />
+			<Input value="{/age}" type="Number" />
+			<Label text="Email" />
+			<Input value="{/email}" />
+		</f:SimpleForm>
+		<Panel headerText="Live Values (read-only bindings)">
+			<HBox class="sapUiSmallMargin">
+				<VBox class="sapUiSmallMarginEnd">
+					<Label text="First Name:" />
+					<Text text="{/firstName}" />
+				</VBox>
+				<VBox class="sapUiSmallMarginEnd">
+					<Label text="Last Name:" />
+					<Text text="{/lastName}" />
+				</VBox>
+				<VBox class="sapUiSmallMarginEnd">
+					<Label text="Age:" />
+					<Text text="{/age}" />
+				</VBox>
+				<VBox>
+					<Label text="Email:" />
+					<Text text="{/email}" />
+				</VBox>
+			</HBox>
+		</Panel>
+		<Button text="Reset to defaults" press=".onReset" class="sapUiSmallMargin" />
+	</Panel>
+</mvc:View>

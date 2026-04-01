@@ -1,0 +1,19 @@
+<mvc:View
+	controllerName="demo.app.controller.StrictMode"
+	xmlns:mvc="sap.ui.core"
+	xmlns="sap.m">
+	<Panel headerText="Strict Mode Demo">
+		<VBox class="sapUiSmallMargin">
+			<HBox>
+				<Input id="pathInput" placeholder="Path (e.g. /nonexistent)" width="300px" class="sapUiSmallMarginEnd" />
+				<Input id="valueInput" placeholder="Value" width="200px" class="sapUiSmallMarginEnd" />
+				<Button text="Set Property (strict)" press=".onSetStrict" type="Emphasized" />
+			</HBox>
+			<MessageStrip id="result" text="" type="None" class="sapUiSmallMarginTop" visible="false" />
+		</VBox>
+		<MessageStrip
+			text="In strict mode, setProperty on a nonexistent path throws a TypeError. Try setting /nonexistent to see the error."
+			type="Information"
+			class="sapUiSmallMargin" />
+	</Panel>
+</mvc:View>
