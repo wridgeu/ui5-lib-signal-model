@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<library xmlns="http://www.sap.com/sap.ui.library.xsd">
+	<name>ui5.model.signal</name>
+	<vendor>Marco</vendor>
+	<version>${version}</version>
+	<copyright></copyright>
+	<title>Signal-based reactive UI5 model</title>
+	<documentation>Drop-in replacement for JSONModel using TC39 Signals for push-based reactivity.</documentation>
+	<dependencies>
+		<dependency>
+			<libraryName>sap.ui.core</libraryName>
+		</dependency>
+	</dependencies>
+</library>
