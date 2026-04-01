@@ -1,7 +1,29 @@
 import ClientPropertyBinding from "sap/ui/model/ClientPropertyBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
+import Context from "sap/ui/model/Context";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
+
+// Type alias for the undeclared internal shape of the base class at runtime
+type ClientPropertyBindingInternal = ClientPropertyBinding & {
+  bSuspended: boolean;
+  oValue: unknown;
+  oContext: Context | undefined;
+  sPath: string;
+  checkUpdate(bForceUpdate?: boolean): void;
+  setValue(oValue: unknown): void;
+  initialize(): ClientPropertyBindingInternal;
+  setContext(oContext?: Context): void;
+  getDataState(): { setValue(v: unknown): void };
+  checkDataState(): void;
+  _getValue(): unknown;
+  _fireChange(oEvent: { reason: ChangeReason }): void;
+};
+
+/** Cast `this` to access undeclared UI5 internals. */
+function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal {
+  return self as unknown as ClientPropertyBindingInternal;
+}
 
 /**
  * Property binding that subscribes to a signal for push-based change notification.
@@ -13,33 +35,35 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   private watcher: Signal.subtle.Watcher | null = null;
   private needsEnqueue = true;
 
-  override checkUpdate(bForceUpdate?: boolean): void {
-    if (this.bSuspended && !bForceUpdate) {
+  checkUpdate(bForceUpdate?: boolean): void {
+    const self = asInternal(this);
+    if (self.bSuspended && !bForceUpdate) {
       return;
     }
 
-    const oValue = this._getValue();
-    if (this.oValue !== oValue || bForceUpdate) {
-      this.oValue = oValue;
-      this.getDataState().setValue(this.oValue);
-      this.checkDataState();
-      this._fireChange({ reason: ChangeReason.Change });
+    const oValue = self._getValue();
+    if (self.oValue !== oValue || bForceUpdate) {
+      self.oValue = oValue;
+      self.getDataState().setValue(self.oValue);
+      self.checkDataState();
+      self._fireChange({ reason: ChangeReason.Change });
     }
   }
 
-  override setValue(oValue: unknown): void {
-    if (this.bSuspended) {
+  setValue(oValue: unknown): void {
+    const self = asInternal(this);
+    if (self.bSuspended) {
       return;
     }
 
-    if (this.oValue !== oValue) {
-      this.oModel.setProperty(this.sPath, oValue, this.oContext, true);
-      this.oValue = oValue;
-      this.getDataState().setValue(this.oValue);
+    if (self.oValue !== oValue) {
+      this.oModel.setProperty(self.sPath, oValue, self.oContext, true);
+      self.oValue = oValue;
+      self.getDataState().setValue(self.oValue);
       this.oModel.firePropertyChange({
         reason: ChangeReason.Binding,
-        path: this.sPath,
-        context: this.oContext,
+        path: self.sPath,
+        context: self.oContext,
         value: oValue,
       });
     }
@@ -51,7 +75,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;
 
-    const signal = this.oModel._getOrCreateSignal(resolvedPath, this._getValue());
+    const self = asInternal(this);
+    const signal = this.oModel._getOrCreateSignal(resolvedPath, self._getValue());
 
     this.needsEnqueue = true;
     this.watcher = new Signal.subtle.Watcher(() => {
@@ -75,16 +100,25 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
   }
 
-  override initialize(): this {
+  initialize(): this {
     this.subscribe();
     this.checkUpdate(true);
     return this;
   }
 
-  override setContext(oContext?: object): void {
-    if (this.oContext !== oContext) {
+  setContext(oContext?: Context): void {
+    const self = asInternal(this);
+    if (self.oContext !== oContext) {
       const oldResolved = this.getResolvedPath();
-      super.setContext(oContext);
+      // Delegate to the prototype's setContext if available
+      const proto = Object.getPrototypeOf(
+        Object.getPrototypeOf(this),
+      ) as ClientPropertyBindingInternal;
+      if (typeof proto.setContext === "function") {
+        proto.setContext.call(this, oContext);
+      } else {
+        self.oContext = oContext;
+      }
       const newResolved = this.getResolvedPath();
       if (oldResolved !== newResolved && newResolved) {
         this.subscribe();
