@@ -41,10 +41,12 @@ export default class SignalModel extends ClientModel {
         string,
         unknown
       >;
+      // Only invalidate paths that were part of the merge payload
+      this._invalidateMergePayload(oData, "");
     } else {
       this.oData = oData;
+      this.registry.invalidateAll((path: string) => this._getObject(path));
     }
-    this.registry.invalidateAll((path: string) => this._getObject(path));
   }
 
   override getData(): Record<string, unknown> {
@@ -52,6 +54,10 @@ export default class SignalModel extends ClientModel {
   }
 
   override getProperty(sPath: string, oContext?: Context): unknown {
+    const sResolvedPath = asInternal(this).resolve(sPath, oContext);
+    if (sResolvedPath && this.registry.isComputed(sResolvedPath)) {
+      return this.registry.get(sResolvedPath)!.get();
+    }
     return this._getObject(sPath, oContext);
   }
 
@@ -93,6 +99,12 @@ export default class SignalModel extends ClientModel {
     }
 
     if (oObject) {
+      // Strict mode: also check that the leaf property exists
+      if (this.strict && !(sPropertyName in oObject)) {
+        throw new TypeError(
+          `Cannot set property at "${sResolvedPath}": path does not exist (strict mode)`,
+        );
+      }
       oObject[sPropertyName] = oValue;
 
       this.registry.set(sResolvedPath, oValue);
@@ -111,6 +123,15 @@ export default class SignalModel extends ClientModel {
   mergeProperty(sPath: string, oValue: unknown, oContext?: Context): boolean {
     const sResolvedPath = asInternal(this).resolve(sPath, oContext);
     if (!sResolvedPath) {
+      return false;
+    }
+
+    // Root path: delegate to setData with merge
+    if (sResolvedPath === "/") {
+      if (typeof oValue === "object" && oValue !== null) {
+        this.setData(oValue as Record<string, unknown>, true);
+        return true;
+      }
       return false;
     }
 
@@ -180,14 +201,19 @@ export default class SignalModel extends ClientModel {
     aDeps: string[],
     fn: (...args: unknown[]) => unknown,
   ): Signal.Computed<unknown> {
-    return this.registry.addComputed(sPath, aDeps, fn);
+    return this.registry.addComputed(sPath, aDeps, fn, this.strict);
   }
 
   removeComputed(sPath: string): void {
     this.registry.removeComputed(sPath);
   }
 
-  _getOrCreateSignal(sPath: string, initialValue: unknown): Signal.State<unknown> {
+  _getOrCreateSignal(
+    sPath: string,
+    initialValue: unknown,
+  ): Signal.State<unknown> | Signal.Computed<unknown> {
+    const existing = this.registry.get(sPath);
+    if (existing) return existing;
     return this.registry.getOrCreate(sPath, initialValue);
   }
 
@@ -244,11 +270,56 @@ export default class SignalModel extends ClientModel {
   ): void {
     for (const key of Object.keys(newData)) {
       const childPath = `${basePath}/${key}`;
-      if (oldData[key] !== newData[key]) {
-        this.registry.set(childPath, newData[key]);
+      const oldValue = oldData[key];
+      const newValue = newData[key];
+
+      if (oldValue !== newValue) {
+        this.registry.set(childPath, newValue);
+
+        // Recurse into nested objects for deep invalidation
+        if (
+          typeof oldValue === "object" &&
+          oldValue !== null &&
+          !Array.isArray(oldValue) &&
+          typeof newValue === "object" &&
+          newValue !== null &&
+          !Array.isArray(newValue)
+        ) {
+          this._invalidateMergedPaths(
+            childPath,
+            oldValue as Record<string, unknown>,
+            newValue as Record<string, unknown>,
+          );
+        } else if (typeof newValue === "object" && newValue !== null) {
+          // New value is an object but old wasn't — invalidate all children
+          this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
+        }
       }
     }
     this.registry.set(basePath, newData);
+  }
+
+  private _invalidateMergePayload(payload: Record<string, unknown>, basePath: string): void {
+    for (const key of Object.keys(payload)) {
+      const childPath = `${basePath}/${key}`;
+      this.registry.set(childPath, this._getObject(childPath));
+
+      const value = payload[key];
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        this._invalidateMergePayload(value as Record<string, unknown>, childPath);
+      }
+
+      // Also invalidate any registered child signals under this path
+      this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
+    }
+    // Invalidate the base path itself if it has a signal
+    if (basePath) {
+      this.registry.set(basePath, this._getObject(basePath));
+    }
+    // Invalidate parent paths
+    if (basePath) {
+      this._invalidateParentSignals(basePath);
+    }
   }
 
   override destroy(): void {

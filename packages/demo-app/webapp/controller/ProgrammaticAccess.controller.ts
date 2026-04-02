@@ -20,8 +20,7 @@ export default class ProgrammaticAccess extends Controller {
     const value = input.getValue();
 
     if (value) {
-      const signal = model.getSignal("/firstName");
-      signal.set(value);
+      model.setProperty("/firstName", value);
       input.setValue("");
     }
   }

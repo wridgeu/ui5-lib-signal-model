@@ -1,32 +1,32 @@
 {
-	"_version": "2.0.0",
-	"sap.app": {
-		"id": "ui5.model.signal",
-		"type": "library",
-		"applicationVersion": {
-			"version": "0.1.0"
-		},
-		"title": "Signal-based reactive UI5 model",
-		"description": "Drop-in replacement for JSONModel using TC39 Signals for push-based reactivity."
-	},
-	"sap.ui": {
-		"technology": "UI5",
-		"deviceTypes": {
-			"desktop": true,
-			"tablet": true,
-			"phone": true
-		}
-	},
-	"sap.ui5": {
-		"contentDensities": {
-			"compact": true,
-			"cozy": true
-		},
-		"dependencies": {
-			"minUI5Version": "1.144.0",
-			"libs": {
-				"sap.ui.core": {}
-			}
-		}
-	}
+  "_version": "2.0.0",
+  "sap.app": {
+    "id": "ui5.model.signal",
+    "type": "library",
+    "applicationVersion": {
+      "version": "0.1.0"
+    },
+    "title": "Signal-based reactive UI5 model",
+    "description": "Drop-in replacement for JSONModel using TC39 Signals for push-based reactivity."
+  },
+  "sap.ui": {
+    "technology": "UI5",
+    "deviceTypes": {
+      "desktop": true,
+      "tablet": true,
+      "phone": true
+    }
+  },
+  "sap.ui5": {
+    "contentDensities": {
+      "compact": true,
+      "cozy": true
+    },
+    "dependencies": {
+      "minUI5Version": "1.144.0",
+      "libs": {
+        "sap.ui.core": {}
+      }
+    }
+  }
 }

@@ -37,24 +37,24 @@ const model = new SignalModel({
 
 ## Feature Comparison: SignalModel vs JSONModel
 
-| Feature                        | JSONModel                                                         | SignalModel                                                       |
-| ------------------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------- |
-| **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified           |
-| **Notification granularity**   | O(n) on total bindings per `setProperty` call                     | O(1) for leaf writes, O(k) for branch writes (k = child bindings) |
-| **Change detection**           | `deepEqual` comparison on every binding                           | Signal identity: no comparison needed                             |
-| **Binding API**                | `{/path}` in XML views                                            | Identical: `{/path}` in XML views                                 |
-| **setProperty / getProperty**  | Standard API                                                      | Same API, same signatures                                         |
-| **setData (replace)**          | Replaces data, notifies all bindings                              | Replaces data, fires all signals                                  |
-| **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                           |
-| **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals            |
-| **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state |
-| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying Signal.State              |
-| **Strict mode**                | Not available                                                     | `{ strict: true }` throws on nonexistent paths                    |
-| **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion     |
-| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                    |
-| **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                         |
-| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)      |
-| **TC39 Signals alignment**     | N/A                                                               | Uses signal-polyfill; swap for native Signal when spec ships      |
+| Feature                        | JSONModel                                                         | SignalModel                                                              |
+| ------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified                  |
+| **Notification granularity**   | O(n) on total bindings per `setProperty` call                     | O(k) where k = bindings to changed path + parent paths (vs all bindings) |
+| **Change detection**           | `deepEqual` comparison on every binding                           | Signal identity: no comparison needed                                    |
+| **Binding API**                | `{/path}` in XML views                                            | Identical: `{/path}` in XML views                                        |
+| **setProperty / getProperty**  | Standard API                                                      | Same API, same signatures                                                |
+| **setData (replace)**          | Replaces data, notifies all bindings                              | Replaces data, fires all signals                                         |
+| **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                                  |
+| **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals                   |
+| **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state        |
+| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying Signal.State                     |
+| **Strict mode**                | Not available                                                     | `{ strict: true }` throws on nonexistent paths                           |
+| **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion            |
+| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                           |
+| **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                |
+| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)             |
+| **TC39 Signals alignment**     | N/A                                                               | Uses signal-polyfill; swap for native Signal when spec ships             |
 
 ## API
 

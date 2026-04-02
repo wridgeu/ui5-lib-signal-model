@@ -1,37 +1,40 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-	<meta charset="utf-8">
-	<title>QUnit Tests - ui5-lib-signal-model</title>
-	<script
-		id="sap-ui-bootstrap"
-		src="/resources/sap-ui-core.js"
-		data-sap-ui-theme="sap_horizon"
-		data-sap-ui-async="true"
-		data-sap-ui-resource-roots='{
+  <head>
+    <meta charset="utf-8" />
+    <title>QUnit Tests - ui5-lib-signal-model</title>
+    <script
+      id="sap-ui-bootstrap"
+      src="/resources/sap-ui-core.js"
+      data-sap-ui-theme="sap_horizon"
+      data-sap-ui-async="true"
+      data-sap-ui-resource-roots='{
 			"ui5/model/signal": "/resources/ui5/model/signal/",
 			"test": "/test-resources/ui5/model/signal/qunit/"
-		}'>
-	</script>
-	<link rel="stylesheet" href="/resources/sap/ui/thirdparty/qunit-2.css">
-	<script src="/resources/sap/ui/thirdparty/qunit-2.js"></script>
-	<script>
-		QUnit.config.autostart = false;
-		sap.ui.require([
-			"test/SignalRegistry.qunit",
-			"test/SignalPropertyBinding.qunit",
-			"test/SignalModel.qunit",
-			"test/SignalListBinding.qunit",
-			"test/ComputedSignals.qunit",
-			"test/MergeProperty.qunit",
-			"test/StrictMode.qunit"
-		], function() {
-			QUnit.start();
-		});
-	</script>
-</head>
-<body>
-	<div id="qunit"></div>
-	<div id="qunit-fixture"></div>
-</body>
+		}'
+    ></script>
+    <link rel="stylesheet" href="/resources/sap/ui/thirdparty/qunit-2.css" />
+    <script src="/resources/sap/ui/thirdparty/qunit-2.js"></script>
+    <script>
+      QUnit.config.autostart = false;
+      sap.ui.require(
+        [
+          "test/SignalRegistry.qunit",
+          "test/SignalPropertyBinding.qunit",
+          "test/SignalModel.qunit",
+          "test/SignalListBinding.qunit",
+          "test/ComputedSignals.qunit",
+          "test/MergeProperty.qunit",
+          "test/StrictMode.qunit",
+        ],
+        function () {
+          QUnit.start();
+        },
+      );
+    </script>
+  </head>
+  <body>
+    <div id="qunit"></div>
+    <div id="qunit-fixture"></div>
+  </body>
 </html>

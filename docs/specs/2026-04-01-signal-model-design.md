@@ -73,6 +73,7 @@ Signals are created on demand when a binding requests a path. No signal exists u
 ### Write Semantics
 
 **Leaf write:**
+
 ```
 setProperty("/customer/name", "John")
   -> this.oData.customer.name = "John"
@@ -82,6 +83,7 @@ setProperty("/customer/name", "John")
 ```
 
 **Branch write -- replace (default):**
+
 ```
 setProperty("/customer", { name: "Bob", age: 30 })
   -> Replaces entire object in oData
@@ -90,6 +92,7 @@ setProperty("/customer", { name: "Bob", age: 30 })
 ```
 
 **Branch write -- merge (via mergeProperty):**
+
 ```
 mergeProperty("/customer", { age: 31 })
   -> Merges into existing data: { name: "Bob", age: 31 }
@@ -98,6 +101,7 @@ mergeProperty("/customer", { age: 31 })
 ```
 
 **setData -- replace vs merge:**
+
 ```
 setData(newData)           // replace: all signals fire
 setData(partial, true)     // merge: only changed paths fire
@@ -115,6 +119,7 @@ model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => 
 - `removeComputed(path)` cleans up
 
 **Conflict rules:**
+
 - Computed on empty path: creates it
 - Computed on existing raw data path: throws (almost certainly a bug)
 - `setProperty` on computed path: throws (read-only)
@@ -163,12 +168,12 @@ interface CustomerData {
 
 const model = new SignalModel<CustomerData>({
   customer: { name: "Alice", age: 28 },
-  orders: []
+  orders: [],
 });
 
-model.getProperty("/customer/name")      // typed as string
-model.setProperty("/customer/age", 31)   // type-checked
-model.setProperty("/customer/age", "x")  // compile error
+model.getProperty("/customer/name"); // typed as string
+model.setProperty("/customer/age", 31); // type-checked
+model.setProperty("/customer/age", "x"); // compile error
 ```
 
 ### Drop-in API (JSONModel compatible)
@@ -205,11 +210,13 @@ new SignalModel<T>(data: T, options?: {
 ## Strict Mode
 
 When `strict: true`:
+
 - `setProperty` on a nonexistent path throws `TypeError`
 - All computed signal conflict cases throw
 - Catches typos and stale paths early
 
 When `strict: false` (default):
+
 - Same permissive behavior as JSONModel (auto-creates paths)
 - Computed-on-computed replaces with console warning
 
