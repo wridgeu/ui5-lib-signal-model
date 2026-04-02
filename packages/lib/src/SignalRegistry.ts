@@ -98,6 +98,10 @@ export default class SignalRegistry {
     return this.computeds.has(path);
   }
 
+  get size(): number {
+    return this.signals.size + this.computeds.size;
+  }
+
   destroy(): void {
     this.signals.clear();
     this.computeds.clear();

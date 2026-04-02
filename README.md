@@ -200,39 +200,39 @@ SignalModel (extends ClientModel)
 
 ## Testing
 
-11 QUnit test modules covering unit, integration, and declarative binding:
-
-| Module                | Tests | Coverage                                                                       |
-| --------------------- | ----- | ------------------------------------------------------------------------------ |
-| SignalRegistry        | 12    | Lazy creation, get/set/has, invalidation, computed CRUD                        |
-| SignalPropertyBinding | 8     | Initial value, push notification, two-way, suspend/resume                      |
-| SignalModel           | 16    | Constructor, get/set, setData replace/merge, branch writes, parent propagation |
-| SignalListBinding     | 6     | Contexts, getLength, change notification, filter, sort, path isolation         |
-| SignalTreeBinding     | 7     | Root contexts, child nodes, hasChildren, deep traversal, filter, sort          |
-| ComputedSignals       | 7     | Derived values, reactive updates, write protection, conflicts, chaining        |
-| MergeProperty         | 5     | Preserve unchanged, selective notification, deep merge                         |
-| StrictMode            | 5     | Permissive default, strict throw, nested paths                                 |
-| NestedBinding         | 5     | Relative paths, nested lists, deep access, parent modification                 |
-| ExpressionBinding     | 6     | Composite values, computed expressions, dependency chains                      |
-| DeclarativeBinding    | 10    | One-way, two-way, list rendering, named models, binding modes, control sync    |
-
-Run tests:
+QUnit test modules covering unit, integration, and declarative binding. Automated via WDIO + headless Chrome:
 
 ```bash
-npm run test:qunit  # automated via WDIO + headless Chrome
+npm run test:qunit
 ```
+
+## Performance Benchmark
+
+A self-contained benchmark page compares SignalModel vs JSONModel across 10 scenarios covering all binding types: property bindings (`sap.m.Text`), list bindings (`sap.m.List`, `sap.m.Table`), tree bindings (`sap.m.Tree`), expression bindings, and computed signals.
+
+```bash
+npm run start:bench  # opens benchmark page
+```
+
+The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected sample statistics, and a three-stage async flush protocol. It directly measures the `checkUpdate` bottleneck documented in [SAP/openui5#2600](https://github.com/SAP/openui5/issues/2600).
+
+![Benchmark Results](docs/benchmark-full-results.png)
+
+The key result: **"Update all N bindings"** is where SignalModel shines. At 1000 bindings, JSONModel takes ~200ms (1,000,000 binding checks, exceeding SAP's 100k warning threshold). SignalModel takes ~19ms (1,000 targeted notifications). For list/table/tree replace operations, both models perform equivalently because DOM rendering cost dominates.
+
+See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for technical details on how the benchmark works.
 
 ## Demo Application
 
 7 interactive showcase pages:
 
-- **Properties** -- two-way form binding with live display
-- **List** -- table with filter, sort, add item
-- **Tree** -- org chart hierarchy with add employee
-- **Computed** -- derived fullName and birthYear
-- **Programmatic** -- getSignal() direct access
-- **Strict** -- error display for invalid paths
-- **Comparison** -- side-by-side SignalModel vs JSONModel
+- **Properties** - two-way form binding with live display
+- **List** - table with filter, sort, add item
+- **Tree** - org chart hierarchy with add employee
+- **Computed** - derived fullName and birthYear
+- **Programmatic** - getSignal() direct access
+- **Strict** - error display for invalid paths
+- **Comparison** - side-by-side SignalModel vs JSONModel
 
 ```bash
 npm run start  # opens demo app

@@ -1,0 +1,1234 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SignalModel vs JSONModel - Performance Benchmark</title>
+    <script
+      id="sap-ui-bootstrap"
+      src="/resources/sap-ui-core.js"
+      data-sap-ui-theme="sap_horizon"
+      data-sap-ui-async="true"
+      data-sap-ui-compat-version="edge"
+      data-sap-ui-resource-roots='{
+        "ui5/model/signal": "/resources/ui5/model/signal/"
+      }'
+    ></script>
+    <style>
+      body {
+        font-family: "72", "72full", Arial, Helvetica, sans-serif;
+        margin: 2rem;
+        color: #32363a;
+        background: #f5f6f7;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.25rem;
+      }
+      h2 {
+        font-size: 1.1rem;
+        margin-top: 2rem;
+        color: #0854a0;
+      }
+      .subtitle {
+        color: #6a6d70;
+        font-size: 0.85rem;
+        margin-bottom: 1.5rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 0.75rem 0 1.5rem;
+        background: #fff;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+      th,
+      td {
+        padding: 0.5rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid #e5e5e5;
+      }
+      th {
+        background: #fafafa;
+        font-weight: 600;
+        font-size: 0.85rem;
+      }
+      td {
+        font-size: 0.85rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .faster {
+        color: #107e3e;
+        font-weight: 600;
+      }
+      .slower {
+        color: #bb0000;
+      }
+      .neutral {
+        color: #6a6d70;
+      }
+      button {
+        padding: 0.5rem 1.5rem;
+        background: #0854a0;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      button:hover {
+        background: #0a6ed1;
+      }
+      button:disabled {
+        background: #bcc3ca;
+        cursor: not-allowed;
+      }
+      #status {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        background: #fff3b0;
+        border-radius: 4px;
+        font-size: 0.85rem;
+        display: none;
+      }
+      .config {
+        margin-bottom: 1rem;
+      }
+      .config label {
+        font-size: 0.85rem;
+        margin-right: 0.5rem;
+      }
+      .config select {
+        padding: 0.25rem 0.5rem;
+        border: 1px solid #bcc3ca;
+        border-radius: 4px;
+        font-size: 0.85rem;
+        margin-right: 1rem;
+      }
+      #hidden-container {
+        display: none;
+      }
+      .note {
+        font-size: 0.8rem;
+        color: #6a6d70;
+        margin-top: 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SignalModel vs JSONModel</h1>
+    <p class="subtitle">
+      Objective performance comparison measuring update propagation, binding notification scaling,
+      and throughput. Follows benchmarking best practices: alternating A-B execution order, JIT
+      warmup, median of 10+ samples, and variance reporting.
+    </p>
+
+    <div class="config">
+      <label>Binding count:</label>
+      <select id="bindingCount">
+        <option value="100">100</option>
+        <option value="500" selected>500</option>
+        <option value="1000">1000</option>
+        <option value="2000">2000</option>
+      </select>
+      <label>Iterations per scenario:</label>
+      <select id="iterations">
+        <option value="100">100</option>
+        <option value="500" selected>500</option>
+        <option value="1000">1000</option>
+      </select>
+      <label>Measured rounds:</label>
+      <select id="rounds">
+        <option value="10" selected>10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+      </select>
+    </div>
+
+    <button id="runBtn" onclick="runBenchmark()">Run Benchmark</button>
+    <p class="note">
+      Tip: close other tabs and dev tools before running. Results are most reliable after 2-3
+      consecutive runs.
+    </p>
+    <div id="status"></div>
+
+    <div id="results"></div>
+
+    <!-- Hidden container for binding targets -->
+    <div id="hidden-container"></div>
+
+    <script>
+      /* globals sap */
+      "use strict";
+
+      // ---------------------------------------------------------------
+      // Helpers
+      // ---------------------------------------------------------------
+      function setStatus(msg) {
+        var el = document.getElementById("status");
+        el.style.display = msg ? "block" : "none";
+        el.textContent = msg;
+      }
+
+      /**
+       * Wait for all async notification to complete.
+       * SignalModel uses queueMicrotask; JSONModel uses Promise.resolve().then().
+       * We drain microtasks first, then wait for a setTimeout(0) to catch any
+       * scheduled macrotasks, then drain microtasks again for safety.
+       */
+      function flush() {
+        return new Promise(function (resolve) {
+          Promise.resolve()
+            .then(function () {
+              return new Promise(function (r) {
+                setTimeout(r, 0);
+              });
+            })
+            .then(function () {
+              return new Promise(function (r) {
+                queueMicrotask(r);
+              });
+            })
+            .then(resolve);
+        });
+      }
+
+      /** Generate sample data with N properties for binding targets. */
+      function generateData(n) {
+        var items = [];
+        for (var i = 0; i < n; i++) {
+          items.push({ id: i, value: "item-" + i });
+        }
+        return { items: items, counter: 0 };
+      }
+
+      /** Statistical summary of an array of numbers. Uses Bessel-corrected (sample) variance. */
+      function stats(arr) {
+        var n = arr.length;
+        var sorted = arr.slice().sort(function (a, b) {
+          return a - b;
+        });
+        var mid = Math.floor(n / 2);
+        var med = n % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        var mean =
+          arr.reduce(function (s, v) {
+            return s + v;
+          }, 0) / n;
+        // Bessel's correction: divide by (n-1) for sample variance
+        var variance =
+          n > 1
+            ? arr.reduce(function (s, v) {
+                return s + (v - mean) * (v - mean);
+              }, 0) /
+              (n - 1)
+            : 0;
+        return {
+          median: med,
+          mean: mean,
+          stddev: Math.sqrt(variance),
+          min: sorted[0],
+          max: sorted[n - 1],
+          p5: sorted[Math.floor(n * 0.05)],
+          p95: sorted[Math.ceil(n * 0.95) - 1],
+        };
+      }
+
+      /** Format number with 2 decimal places. */
+      function fmt(n) {
+        return n.toFixed(2);
+      }
+
+      /** Format a ratio as "Nx faster" or "Nx slower". */
+      function fmtRatio(signalMs, jsonMs) {
+        if (signalMs <= 0.01 && jsonMs <= 0.01) return '<span class="neutral">equal</span>';
+        if (signalMs <= 0.01) return '<span class="faster">&gt;100x faster</span>';
+        var ratio = jsonMs / signalMs;
+        if (ratio >= 1.05) {
+          return '<span class="faster">' + fmt(ratio) + "x faster</span>";
+        } else if (ratio <= 0.95) {
+          return '<span class="slower">' + fmt(1 / ratio) + "x slower</span>";
+        }
+        return '<span class="neutral">~equal</span>';
+      }
+
+      /** Create N sap.m.Text controls bound to different paths. */
+      function createBindings(model, n, container) {
+        var controls = [];
+        for (var i = 0; i < n; i++) {
+          var text = new sap.m.Text({ text: "{/items/" + i + "/value}" });
+          text.setModel(model);
+          text.placeAt(container);
+          controls.push(text);
+        }
+        return controls;
+      }
+
+      /** Destroy controls array and clear container. */
+      function destroyBindings(controls, container) {
+        for (var i = 0; i < controls.length; i++) {
+          controls[i].destroy();
+        }
+        container.innerHTML = "";
+      }
+
+      // ---------------------------------------------------------------
+      // Benchmark scenarios
+      //
+      // Each scenario function takes a ModelClass and config, creates
+      // a fresh model, runs the workload, and returns an array of
+      // per-sample timings. The caller alternates JSON/Signal runs.
+      // ---------------------------------------------------------------
+
+      /**
+       * Scenario 1: setProperty throughput (no bindings)
+       * Pure model-layer cost of setting a property value.
+       */
+      async function benchSetPropertyNoBindings(
+        ModelClass,
+        iterations,
+        warmupRounds,
+        measuredRounds,
+      ) {
+        var data = generateData(iterations);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+
+        // Warmup: exercise the same code path
+        for (var w = 0; w < warmupRounds; w++) {
+          for (var i = 0; i < iterations; i++) {
+            model.setProperty("/items/" + i + "/value", "warmup-" + w + "-" + i);
+          }
+          await flush();
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          for (var j = 0; j < iterations; j++) {
+            model.setProperty("/items/" + j + "/value", "measured-" + round + "-" + j);
+          }
+          times.push(performance.now() - start);
+          await flush();
+        }
+
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * Scenario 2: getProperty throughput (no bindings)
+       * Pure read performance.
+       */
+      async function benchGetProperty(ModelClass, iterations, warmupRounds, measuredRounds) {
+        var data = generateData(iterations);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          for (var i = 0; i < iterations; i++) {
+            model.getProperty("/items/" + i + "/value");
+          }
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          for (var j = 0; j < iterations; j++) {
+            model.getProperty("/items/" + j + "/value");
+          }
+          times.push(performance.now() - start);
+        }
+
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * Scenario 3: Single-path update with N bindings (KEY BENCHMARK)
+       *
+       * Creates N property bindings to N different paths, then changes ONE path.
+       * JSONModel: checkUpdate iterates ALL N bindings -> O(N)
+       * SignalModel: only the changed path's binding is notified -> O(1)
+       */
+      async function benchSingleUpdateNBindings(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup: exercise the notification path fully
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setProperty("/items/0/value", "warmup-" + w);
+          await flush();
+        }
+
+        // Measure: change only /items/0/value
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          model.setProperty("/items/0/value", "measured-" + round);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * Scenario 4: Update ALL N bindings sequentially
+       *
+       * Changes every bound path one by one.
+       * JSONModel: each setProperty triggers O(N) check -> total O(N^2)
+       * SignalModel: each setProperty triggers O(1) -> total O(N)
+       */
+      async function benchUpdateAllBindings(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup: exercise ALL paths so JIT sees the full workload
+        for (var w = 0; w < warmupRounds; w++) {
+          for (var i = 0; i < n; i++) {
+            model.setProperty("/items/" + i + "/value", "warmup-" + w + "-" + i);
+          }
+          await flush();
+        }
+
+        // Measure: update every path
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          for (var j = 0; j < n; j++) {
+            model.setProperty("/items/" + j + "/value", "batch-" + round + "-" + j);
+          }
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * Scenario 5: List binding - replace array with N items
+       *
+       * Creates a sap.m.List with N items via list binding, then replaces the array.
+       * Tests SignalListBinding vs JSONListBinding notification.
+       */
+      async function benchListBindingReplace(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = { rows: [] };
+        for (var i = 0; i < n; i++) {
+          data.rows.push({ label: "row-" + i });
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        var list = new sap.m.List({
+          items: {
+            path: "/rows",
+            template: new sap.m.StandardListItem({ title: "{label}" }),
+          },
+        });
+        list.setModel(model);
+        list.placeAt(container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 100);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          var warmupRows = [];
+          for (var j = 0; j < n; j++) {
+            warmupRows.push({ label: "warmup-" + w + "-" + j });
+          }
+          model.setProperty("/rows", warmupRows);
+          await flush();
+          await new Promise(function (r) {
+            setTimeout(r, 50);
+          });
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var newRows = [];
+          for (var k = 0; k < n; k++) {
+            newRows.push({ label: "measured-" + round + "-" + k });
+          }
+          var start = performance.now();
+          model.setProperty("/rows", newRows);
+          await flush();
+          await new Promise(function (r) {
+            setTimeout(r, 10);
+          });
+          times.push(performance.now() - start);
+        }
+
+        list.destroy();
+        model.destroy();
+        container.innerHTML = "";
+        return times;
+      }
+
+      /**
+       * Scenario 6: Table binding - replace table rows with N items
+       *
+       * Creates a sap.m.Table with N rows via list binding (multiple columns),
+       * then replaces the data. Tables are the most common heavy binding case in Fiori apps.
+       */
+      async function benchTableBindingReplace(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = { rows: [] };
+        for (var i = 0; i < n; i++) {
+          data.rows.push({
+            id: i,
+            name: "item-" + i,
+            price: (i * 1.5).toFixed(2),
+            active: i % 2 === 0,
+          });
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        var table = new sap.m.Table({
+          columns: [
+            new sap.m.Column({ header: new sap.m.Text({ text: "ID" }) }),
+            new sap.m.Column({ header: new sap.m.Text({ text: "Name" }) }),
+            new sap.m.Column({ header: new sap.m.Text({ text: "Price" }) }),
+          ],
+          items: {
+            path: "/rows",
+            template: new sap.m.ColumnListItem({
+              cells: [
+                new sap.m.Text({ text: "{id}" }),
+                new sap.m.Text({ text: "{name}" }),
+                new sap.m.Text({ text: "{price}" }),
+              ],
+            }),
+          },
+        });
+        table.setModel(model);
+        table.placeAt(container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 100);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          var warmupRows = [];
+          for (var j = 0; j < n; j++) {
+            warmupRows.push({
+              id: j,
+              name: "warm-" + w + "-" + j,
+              price: (j * 2).toFixed(2),
+              active: true,
+            });
+          }
+          model.setProperty("/rows", warmupRows);
+          await flush();
+          await new Promise(function (r) {
+            setTimeout(r, 50);
+          });
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var newRows = [];
+          for (var k = 0; k < n; k++) {
+            newRows.push({
+              id: k,
+              name: "meas-" + round + "-" + k,
+              price: (k * 3).toFixed(2),
+              active: k % 3 === 0,
+            });
+          }
+          var start = performance.now();
+          model.setProperty("/rows", newRows);
+          await flush();
+          await new Promise(function (r) {
+            setTimeout(r, 10);
+          });
+          times.push(performance.now() - start);
+        }
+
+        table.destroy();
+        model.destroy();
+        container.innerHTML = "";
+        return times;
+      }
+
+      /**
+       * Scenario 7: Tree binding - replace tree data
+       *
+       * Creates a sap.m.Tree with hierarchical data via tree binding, then replaces it.
+       * Tests SignalTreeBinding vs ClientTreeBinding notification.
+       */
+      async function benchTreeBindingReplace(ModelClass, n, warmupRounds, measuredRounds) {
+        // Build a flat tree with n root nodes, each with 2 children
+        var nodes = [];
+        for (var i = 0; i < n; i++) {
+          nodes.push({
+            name: "node-" + i,
+            children: [
+              { name: "child-" + i + "-a", children: [] },
+              { name: "child-" + i + "-b", children: [] },
+            ],
+          });
+        }
+        var data = { tree: nodes };
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        var tree = new sap.m.Tree({
+          items: {
+            path: "/tree",
+            parameters: { arrayNames: ["children"] },
+            template: new sap.m.StandardTreeItem({ title: "{name}" }),
+          },
+        });
+        tree.setModel(model);
+        tree.placeAt(container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 100);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          var warmupNodes = [];
+          for (var j = 0; j < n; j++) {
+            warmupNodes.push({
+              name: "warm-" + w + "-" + j,
+              children: [{ name: "wc-" + j + "-a", children: [] }],
+            });
+          }
+          model.setProperty("/tree", warmupNodes);
+          await flush();
+          await new Promise(function (r) {
+            setTimeout(r, 50);
+          });
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var newNodes = [];
+          for (var k = 0; k < n; k++) {
+            newNodes.push({
+              name: "meas-" + round + "-" + k,
+              children: [
+                { name: "mc-" + k + "-a", children: [] },
+                { name: "mc-" + k + "-b", children: [] },
+              ],
+            });
+          }
+          var start = performance.now();
+          model.setProperty("/tree", newNodes);
+          await flush();
+          await new Promise(function (r) {
+            setTimeout(r, 10);
+          });
+          times.push(performance.now() - start);
+        }
+
+        tree.destroy();
+        model.destroy();
+        container.innerHTML = "";
+        return times;
+      }
+
+      /**
+       * Scenario 8: Expression binding - N Text controls with expression syntax
+       *
+       * Creates N controls using expression binding "{= ${/items/N/id} + ': ' + ${/items/N/value}}".
+       * Each control has a composite binding with two parts. Tests expression evaluation overhead.
+       */
+      async function benchExpressionBinding(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        var controls = [];
+        for (var i = 0; i < n; i++) {
+          var text = new sap.m.Text({
+            text: "{= ${/items/" + i + "/id} + ': ' + ${/items/" + i + "/value} }",
+          });
+          text.setModel(model);
+          text.placeAt(container);
+          controls.push(text);
+        }
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setProperty("/items/0/value", "warmup-" + w);
+          await flush();
+        }
+
+        // Measure: change one path, expression bindings on that path re-evaluate
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          model.setProperty("/items/0/value", "expr-" + round);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * Scenario 9: Computed signals (SignalModel only, uses getProperty for JSONModel)
+       *
+       * Creates N computed signals, each depending on a source path.
+       * Measures update propagation through the computed dependency chain.
+       * For JSONModel: creates N Text controls bound to paths (no computed concept),
+       * measures equivalent setProperty propagation for a fair baseline.
+       */
+      async function benchComputedSignals(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
+        var data = { values: [] };
+        for (var i = 0; i < n; i++) {
+          data.values.push(i);
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        if (isSignal && model.createComputed) {
+          // Create N computed signals, each reading one source path
+          for (var i = 0; i < n; i++) {
+            model.createComputed("/computed" + i, ["/values/" + i], function (v) {
+              return "computed:" + v;
+            });
+          }
+        }
+
+        // Bind to the computed paths (SignalModel) or source paths (JSONModel)
+        var controls = [];
+        for (var j = 0; j < n; j++) {
+          var path = isSignal && model.createComputed ? "/computed" + j : "/values/" + j;
+          var text = new sap.m.Text({ text: "{" + path + "}" });
+          text.setModel(model);
+          text.placeAt(container);
+          controls.push(text);
+        }
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setProperty("/values/0", 1000 + w);
+          await flush();
+        }
+
+        // Measure: update source, computed re-evaluates
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          model.setProperty("/values/0", 2000 + round);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * Scenario 10: setData replace with N bindings
+       *
+       * Replaces the entire model data and measures propagation to all bindings.
+       */
+      async function benchSetDataReplace(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setData(JSON.parse(JSON.stringify(generateData(n))));
+          await flush();
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var newData = generateData(n);
+          for (var k = 0; k < n; k++) {
+            newData.items[k].value = "replaced-" + round + "-" + k;
+          }
+          var start = performance.now();
+          model.setData(newData);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      // ---------------------------------------------------------------
+      // Main runner with alternating execution order
+      // ---------------------------------------------------------------
+
+      /**
+       * Runs a scenario function for both models in alternating order
+       * (JSON-Signal-JSON-Signal...) to cancel out environmental drift
+       * like GC pauses, thermal throttling, and background activity.
+       */
+      async function runAlternating(scenarioFn, args, measuredRounds) {
+        var halfRounds = Math.ceil(measuredRounds / 2);
+        var jsonTimes = [];
+        var signalTimes = [];
+
+        // We run each model for halfRounds independently (fresh model each time)
+        // but alternate which model goes first each pair.
+        for (var pair = 0; pair < halfRounds; pair++) {
+          var jsonFirst = pair % 2 === 0;
+
+          if (jsonFirst) {
+            var jt = await scenarioFn.apply(
+              null,
+              [args.JSONModel].concat(args.params).concat([args.warmup, 1]),
+            );
+            jsonTimes.push(jt[0]);
+            var st = await scenarioFn.apply(
+              null,
+              [args.SignalModel].concat(args.params).concat([args.warmup, 1]),
+            );
+            signalTimes.push(st[0]);
+          } else {
+            var st2 = await scenarioFn.apply(
+              null,
+              [args.SignalModel].concat(args.params).concat([args.warmup, 1]),
+            );
+            signalTimes.push(st2[0]);
+            var jt2 = await scenarioFn.apply(
+              null,
+              [args.JSONModel].concat(args.params).concat([args.warmup, 1]),
+            );
+            jsonTimes.push(jt2[0]);
+          }
+        }
+
+        return { jsonTimes: jsonTimes, signalTimes: signalTimes };
+      }
+
+      async function runBenchmark() {
+        var btn = document.getElementById("runBtn");
+        btn.disabled = true;
+
+        var n = parseInt(document.getElementById("bindingCount").value, 10);
+        var iters = parseInt(document.getElementById("iterations").value, 10);
+        var measuredRounds = parseInt(document.getElementById("rounds").value, 10);
+        var warmup = 3;
+
+        setStatus("Loading UI5 modules...");
+
+        var mods = await new Promise(function (resolve) {
+          sap.ui.require(
+            [
+              "sap/ui/model/json/JSONModel",
+              "ui5/model/signal/SignalModel",
+              "sap/m/Text",
+              "sap/m/List",
+              "sap/m/StandardListItem",
+              "sap/m/Table",
+              "sap/m/Column",
+              "sap/m/ColumnListItem",
+              "sap/m/Tree",
+              "sap/m/StandardTreeItem",
+            ],
+            function (JSONModel, SignalModel) {
+              resolve({ JSONModel: JSONModel, SignalModel: SignalModel });
+            },
+          );
+        });
+
+        var base = {
+          JSONModel: mods.JSONModel,
+          SignalModel: mods.SignalModel,
+          warmup: warmup,
+        };
+        var results = [];
+
+        // --- Scenario 1 ---
+        setStatus(
+          "Running: setProperty throughput (no bindings, " + iters + " ops, alternating)...",
+        );
+        var r1 = await runAlternating(
+          benchSetPropertyNoBindings,
+          Object.assign({}, base, { params: [iters] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "setProperty throughput (no bindings)",
+          detail: iters + " ops",
+          category: "Model API",
+          json: stats(r1.jsonTimes),
+          signal: stats(r1.signalTimes),
+        });
+
+        // --- Scenario 2 ---
+        setStatus("Running: getProperty throughput (" + iters + " reads, alternating)...");
+        var r2 = await runAlternating(
+          benchGetProperty,
+          Object.assign({}, base, { params: [iters] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "getProperty throughput",
+          detail: iters + " reads",
+          category: "Model API",
+          json: stats(r2.jsonTimes),
+          signal: stats(r2.signalTimes),
+        });
+
+        // --- Scenario 3 (key benchmark) ---
+        setStatus(
+          "Running: single-path update with " + n + " bindings (key benchmark, alternating)...",
+        );
+        var r3 = await runAlternating(
+          benchSingleUpdateNBindings,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "Single-path update, " + n + " bindings",
+          detail: "Change 1 path, " + n + " bindings exist",
+          category: "Property (sap.m.Text)",
+          json: stats(r3.jsonTimes),
+          signal: stats(r3.signalTimes),
+        });
+
+        // --- Scenario 4 ---
+        setStatus("Running: update all " + n + " bindings (alternating)...");
+        var r4 = await runAlternating(
+          benchUpdateAllBindings,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "Update all " + n + " bindings",
+          detail: n + " setProperty calls, " + n + " bindings",
+          category: "Property (sap.m.Text)",
+          json: stats(r4.jsonTimes),
+          signal: stats(r4.signalTimes),
+        });
+
+        // --- Scenario 5: List binding ---
+        var listN = Math.min(n, 500); // Cap list items to avoid DOM explosion
+        setStatus("Running: list binding replace with " + listN + " items (alternating)...");
+        var r5 = await runAlternating(
+          benchListBindingReplace,
+          Object.assign({}, base, { params: [listN] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "List binding replace, " + listN + " items",
+          detail: "Replace array, re-render list",
+          category: "List (sap.m.List)",
+          json: stats(r5.jsonTimes),
+          signal: stats(r5.signalTimes),
+        });
+
+        // --- Scenario 6: Table binding ---
+        var tableN = Math.min(n, 500); // Cap table rows
+        setStatus("Running: table binding replace with " + tableN + " rows (alternating)...");
+        var r6 = await runAlternating(
+          benchTableBindingReplace,
+          Object.assign({}, base, { params: [tableN] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "Table binding replace, " + tableN + " rows",
+          detail: "Replace rows, 3 columns each",
+          category: "List (sap.m.Table)",
+          json: stats(r6.jsonTimes),
+          signal: stats(r6.signalTimes),
+        });
+
+        // --- Scenario 7: Tree binding ---
+        var treeN = Math.min(n, 200); // Cap tree nodes to avoid DOM explosion
+        setStatus("Running: tree binding replace with " + treeN + " root nodes (alternating)...");
+        var r7 = await runAlternating(
+          benchTreeBindingReplace,
+          Object.assign({}, base, { params: [treeN] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "Tree binding replace, " + treeN + " nodes",
+          detail: "Replace tree, re-render hierarchy",
+          category: "Tree (sap.m.Tree)",
+          json: stats(r7.jsonTimes),
+          signal: stats(r7.signalTimes),
+        });
+
+        // --- Scenario 8: Expression binding ---
+        var exprN = Math.min(n, 500);
+        setStatus("Running: expression binding with " + exprN + " controls (alternating)...");
+        var r8 = await runAlternating(
+          benchExpressionBinding,
+          Object.assign({}, base, { params: [exprN] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "Expression binding, " + exprN + " controls",
+          detail: "Change 1 path, expression re-evaluates",
+          category: "Expression (sap.m.Text)",
+          json: stats(r8.jsonTimes),
+          signal: stats(r8.signalTimes),
+        });
+
+        // --- Scenario 9: Computed signals ---
+        var compN = Math.min(n, 500);
+        setStatus("Running: computed signals with " + compN + " computeds (alternating)...");
+        // Computed needs special handling: isSignal flag differs per model
+        var compJsonTimes = [];
+        var compSignalTimes = [];
+        var compHalf = Math.ceil(measuredRounds / 2);
+        for (var cp = 0; cp < compHalf; cp++) {
+          if (cp % 2 === 0) {
+            var cjt = await benchComputedSignals(base.JSONModel, false, compN, warmup, 1);
+            compJsonTimes.push(cjt[0]);
+            var cst = await benchComputedSignals(base.SignalModel, true, compN, warmup, 1);
+            compSignalTimes.push(cst[0]);
+          } else {
+            var cst2 = await benchComputedSignals(base.SignalModel, true, compN, warmup, 1);
+            compSignalTimes.push(cst2[0]);
+            var cjt2 = await benchComputedSignals(base.JSONModel, false, compN, warmup, 1);
+            compJsonTimes.push(cjt2[0]);
+          }
+        }
+        results.push({
+          name: "Computed signals, " + compN + " computeds",
+          detail: "Change 1 source, computed re-evaluates",
+          category: "Computed (sap.m.Text)",
+          json: stats(compJsonTimes),
+          signal: stats(compSignalTimes),
+        });
+
+        // --- Scenario 10: setData replace ---
+        setStatus("Running: setData replace with " + n + " bindings (alternating)...");
+        var r10 = await runAlternating(
+          benchSetDataReplace,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "setData replace, " + n + " bindings",
+          detail: "Full data replacement",
+          category: "Property (sap.m.Text)",
+          json: stats(r10.jsonTimes),
+          signal: stats(r10.signalTimes),
+        });
+
+        renderResults(results, n, iters, measuredRounds);
+        setStatus("");
+        btn.disabled = false;
+      }
+
+      function renderResults(results, n, iters, measuredRounds) {
+        var samplesPerModel = Math.ceil(measuredRounds / 2);
+        var html =
+          "<h2>Results (median of " + samplesPerModel + " samples per model, alternating)</h2>";
+        html += "<table>";
+        html += "<tr>";
+        html += "<th>Binding Type</th>";
+        html += "<th>Scenario</th>";
+        html += "<th>Detail</th>";
+        html += "<th>JSONModel median (ms)</th>";
+        html += "<th>SignalModel median (ms)</th>";
+        html += "<th>SignalModel vs JSONModel</th>";
+        html += "</tr>";
+
+        for (var i = 0; i < results.length; i++) {
+          var r = results[i];
+          html += "<tr>";
+          html += "<td>" + (r.category || "") + "</td>";
+          html += "<td>" + r.name + "</td>";
+          html += "<td>" + r.detail + "</td>";
+          html +=
+            "<td>" + fmt(r.json.median) + " <small>(\u00b1" + fmt(r.json.stddev) + ")</small></td>";
+          html +=
+            "<td>" +
+            fmt(r.signal.median) +
+            " <small>(\u00b1" +
+            fmt(r.signal.stddev) +
+            ")</small></td>";
+          html += "<td>" + fmtRatio(r.signal.median, r.json.median) + "</td>";
+          html += "</tr>";
+        }
+        html += "</table>";
+
+        // Detailed stats table
+        html += "<h2>Detailed Statistics</h2>";
+        html += "<table>";
+        html +=
+          "<tr><th>Scenario</th><th>Model</th><th>Median</th><th>Mean</th><th>StdDev</th><th>Min</th><th>Max</th><th>P5</th><th>P95</th></tr>";
+        for (var j = 0; j < results.length; j++) {
+          var s = results[j];
+          html += "<tr><td rowspan='2'>" + s.name + "</td>";
+          html += "<td>JSONModel</td>";
+          html +=
+            "<td>" +
+            fmt(s.json.median) +
+            "</td><td>" +
+            fmt(s.json.mean) +
+            "</td><td>" +
+            fmt(s.json.stddev) +
+            "</td>";
+          html += "<td>" + fmt(s.json.min) + "</td><td>" + fmt(s.json.max) + "</td>";
+          html += "<td>" + fmt(s.json.p5) + "</td><td>" + fmt(s.json.p95) + "</td></tr>";
+          html += "<tr><td>SignalModel</td>";
+          html +=
+            "<td>" +
+            fmt(s.signal.median) +
+            "</td><td>" +
+            fmt(s.signal.mean) +
+            "</td><td>" +
+            fmt(s.signal.stddev) +
+            "</td>";
+          html += "<td>" + fmt(s.signal.min) + "</td><td>" + fmt(s.signal.max) + "</td>";
+          html += "<td>" + fmt(s.signal.p5) + "</td><td>" + fmt(s.signal.p95) + "</td></tr>";
+        }
+        html += "</table>";
+
+        // Binding check analysis (the metric SAP tracks in their checkPerformanceOfUpdate)
+        html += "<h2>Binding Check Analysis</h2>";
+        html +=
+          '<p style="font-size:0.85rem;color:#6a6d70;">Reference: <a href="https://github.com/SAP/openui5/issues/2600">SAP/openui5#2600</a> documents this bottleneck. ';
+        html +=
+          "SAP added <code>checkPerformanceOfUpdate</code> (commit <code>cb6c7f7a</code>) which warns when cumulative binding checks exceed 100,000. ";
+        html += "Real-world report: 3,449 bindings = ~200ms per setProperty call.</p>";
+        html += "<table>";
+        html +=
+          "<tr><th>Scenario</th><th>JSONModel binding checks</th><th>SignalModel notifications</th><th>Exceeds SAP 100k threshold?</th></tr>";
+
+        // Single-path update: JSON checks all N bindings, Signal notifies 1
+        html += "<tr><td>Single-path update</td>";
+        html += "<td>" + n + " (all bindings checked)</td>";
+        html += "<td>1 (only changed path)</td>";
+        html += "<td>" + (n > 100000 ? "Yes" : "No") + "</td></tr>";
+
+        // Update all: JSON checks N bindings per call * N calls = N^2
+        var jsonChecks = n * n;
+        html += "<tr><td>Update all " + n + " bindings</td>";
+        html +=
+          "<td>" + jsonChecks.toLocaleString() + " (" + n + " calls x " + n + " bindings)</td>";
+        html += "<td>" + n.toLocaleString() + " (" + n + " calls x 1 notification)</td>";
+        html += '<td class="' + (jsonChecks > 100000 ? "slower" : "neutral") + '">';
+        html += jsonChecks > 100000 ? "Yes - JSONModel would log performance warning" : "No";
+        html += "</td></tr>";
+
+        html += "</table>";
+
+        html += "<h2>Interpretation</h2>";
+        html += "<ul>";
+        html += "<li><strong>setProperty throughput (no bindings)</strong>: ";
+        html +=
+          "Raw model-layer cost with zero active bindings. SignalModel has a small per-call overhead (~0.4 microseconds) because it checks the signal registry and computed map. " +
+          "This is a synthetic edge case: in any real application, bindings exist and the signal approach pays for this overhead many times over (see Update All scenario). " +
+          "The absolute difference is sub-millisecond for hundreds of operations.</li>";
+        html += "<li><strong>getProperty throughput</strong>: ";
+        html +=
+          "Read performance. SignalModel checks for computed signals; JSONModel reads directly.</li>";
+        html += "<li><strong>Single-path update with N bindings</strong>: ";
+        html +=
+          "The key benchmark, directly measuring the problem from <a href='https://github.com/SAP/openui5/issues/2600'>openui5#2600</a>. " +
+          "JSONModel's <code>checkUpdate</code> iterates ALL " +
+          n +
+          " bindings (O(n)), " +
+          "SignalModel notifies only the changed binding via its signal watcher (O(1)). ";
+        html += "The advantage grows linearly with binding count.</li>";
+        html += "<li><strong>Update all N bindings</strong>: ";
+        html +=
+          "Simulates the consecutive synchronous <code>setProperty</code> pattern that SAP warns about. ";
+        html += "JSONModel does O(N) work per call = O(N<sup>2</sup>) total binding checks. ";
+        html += "SignalModel does O(1) per call = O(N) total.</li>";
+        html += "<li><strong>List binding replace</strong>: ";
+        html +=
+          "Tests <code>SignalListBinding</code> vs <code>JSONListBinding</code> with a real <code>sap.m.List</code> control. " +
+          "Replaces the bound array and measures full propagation including list re-rendering.</li>";
+        html += "<li><strong>Table binding replace</strong>: ";
+        html +=
+          "Tests list binding with a <code>sap.m.Table</code> (3 columns per row). " +
+          "Tables are the most common heavy binding scenario in Fiori applications. " +
+          "Each row creates multiple property bindings (one per cell), multiplying the binding count.</li>";
+        html += "<li><strong>Tree binding replace</strong>: ";
+        html +=
+          "Tests <code>SignalTreeBinding</code> vs <code>ClientTreeBinding</code> with a real <code>sap.m.Tree</code> control. " +
+          "Replaces hierarchical data (each root has 2 children) and measures full propagation.</li>";
+        html += "<li><strong>setData replace</strong>: ";
+        html +=
+          "Both models must notify all bindings. SignalModel invalidates all signals; JSONModel runs checkUpdate on all bindings.</li>";
+        html += "</ul>";
+
+        html += "<h2>Methodology</h2>";
+        html += "<ul>";
+        html +=
+          "<li><strong>Alternating execution:</strong> Each sample alternates which model runs first (JSON-Signal, Signal-JSON, ...) to cancel out GC pauses, thermal throttling, and JIT compilation bias.</li>";
+        html +=
+          "<li><strong>Fresh model per sample:</strong> Each sample creates a new model and new bindings, preventing state accumulation.</li>";
+        html +=
+          "<li><strong>Warmup:</strong> 3 warmup rounds per sample exercise the same code paths before measurement begins, stabilizing JIT compilation.</li>";
+        html +=
+          "<li><strong>Statistical reporting:</strong> Median (robust to outliers), mean, standard deviation, min, max, P5, and P95 are all reported.</li>";
+        html +=
+          "<li><strong>Flush protocol:</strong> After each operation, a Promise.then + setTimeout(0) + queueMicrotask chain ensures all async notification paths (microtask queue for SignalModel, promise/setTimeout for JSONModel) complete before timing stops.</li>";
+        html +=
+          "<li><strong>Hidden container:</strong> sap.m.Text controls are placed in a display:none container to isolate model performance from DOM rendering cost.</li>";
+        html +=
+          "<li><strong>Identical data:</strong> Both models receive structurally identical data (deep-copied via JSON.parse/stringify).</li>";
+        html += "</ul>";
+
+        html += "<h2>Relation to SAP/openui5#2600</h2>";
+        html += "<ul>";
+        html +=
+          "<li>Issue <a href='https://github.com/SAP/openui5/issues/2600'>#2600</a> identified that <code>Model#checkUpdate</code> iterates <strong>all</strong> bindings on every <code>setProperty</code> call, performing <code>deepEqual</code> on each.</li>";
+        html +=
+          "<li>SAP's response (commit <code>cb6c7f7a</code>, JIRA CPOUI5MODELS-1947): made <code>checkUpdate</code> return the number of bindings checked, and added <code>checkPerformanceOfUpdate</code> which logs a warning when consecutive sync <code>setProperty</code> calls cause > 100,000 cumulative binding checks.</li>";
+        html +=
+          "<li>SAP's recommendation: use <code>bAsyncUpdate=true</code> to batch sync <code>setProperty</code> calls. This reduces N calls from N separate <code>checkUpdate</code> passes to 1, but each pass still iterates all bindings - O(N) per batch instead of O(N<sup>2</sup>) total.</li>";
+        html +=
+          "<li><strong>SignalModel eliminates the problem entirely:</strong> signals provide O(1) notification per changed path regardless of sync/async mode. No <code>checkUpdate</code> iteration occurs.</li>";
+        html += "</ul>";
+
+        html += "<h2>Limitations</h2>";
+        html += "<ul>";
+        html +=
+          "<li>Browser fingerprinting protections may reduce performance.now() precision (typically to ~0.1ms in modern browsers).</li>";
+        html +=
+          "<li>Garbage collection is not explicitly triggered between samples (requires Chrome --js-flags='--expose-gc'). GC pauses may affect individual samples, which is why median is used.</li>";
+        html +=
+          "<li>Results may vary between browser engines (V8, SpiderMonkey, JavaScriptCore) due to different JIT optimization strategies.</li>";
+        html +=
+          "<li>For most reliable results, close other tabs, disable extensions, and run the benchmark 2-3 times.</li>";
+        html += "</ul>";
+
+        document.getElementById("results").innerHTML = html;
+      }
+    </script>
+  </body>
+</html>

@@ -134,4 +134,22 @@ QUnit.module("SignalPropertyBinding", () => {
     assert.ok(true, "destroy completes without error");
     model.destroy();
   });
+
+  QUnit.test("destroyed binding does not fire after setProperty", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ name: "Alice" });
+    const binding = model.bindProperty("/name");
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+    binding.destroy();
+
+    model.setProperty("/name", "Bob");
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no change event after destroy");
+      model.destroy();
+      done();
+    }, 50);
+  });
 });

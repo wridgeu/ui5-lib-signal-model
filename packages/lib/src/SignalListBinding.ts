@@ -100,7 +100,10 @@ export default class SignalListBinding extends ClientListBinding {
 
   unsubscribe(): void {
     if (this.watcher) {
-      this.watcher.unwatch();
+      const sources = Signal.subtle.introspectSources(this.watcher);
+      if (sources.length) {
+        this.watcher.unwatch(...sources);
+      }
       this.watcher = null;
     }
   }

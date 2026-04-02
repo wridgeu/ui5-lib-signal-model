@@ -42,7 +42,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
 
     const oValue = self._getValue();
-    // For objects, always fire — the reference may be the same but contents may have changed
+    // For objects, always fire - the reference may be the same but contents may have changed
     // (mutation through setProperty on child paths). For primitives, use strict equality.
     const hasChanged =
       typeof oValue === "object" && oValue !== null ? true : self.oValue !== oValue;
@@ -99,7 +99,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
 
   unsubscribe(): void {
     if (this.watcher) {
-      this.watcher.unwatch();
+      const sources = Signal.subtle.introspectSources(this.watcher);
+      if (sources.length) {
+        this.watcher.unwatch(...sources);
+      }
       this.watcher = null;
     }
   }

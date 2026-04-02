@@ -7,6 +7,8 @@ framework:
   version: "1.144.0"
   libraries:
     - name: sap.ui.core
+    - name: sap.m
+      development: true
 builder:
   resources:
     excludes:

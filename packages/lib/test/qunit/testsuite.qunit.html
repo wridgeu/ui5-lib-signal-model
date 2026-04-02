@@ -8,6 +8,7 @@
       src="/resources/sap-ui-core.js"
       data-sap-ui-theme="sap_horizon"
       data-sap-ui-async="true"
+      data-sap-ui-compat-version="edge"
       data-sap-ui-resource-roots='{
 			"ui5/model/signal": "/resources/ui5/model/signal/",
 			"test": "/test-resources/ui5/model/signal/qunit/"
@@ -29,6 +30,7 @@
           "test/SignalTreeBinding.qunit",
           "test/NestedBinding.qunit",
           "test/ExpressionBinding.qunit",
+          "test/DeclarativeBinding.qunit",
         ],
         function () {
           QUnit.start();

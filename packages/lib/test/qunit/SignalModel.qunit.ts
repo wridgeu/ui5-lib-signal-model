@@ -177,6 +177,45 @@ QUnit.module("SignalModel", () => {
     }, 50);
   });
 
+  QUnit.test("replacing object with primitive notifies child bindings", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ customer: { name: "Alice", age: 28 } });
+    const nameBinding = model.bindProperty("/customer/name");
+    let nameChanged = false;
+
+    nameBinding.attachChange(() => {
+      nameChanged = true;
+    });
+
+    // Replace the object at /customer with a primitive
+    model.setProperty("/customer", "deleted");
+
+    setTimeout(() => {
+      assert.ok(nameChanged, "child binding notified when parent becomes primitive");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("setData merge invalidates root signal", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ name: "Alice", age: 28 });
+    const rootBinding = model.bindProperty("/");
+    let rootChanged = false;
+
+    rootBinding.attachChange(() => {
+      rootChanged = true;
+    });
+
+    model.setData({ age: 30 }, true);
+
+    setTimeout(() => {
+      assert.ok(rootChanged, "root binding notified on merge");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
   QUnit.test("destroy cleans up registry", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.bindProperty("/name");

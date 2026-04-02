@@ -28,7 +28,7 @@
 			</Panel>
 		</l:Grid>
 		<MessageStrip
-			text="Both models show identical behavior. Edit either side -- bindings update the same way. The difference is internal: SignalModel uses push-based signals, JSONModel uses poll-based checkUpdate."
+			text="Both models show identical behavior. Edit either side - bindings update the same way. The difference is internal: SignalModel uses push-based signals, JSONModel uses poll-based checkUpdate."
 			type="Information"
 			class="sapUiSmallMargin" />
 	</Panel>

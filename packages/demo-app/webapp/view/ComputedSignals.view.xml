@@ -17,7 +17,7 @@
 			<Text text="{/birthYear}" />
 		</f:SimpleForm>
 		<MessageStrip
-			text="fullName and birthYear are computed signals -- they update automatically when their dependencies change."
+			text="fullName and birthYear are computed signals. They update automatically when their dependencies change."
 			type="Information"
 			class="sapUiSmallMargin" />
 	</Panel>

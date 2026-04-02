@@ -119,11 +119,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       }
       oObject[sPropertyName] = oValue;
 
-      this.registry.set(sResolvedPath, oValue);
-
-      this._invalidateParentSignals(sResolvedPath);
-
-      if (typeof oValue === "object" && oValue !== null) {
+      if (this.registry.size > 0) {
+        this.registry.set(sResolvedPath, oValue);
+        this._invalidateParentSignals(sResolvedPath);
         this.registry.invalidateChildren(sResolvedPath, (path: string) => this._getObject(path));
       }
 
@@ -230,7 +228,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   isList(sPath: string, oContext?: Context): boolean {
     const sAbsolutePath = asInternal(this).resolve(sPath, oContext);
-    return Array.isArray(this._getObject(sAbsolutePath!));
+    if (!sAbsolutePath) return false;
+    return Array.isArray(this._getObject(sAbsolutePath));
   }
 
   checkUpdate(_bForceUpdate?: boolean, _bAsync?: boolean): number {
@@ -317,12 +316,17 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   private _invalidateParentSignals(sPath: string): void {
-    const parts = sPath.split("/");
-    for (let i = parts.length - 1; i >= 1; i--) {
-      const parentPath = parts.slice(0, i).join("/") || "/";
+    let idx = sPath.lastIndexOf("/");
+    while (idx > 0) {
+      const parentPath = sPath.substring(0, idx);
       if (this.registry.has(parentPath)) {
         this.registry.set(parentPath, this._getObject(parentPath));
       }
+      idx = sPath.lastIndexOf("/", idx - 1);
+    }
+    // Check root
+    if (this.registry.has("/")) {
+      this.registry.set("/", this._getObject("/"));
     }
   }
 
@@ -354,7 +358,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             newValue as Record<string, unknown>,
           );
         } else if (typeof newValue === "object" && newValue !== null) {
-          // New value is an object but old wasn't — invalidate all children
+          // New value is an object but old was not - invalidate all children
           this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
         }
       }
@@ -375,11 +379,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // Also invalidate any registered child signals under this path
       this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
     }
-    // Invalidate the base path itself if it has a signal
-    if (basePath) {
-      this.registry.set(basePath, this._getObject(basePath));
-    }
-    // Invalidate parent paths
+    // Invalidate the base path itself (including root)
+    const effectivePath = basePath || "/";
+    this.registry.set(effectivePath, this._getObject(effectivePath));
     if (basePath) {
       this._invalidateParentSignals(basePath);
     }
