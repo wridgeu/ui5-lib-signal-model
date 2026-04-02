@@ -25,12 +25,10 @@ function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal 
   return self as unknown as ClientPropertyBindingInternal;
 }
 
-// Microtask batching: collect all pending binding updates and process them
-// in a single microtask instead of scheduling one microtask per signal change.
-const pendingUpdates = new Map<
-  SignalPropertyBinding,
-  Signal.State<unknown> | Signal.Computed<unknown>
->();
+// Microtask batching: collect pending updates in an array and process them
+// in a single queueMicrotask. Uses a boolean flag on each binding for O(1)
+// deduplication instead of Map overhead.
+let pendingQueue: Array<SignalPropertyBinding> = [];
 let flushScheduled = false;
 
 function scheduleFlush(): void {
@@ -38,11 +36,16 @@ function scheduleFlush(): void {
     flushScheduled = true;
     queueMicrotask(() => {
       flushScheduled = false;
-      const entries = [...pendingUpdates.entries()];
-      pendingUpdates.clear();
-      for (const [binding, signal] of entries) {
-        signal.get();
-        binding.watcher?.watch();
+      const queue = pendingQueue;
+      pendingQueue = [];
+      for (let i = 0; i < queue.length; i++) {
+        const binding = queue[i];
+        binding.pending = false;
+        const s = binding.trackedSignal;
+        if (s) {
+          s.get();
+          binding.watcher?.watch();
+        }
         binding.checkUpdate();
       }
     });
@@ -57,6 +60,8 @@ function scheduleFlush(): void {
 export default class SignalPropertyBinding extends ClientPropertyBinding {
   declare oModel: SignalModel;
   watcher: Signal.subtle.Watcher | null = null;
+  trackedSignal: Signal.State<unknown> | Signal.Computed<unknown> | null = null;
+  pending = false;
 
   checkUpdate(bForceUpdate?: boolean): void {
     const self = asInternal(this);
@@ -105,15 +110,20 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     const self = asInternal(this);
     const signal = this.oModel._getOrCreateSignal(resolvedPath, self._getValue());
 
+    this.trackedSignal = signal;
     this.watcher = new Signal.subtle.Watcher(() => {
-      pendingUpdates.set(this, signal);
-      scheduleFlush();
+      if (!this.pending) {
+        this.pending = true;
+        pendingQueue.push(this);
+        scheduleFlush();
+      }
     });
     this.watcher.watch(signal);
   }
 
   unsubscribe(): void {
-    pendingUpdates.delete(this);
+    this.pending = false;
+    this.trackedSignal = null;
     if (this.watcher) {
       const sources = Signal.subtle.introspectSources(this.watcher);
       if (sources.length) {
