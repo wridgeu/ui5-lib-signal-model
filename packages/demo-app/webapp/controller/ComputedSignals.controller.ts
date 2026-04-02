@@ -14,4 +14,10 @@ export default class ComputedSignals extends Controller {
       return new Date().getFullYear() - (age as number);
     });
   }
+
+  override onExit(): void {
+    const model = this.getView()!.getModel() as SignalModel;
+    model.removeComputed("/fullName");
+    model.removeComputed("/birthYear");
+  }
 }

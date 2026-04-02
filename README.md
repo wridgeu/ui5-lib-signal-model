@@ -4,6 +4,8 @@
 
 > [!CAUTION]
 > This is an **experimental proof of concept** exploring reactive primitives in the UI5 ecosystem. It was developed with full AI assistance using speech-to-text during post-surgery recovery. Treat it as a technical exploration and learning exercise, not a production-ready library.
+>
+> A minor version may be published to npm so that others can try it out and experiment. This does **not** indicate production readiness — the API surface may change without notice between releases.
 
 ## Installation
 

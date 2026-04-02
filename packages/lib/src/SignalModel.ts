@@ -258,12 +258,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const existing = this._getObject(sResolvedPath);
     if (existing && typeof existing === "object" && typeof oValue === "object" && oValue !== null) {
       // In-place merge: walk the payload, compare, overwrite, and fire signals in one pass.
+      // _mergeInPlace already calls _invalidateParentSignals internally.
       this._mergeInPlace(
         existing as Record<string, unknown>,
         oValue as Record<string, unknown>,
         sResolvedPath,
       );
-      this._invalidateParentSignals(sResolvedPath);
 
       return true;
     }

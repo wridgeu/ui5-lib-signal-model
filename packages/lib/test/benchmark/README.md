@@ -35,12 +35,12 @@ The benchmark covers 16 scenarios across all binding types, model operations, an
 
 ### Merge Scenario Design
 
-The merge scenarios (12–15) are designed to test different payload shapes that exercise the `setData(data, true)` code path with varying data-to-payload ratios:
+The merge scenarios (13–16) are designed to test different payload shapes that exercise the `setData(data, true)` code path with varying data-to-payload ratios:
 
-- **Shallow (12)**: Small flat payload into a large flat array. Both models pay the `deepExtend`/in-place merge cost, but the binding notification cost dominates because all N bindings exist. Tests the common "update a few fields in a form" pattern.
-- **Deep (13)**: Payload covers every item. This is the worst case for merge — no savings from targeted invalidation. Both models must process all N items.
-- **Nested config (14)**: A realistic deeply nested configuration object (5 levels: `app.features.notifications.push`). The merge payload touches only 3 leaf paths. Tests recursive merge depth traversal.
-- **Large dataset, pinpoint (15)**: The key merge benchmark. Creates 10x N items (e.g., 10,000 for N=1000) with complex objects (7 properties, nested `metadata`), then merges only 3 items. JSONModel's `deepExtend` must deep-clone all 10,000 objects. SignalModel's in-place merge walks only the 3 payload items. This isolates the O(n) vs O(k) architectural difference.
+- **Shallow (13)**: Small flat payload into a large flat array. Both models pay the `deepExtend`/in-place merge cost, but the binding notification cost dominates because all N bindings exist. Tests the common "update a few fields in a form" pattern.
+- **Deep (14)**: Payload covers every item. This is the worst case for merge — no savings from targeted invalidation. Both models must process all N items.
+- **Nested config (15)**: A realistic deeply nested configuration object (5 levels: `app.features.notifications.push`). The merge payload touches only 3 leaf paths. Tests recursive merge depth traversal.
+- **Large dataset, pinpoint (16)**: The key merge benchmark. Creates 10x N items (e.g., 10,000 for N=1000) with complex objects (7 properties, nested `metadata`), then merges only 3 items. JSONModel's `deepExtend` must deep-clone all 10,000 objects. SignalModel's in-place merge walks only the 3 payload items. This isolates the O(n) vs O(k) architectural difference.
 
 ## How It Works
 

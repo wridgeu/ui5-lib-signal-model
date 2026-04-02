@@ -542,10 +542,11 @@
           var start = performance.now();
           model.setProperty("/rows", newRows);
           await flush();
+          times.push(performance.now() - start);
+          // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
           });
-          times.push(performance.now() - start);
         }
 
         list.destroy();
@@ -629,10 +630,11 @@
           var start = performance.now();
           model.setProperty("/rows", newRows);
           await flush();
+          times.push(performance.now() - start);
+          // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
           });
-          times.push(performance.now() - start);
         }
 
         table.destroy();
@@ -708,10 +710,11 @@
           var start = performance.now();
           model.setProperty("/tree", newNodes);
           await flush();
+          times.push(performance.now() - start);
+          // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
           });
-          times.push(performance.now() - start);
         }
 
         tree.destroy();
@@ -950,10 +953,14 @@
           setTimeout(r, 50);
         });
 
-        // Warmup
+        // Warmup: use the same payload shape as the measured run (counter + items array)
+        // so that the merge code path is JIT-compiled before measurement begins.
         for (var w = 0; w < warmupRounds; w++) {
-          var warmupPayload = { counter: w };
-          model.setData(warmupPayload, true);
+          var warmupItems = [];
+          for (var wi = 0; wi < Math.min(5, n); wi++) {
+            warmupItems.push({ id: wi, value: "warmup-" + w + "-" + wi });
+          }
+          model.setData({ counter: w, items: warmupItems }, true);
           await flush();
         }
 
@@ -1343,7 +1350,7 @@
           signal: stats(r5.signalTimes),
         });
 
-        // --- Scenario 7: List binding ---
+        // --- Scenario 6: List binding ---
         var listN = Math.min(n, 500); // Cap list items to avoid DOM explosion
         setStatus("Running: list binding replace with " + listN + " items (alternating)...");
         var r6 = await runAlternating(
@@ -1360,7 +1367,7 @@
         });
 
         // --- Scenario 7: Table binding ---
-        var tableN = Math.min(n, 500); // Cap table rows
+        var tableN = Math.min(n, 500);
         setStatus("Running: table binding replace with " + tableN + " rows (alternating)...");
         var r7 = await runAlternating(
           benchTableBindingReplace,
@@ -1436,9 +1443,7 @@
         });
 
         // --- Scenario 11: Computed signals with redefinition ---
-        setStatus(
-          "Running: computed (redefined) with " + compN + " computeds (alternating)...",
-        );
+        setStatus("Running: computed (redefined) with " + compN + " computeds (alternating)...");
         var compRedefJsonTimes = [];
         var compRedefSignalTimes = [];
         for (var cr = 0; cr < compHalf; cr++) {
@@ -1477,7 +1482,7 @@
           signal: stats(r11.signalTimes),
         });
 
-        // --- Scenario 12: setData merge (shallow) ---
+        // --- Scenario 13: setData merge (shallow) ---
         setStatus("Running: setData merge (shallow) with " + n + " bindings (alternating)...");
         var r12 = await runAlternating(
           benchSetDataMergeShallow,

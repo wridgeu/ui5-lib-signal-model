@@ -135,8 +135,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
         self.oContext = oContext;
       }
       const newResolved = this.getResolvedPath();
-      if (oldResolved !== newResolved && newResolved) {
-        this.subscribe();
+      if (oldResolved !== newResolved) {
+        this.subscribe(); // subscribe() calls unsubscribe() first, handles null newResolved
       }
     }
   }

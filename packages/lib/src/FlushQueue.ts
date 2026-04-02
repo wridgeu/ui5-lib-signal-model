@@ -1,3 +1,4 @@
+import Log from "sap/base/Log";
 import { Signal } from "signal-polyfill";
 
 /**
@@ -42,7 +43,15 @@ export function scheduleFlush(
       for (const [b, s] of entries) {
         s.get();
         b.watcher?.watch();
-        b.checkUpdate();
+        try {
+          b.checkUpdate();
+        } catch (e) {
+          Log.error(
+            "SignalModel: checkUpdate failed for binding",
+            e instanceof Error ? e : String(e),
+            "ui5.model.signal.FlushQueue",
+          );
+        }
       }
     });
   }
