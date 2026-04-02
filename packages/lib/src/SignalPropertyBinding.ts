@@ -42,7 +42,11 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
 
     const oValue = self._getValue();
-    if (self.oValue !== oValue || bForceUpdate) {
+    // For objects, always fire — the reference may be the same but contents may have changed
+    // (mutation through setProperty on child paths). For primitives, use strict equality.
+    const hasChanged =
+      typeof oValue === "object" && oValue !== null ? true : self.oValue !== oValue;
+    if (hasChanged || bForceUpdate) {
       self.oValue = oValue;
       self.getDataState().setValue(self.oValue);
       self.checkDataState();

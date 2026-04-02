@@ -53,11 +53,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   getProperty<P extends string & ModelPath<T>>(sPath: P, oContext?: undefined): PathValue<T, P>;
-  getProperty(sPath: string, oContext?: Context): unknown;
-  getProperty(sPath: string, oContext?: Context): unknown {
-    const sResolvedPath = asInternal(this).resolve(sPath, oContext);
-    if (sResolvedPath && this.registry.isComputed(sResolvedPath)) {
-      return this.registry.get(sResolvedPath)!.get();
+  getProperty(sPath: string, oContext?: object): unknown;
+  getProperty(sPath: string, oContext?: object): unknown {
+    // Only resolve computed check for proper Context objects (not raw data items from FilterProcessor)
+    if (!oContext || typeof (oContext as Context).getPath === "function") {
+      const sResolvedPath = asInternal(this).resolve(sPath, oContext as Context | undefined);
+      if (sResolvedPath && this.registry.isComputed(sResolvedPath)) {
+        return this.registry.get(sResolvedPath)!.get();
+      }
     }
     return this._getObject(sPath, oContext);
   }
@@ -176,12 +179,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     mParameters?: object,
   ): SignalPropertyBinding {
     // ClientPropertyBinding's constructor is protected in type stubs but callable from subclasses at runtime
-    return new (SignalPropertyBinding as unknown as new (
+    const binding = new (SignalPropertyBinding as unknown as new (
       model: SignalModel<any>,
       path: string,
       context?: Context,
       params?: object,
     ) => SignalPropertyBinding)(this, sPath, oContext, mParameters);
+    binding.subscribe();
+    return binding;
   }
 
   override bindList(
@@ -191,7 +196,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     aFilters?: object | object[],
     mParameters?: object,
   ): SignalListBinding {
-    return new (SignalListBinding as unknown as new (
+    const binding = new (SignalListBinding as unknown as new (
       model: SignalModel<any>,
       path: string,
       context?: Context,
@@ -199,6 +204,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       filters?: object | object[],
       params?: object,
     ) => SignalListBinding)(this, sPath, oContext, aSorters, aFilters, mParameters);
+    binding.subscribe();
+    return binding;
   }
 
   checkUpdate(_bForceUpdate?: boolean, _bAsync?: boolean): number {
@@ -216,6 +223,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     aDeps: string[],
     fn: (...args: unknown[]) => unknown,
   ): Signal.Computed<unknown> {
+    // Ensure dependency signals exist before creating the computed
+    for (const dep of aDeps) {
+      this.registry.getOrCreate(dep, this._getObject(dep));
+    }
     return this.registry.addComputed(sPath, aDeps, fn, this.strict);
   }
 
@@ -232,10 +243,22 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return this.registry.getOrCreate(sPath, initialValue);
   }
 
-  _getObject(sPath: string, oContext?: Context): unknown {
+  _getObject(sPath: string, oContext?: object): unknown {
+    // If context is a raw data object (not a Context instance), navigate into it directly.
+    // This is needed for FilterProcessor/SorterProcessor which pass raw list items as context.
+    if (oContext && typeof (oContext as Context).getPath !== "function") {
+      let oNode: unknown = oContext;
+      const aParts = sPath.split("/").filter(Boolean);
+      for (const sPart of aParts) {
+        if (oNode === null || oNode === undefined) return undefined;
+        oNode = (oNode as Record<string, unknown>)[sPart];
+      }
+      return oNode;
+    }
+
     let oNode: unknown = this.oData;
 
-    const sResolvedPath = asInternal(this).resolve(sPath, oContext);
+    const sResolvedPath = asInternal(this).resolve(sPath, oContext as Context | undefined);
     if (!sResolvedPath) {
       return undefined;
     }

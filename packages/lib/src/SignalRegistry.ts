@@ -2,6 +2,16 @@ import { Signal } from "signal-polyfill";
 
 type ValueResolver = (path: string) => unknown;
 
+/**
+ * Custom equality that uses Object.is for primitives but always returns false
+ * for objects/arrays. This ensures that parent signals fire when child properties
+ * are mutated in place (the parent reference doesn't change but its contents did).
+ */
+function signalEquals(_a: unknown, _b: unknown): boolean {
+  if (typeof _a === "object" && _a !== null) return false;
+  return Object.is(_a, _b);
+}
+
 export default class SignalRegistry {
   private readonly signals = new Map<string, Signal.State<unknown>>();
   private readonly computeds = new Map<string, Signal.Computed<unknown>>();
@@ -9,7 +19,7 @@ export default class SignalRegistry {
   getOrCreate(path: string, initialValue: unknown): Signal.State<unknown> {
     let signal = this.signals.get(path);
     if (!signal) {
-      signal = new Signal.State(initialValue);
+      signal = new Signal.State(initialValue, { equals: signalEquals });
       this.signals.set(path, signal);
     }
     return signal;

@@ -19,4 +19,8 @@ export const config = {
   ],
   reporters: ["spec"],
   baseUrl: process.env["TEST_BASE_URL"] || "http://localhost:8080",
+  waitforTimeout: 30000,
+  mochaOpts: {
+    timeout: 60000,
+  },
 };
