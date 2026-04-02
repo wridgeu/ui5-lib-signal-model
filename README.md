@@ -218,9 +218,9 @@ The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected
 
 ![Benchmark Results](docs/benchmark-full-results.png)
 
-The key result: **"Update all N bindings"** is where SignalModel shines. At 1000 bindings, JSONModel takes ~200ms (1,000,000 binding checks, exceeding SAP's 100k warning threshold). SignalModel takes ~19ms (1,000 targeted notifications). For list/table/tree replace operations, both models perform equivalently because DOM rendering cost dominates.
+The key result: with default synchronous `setProperty`, **"Update all N bindings"** shows ~10x improvement at 1000 bindings (202ms vs 19ms). The benchmark also tests JSONModel's `bAsyncUpdate=true` workaround for an honest comparison. For list/table/tree replace operations, both models perform equivalently because DOM rendering cost dominates.
 
-See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for technical details on how the benchmark works.
+See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for the full analysis, including honest observations about where SignalModel does and does not improve over JSONModel.
 
 ## Demo Application
 

@@ -446,7 +446,55 @@
       }
 
       /**
-       * Scenario 5: List binding - replace array with N items
+       * Scenario 5: Update ALL N bindings with bAsyncUpdate=true
+       *
+       * Same as Scenario 4 but passes bAsyncUpdate=true to setProperty.
+       * JSONModel: batches all checkUpdate calls into one setTimeout pass,
+       *   reducing N*O(N) to 1*O(N). This is SAP's recommended workaround.
+       * SignalModel: ignores the flag (signals are always push-based).
+       * This scenario shows the honest comparison when JSONModel is used optimally.
+       */
+      async function benchUpdateAllBindingsAsync(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          for (var i = 0; i < n; i++) {
+            model.setProperty("/items/" + i + "/value", "warmup-" + w + "-" + i, undefined, true);
+          }
+          await flush();
+        }
+
+        // Measure: update every path with bAsyncUpdate=true
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          for (var j = 0; j < n; j++) {
+            model.setProperty(
+              "/items/" + j + "/value",
+              "async-" + round + "-" + j,
+              undefined,
+              true,
+            );
+          }
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * Scenario 6: List binding - replace array with N items
        *
        * Creates a sap.m.List with N items via list binding, then replaces the array.
        * Tests SignalListBinding vs JSONListBinding notification.
@@ -963,7 +1011,22 @@
           signal: stats(r4.signalTimes),
         });
 
-        // --- Scenario 5: List binding ---
+        // --- Scenario 5: Update all (async) ---
+        setStatus("Running: update all " + n + " bindings with bAsyncUpdate=true (alternating)...");
+        var r5 = await runAlternating(
+          benchUpdateAllBindingsAsync,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "Update all " + n + " (async)",
+          detail: n + " setProperty(bAsync=true)",
+          category: "Property (sap.m.Text)",
+          json: stats(r5.jsonTimes),
+          signal: stats(r5.signalTimes),
+        });
+
+        // --- Scenario 6: List binding ---
         var listN = Math.min(n, 500); // Cap list items to avoid DOM explosion
         setStatus("Running: list binding replace with " + listN + " items (alternating)...");
         var r5 = await runAlternating(
@@ -1188,11 +1251,18 @@
           " bindings (O(n)), " +
           "SignalModel notifies only the changed binding via its signal watcher (O(1)). ";
         html += "The advantage grows linearly with binding count.</li>";
-        html += "<li><strong>Update all N bindings</strong>: ";
+        html += "<li><strong>Update all N bindings (sync)</strong>: ";
+        html += "Consecutive synchronous <code>setProperty</code> calls (the default). ";
+        html += "JSONModel does O(N) work per call = O(N<sup>2</sup>) total. ";
         html +=
-          "Simulates the consecutive synchronous <code>setProperty</code> pattern that SAP warns about. ";
-        html += "JSONModel does O(N) work per call = O(N<sup>2</sup>) total binding checks. ";
-        html += "SignalModel does O(1) per call = O(N) total.</li>";
+          "SignalModel does O(1) per call = O(N) total. This is the worst case for JSONModel.</li>";
+        html += "<li><strong>Update all N bindings (async)</strong>: ";
+        html +=
+          "Same workload but with <code>bAsyncUpdate=true</code>, SAP's recommended workaround. ";
+        html +=
+          "JSONModel batches all <code>checkUpdate</code> calls into one <code>setTimeout</code> pass: O(N) total instead of O(N<sup>2</sup>). ";
+        html += "SignalModel is unaffected (signals are always push-based). ";
+        html += "This is the honest comparison when JSONModel is used optimally.</li>";
         html += "<li><strong>List binding replace</strong>: ";
         html +=
           "Tests <code>SignalListBinding</code> vs <code>JSONListBinding</code> with a real <code>sap.m.List</code> control. " +

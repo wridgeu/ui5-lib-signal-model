@@ -82,11 +82,31 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 | Computed (sap.m.Text)   | Computed signals, 500 computeds  | 4.70ms      | 5.20ms      | ~equal           |
 | Property (sap.m.Text)   | setData replace                  | 10.20ms     | 10.80ms     | ~equal           |
 
-### Key Takeaway
+### Honest Observations
 
-The **"Update all N bindings"** scenario is where SignalModel shines. At 500 bindings, JSONModel takes 50.9ms (each `setProperty` iterates all 500 bindings = 250,000 total checks, exceeding SAP's 100k warning threshold). SignalModel takes 11ms (each `setProperty` notifies only the 1 changed binding = 500 total notifications). At 1000 bindings this becomes ~10x faster (189ms vs 19ms). This directly addresses the bottleneck documented in [SAP/openui5#2600](https://github.com/SAP/openui5/issues/2600).
+**Where SignalModel is faster:**
 
-For list, table, and tree binding scenarios where the entire aggregation is replaced, both models perform equivalently because the DOM rendering cost dominates the model notification cost.
+The "Update all N bindings (sync)" scenario shows the largest difference: at 1000 bindings, JSONModel takes ~200ms while SignalModel takes ~19ms (~10x faster). This is because JSONModel's default synchronous `setProperty` calls `checkUpdate` after every single call, iterating all bindings each time (O(N^2) total).
+
+**The `bAsyncUpdate` caveat:**
+
+JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it batches all `checkUpdate` calls into a single `setTimeout` pass, collapsing O(N^2) to O(N). The benchmark includes this scenario ("Update all N async") for an honest comparison. With `bAsyncUpdate=true`, JSONModel's performance approaches SignalModel's because the one remaining `checkUpdate` pass is a single O(N) iteration.
+
+**Where both models are equivalent:**
+
+For list, table, and tree binding scenarios where the entire aggregation is replaced, both models perform equivalently. The DOM rendering cost (destroying and recreating list items, table rows, tree nodes) dominates the model notification cost by an order of magnitude. The model layer is not the bottleneck in these scenarios.
+
+Expression binding, computed signals, getProperty, setProperty (no bindings), and setData replace are all equivalent between the two models.
+
+**What SignalModel still offers over JSONModel with `bAsyncUpdate`:**
+
+1. **Correct by default.** Developers do not need to remember to pass `bAsyncUpdate=true`. SAP added a runtime performance warning (`checkPerformanceOfUpdate`) specifically because developers keep using the synchronous default. SignalModel is always O(1) per notification regardless of how `setProperty` is called.
+
+2. **Per-path notification.** Even with `bAsyncUpdate=true`, JSONModel's single `checkUpdate` pass still iterates ALL bindings and runs `deepEqual` on each. With 3,000+ bindings (the scale reported in [openui5#2600](https://github.com/SAP/openui5/issues/2600)), this single pass alone takes ~200ms. SignalModel notifies only the bindings on changed paths.
+
+3. **Computed signals.** Model-layer derived values (`createComputed`) that update reactively. JSONModel has no equivalent (formatters are view-layer and do not participate in the model's dependency graph).
+
+4. **TC39 Signals alignment.** When the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) ships natively in browsers, `signal-polyfill` can be swapped for the native implementation with zero API changes.
 
 ## Background
 
