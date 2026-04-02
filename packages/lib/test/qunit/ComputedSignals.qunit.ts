@@ -100,6 +100,32 @@ QUnit.module("ComputedSignals", () => {
     model.setProperty("/a", 7);
   });
 
+  QUnit.test(
+    "existing binding updates after removeComputed + createComputed (same deps)",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({ a: 5 });
+      model.createComputed("/result", ["/a"], (a) => (a as number) + 10);
+
+      // Simulate an XML view binding that was created before the redefine
+      const binding = model.bindProperty("/result");
+      assert.strictEqual(binding.getValue(), 15, "binding reads original computed");
+
+      // Redefine: remove + recreate with same dependencies
+      model.removeComputed("/result");
+      model.createComputed("/result", ["/a"], (a) => (a as number) * 3);
+
+      // Trigger a dependency change — binding should see the new formula
+      binding.attachChange(() => {
+        assert.strictEqual(binding.getValue(), 21, "binding sees new computed (7 * 3 = 21)");
+        model.destroy();
+        done();
+      });
+
+      model.setProperty("/a", 7);
+    },
+  );
+
   QUnit.test("computed with multiple dependencies", (assert) => {
     const done = assert.async();
     const model = new SignalModel({ price: 100, tax: 0.2 });
