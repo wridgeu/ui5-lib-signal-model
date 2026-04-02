@@ -4,7 +4,7 @@ import deepExtend from "sap/base/util/deepExtend";
 import SignalRegistry from "./SignalRegistry";
 import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
-import type { SignalModelOptions } from "./types";
+import type { SignalModelOptions, ModelPath, PathValue } from "./types";
 import type { Signal } from "signal-polyfill";
 
 // `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
@@ -13,7 +13,7 @@ type ClientModelInternal = ClientModel & {
   checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): void;
 };
 
-function asInternal(self: SignalModel): ClientModelInternal {
+function asInternal(self: SignalModel<Record<string, unknown>>): ClientModelInternal {
   return self as unknown as ClientModelInternal;
 }
 
@@ -23,37 +23,38 @@ function asInternal(self: SignalModel): ClientModelInternal {
  *
  * @namespace ui5.model.signal
  */
-export default class SignalModel extends ClientModel {
+export default class SignalModel<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> extends ClientModel {
   private registry: SignalRegistry;
   private strict: boolean;
-  declare oData: Record<string, unknown>;
+  declare oData: T;
 
-  constructor(oData?: Record<string, unknown>, mOptions?: SignalModelOptions) {
+  constructor(oData?: T, mOptions?: SignalModelOptions) {
     super();
-    this.oData = oData || {};
+    this.oData = (oData || {}) as T;
     this.registry = new SignalRegistry();
     this.strict = mOptions?.strict ?? false;
   }
 
-  setData(oData: Record<string, unknown>, bMerge?: boolean): void {
+  setData(oData: Partial<T>, bMerge?: boolean): void {
     if (bMerge) {
-      this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData, oData) as Record<
-        string,
-        unknown
-      >;
+      this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData, oData) as T;
       // Only invalidate paths that were part of the merge payload
-      this._invalidateMergePayload(oData, "");
+      this._invalidateMergePayload(oData as Record<string, unknown>, "");
     } else {
-      this.oData = oData;
+      this.oData = oData as T;
       this.registry.invalidateAll((path: string) => this._getObject(path));
     }
   }
 
-  override getData(): Record<string, unknown> {
+  getData(): T {
     return this.oData;
   }
 
-  override getProperty(sPath: string, oContext?: Context): unknown {
+  getProperty<P extends string & ModelPath<T>>(sPath: P): PathValue<T, P>;
+  getProperty(sPath: string, oContext?: Context): unknown;
+  getProperty(sPath: string, oContext?: Context): unknown {
     const sResolvedPath = asInternal(this).resolve(sPath, oContext);
     if (sResolvedPath && this.registry.isComputed(sResolvedPath)) {
       return this.registry.get(sResolvedPath)!.get();
@@ -61,6 +62,8 @@ export default class SignalModel extends ClientModel {
     return this._getObject(sPath, oContext);
   }
 
+  setProperty<P extends string & ModelPath<T>>(sPath: P, oValue: PathValue<T, P>): boolean;
+  setProperty(sPath: string, oValue: unknown, oContext?: Context, bAsyncUpdate?: boolean): boolean;
   setProperty(
     sPath: string,
     oValue: unknown,
@@ -73,7 +76,7 @@ export default class SignalModel extends ClientModel {
     }
 
     if (sResolvedPath === "/") {
-      this.setData(oValue as Record<string, unknown>);
+      this.setData(oValue as Partial<T>);
       return true;
     }
 
@@ -120,6 +123,11 @@ export default class SignalModel extends ClientModel {
     return false;
   }
 
+  mergeProperty<P extends string & ModelPath<T>>(
+    sPath: P,
+    oValue: Partial<PathValue<T, P>>,
+  ): boolean;
+  mergeProperty(sPath: string, oValue: unknown, oContext?: Context): boolean;
   mergeProperty(sPath: string, oValue: unknown, oContext?: Context): boolean {
     const sResolvedPath = asInternal(this).resolve(sPath, oContext);
     if (!sResolvedPath) {
@@ -129,7 +137,7 @@ export default class SignalModel extends ClientModel {
     // Root path: delegate to setData with merge
     if (sResolvedPath === "/") {
       if (typeof oValue === "object" && oValue !== null) {
-        this.setData(oValue as Record<string, unknown>, true);
+        this.setData(oValue as Partial<T>, true);
         return true;
       }
       return false;
@@ -192,6 +200,8 @@ export default class SignalModel extends ClientModel {
     return 0;
   }
 
+  getSignal<P extends string & ModelPath<T>>(sPath: P): Signal.State<PathValue<T, P>>;
+  getSignal(sPath: string): Signal.State<unknown>;
   getSignal(sPath: string): Signal.State<unknown> {
     return this.registry.getOrCreate(sPath, this._getObject(sPath));
   }
@@ -240,7 +250,7 @@ export default class SignalModel extends ClientModel {
   }
 
   private _createPath(sPath: string): Record<string, unknown> {
-    let oNode: Record<string, unknown> = this.oData;
+    let oNode: Record<string, unknown> = this.oData as Record<string, unknown>;
     const aParts = sPath.substring(1).split("/");
 
     for (const sPart of aParts) {

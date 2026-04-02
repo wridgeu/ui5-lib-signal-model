@@ -36,7 +36,7 @@ QUnit.module("SignalModel", () => {
   });
 
   QUnit.test("setProperty at root uses setData", (assert) => {
-    const model = new SignalModel({ old: true });
+    const model: SignalModel = new SignalModel({ old: true });
     const newData = { new: true };
     model.setProperty("/", newData);
     assert.deepEqual(model.getData(), newData, "root replaced via setData");
@@ -44,7 +44,7 @@ QUnit.module("SignalModel", () => {
   });
 
   QUnit.test("setData replaces all data", (assert) => {
-    const model = new SignalModel({ name: "Alice" });
+    const model: SignalModel = new SignalModel({ name: "Alice" });
     model.setData({ name: "Bob", extra: true });
     assert.strictEqual(model.getProperty("/name"), "Bob", "data replaced");
     assert.strictEqual(model.getProperty("/extra"), true, "new properties available");
