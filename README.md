@@ -221,9 +221,9 @@ The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected
 
 ![Benchmark Results - 1000 bindings](docs/img/benchmark-1000-bindings.png)
 
-The key result: with default synchronous `setProperty`, **"Update all N bindings"** shows ~10x improvement at 1000 bindings (202ms vs 19ms). The benchmark also tests JSONModel's `bAsyncUpdate=true` workaround for an honest comparison. For list/table/tree replace operations, both models perform equivalently because DOM rendering cost dominates.
+With default synchronous `setProperty`, **"Update all N bindings"** shows ~10x improvement at 1000 bindings (204ms vs 19ms). However, with JSONModel's `bAsyncUpdate=true`, JSONModel is faster (~13ms vs ~19ms) because it collapses all updates into one bulk `deepEqual` loop, while SignalModel still pays per-binding overhead from the `signal.get()` + `watcher.watch()` re-arm cycle required by the signal-polyfill Watcher API. For list/table/tree replace operations, both models perform equivalently because DOM rendering cost dominates.
 
-See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for the full analysis, including honest observations about where SignalModel does and does not improve over JSONModel.
+See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for the full analysis.
 
 ## Demo Application
 

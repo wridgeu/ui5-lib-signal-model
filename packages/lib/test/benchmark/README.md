@@ -113,7 +113,14 @@ The "Update all N bindings (sync)" scenario shows the largest difference: at 100
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it batches all `checkUpdate` calls into a single `setTimeout` pass, collapsing O(N^2) to O(N). The benchmark includes this scenario ("Update all N async") for an honest comparison.
 
-With `bAsyncUpdate=true`, **JSONModel is actually faster than SignalModel** for bulk batch updates. At 2000 bindings: JSONModel-async takes ~28ms while SignalModel takes ~60ms. Both models execute ONE batched pass (JSONModel via `setTimeout`, SignalModel via a single coalesced `queueMicrotask`). The difference is per-binding overhead: JSONModel's `checkUpdate` loop does one `deepEqual` per binding. SignalModel's batched flush does `signal.get()` + `watcher.watch()` + `checkUpdate()` per binding, plus N synchronous watcher callback invocations during the `setProperty` calls themselves.
+With `bAsyncUpdate=true`, **JSONModel is actually faster than SignalModel** for bulk batch updates. At 1000 bindings: JSONModel-async takes ~13ms while SignalModel takes ~19ms. Both execute ONE batched pass, but the per-binding work differs:
+
+| Step                         | JSONModel async                 | SignalModel                                                              |
+| ---------------------------- | ------------------------------- | ------------------------------------------------------------------------ |
+| During N `setProperty` calls | Sets data, schedules 1 timer    | Sets data, fires N watcher callbacks, each does `Map.set()`              |
+| Batched flush                | 1 loop: `deepEqual` per binding | 1 loop: `signal.get()` + `watcher.watch()` + `checkUpdate()` per binding |
+
+The overhead comes from the TC39 `Signal.subtle.Watcher` API contract: after a signal notifies its watcher, the watcher must be explicitly re-armed by calling `signal.get()` (to acknowledge the change) then `watcher.watch()` (to re-register). This is inherent to the polyfill's design and cannot be optimized away without changes to the signal-polyfill itself. JSONModel's `deepEqual` comparison is a single function call per binding with no re-registration overhead.
 
 **Where both models are equivalent:**
 
