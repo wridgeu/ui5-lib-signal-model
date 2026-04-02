@@ -239,17 +239,22 @@
 
       /**
        * Format a ratio as "Nx faster", "Nx slower", or "~equal".
-       * Uses statistical significance: the difference must exceed the pooled
-       * standard error to be reported as meaningful, not just noise.
+       *
+       * Guards against edge cases (zero/near-zero medians) and uses two
+       * significance checks:
+       * 1. The absolute difference must exceed the pooled standard deviation.
+       * 2. The ratio must exceed 10% (1.10x) to filter out tiny but
+       *    technically-significant differences in rendering-dominated scenarios.
        */
       function fmtRatio(signalStats, jsonStats) {
         var sm = signalStats.median;
         var jm = jsonStats.median;
-        if (sm <= 0.01 && jm <= 0.01) return '<span class="neutral">equal</span>';
-        if (sm <= 0.01) return '<span class="faster">&gt;100x faster</span>';
 
-        // Check statistical significance: is the difference larger than the
-        // pooled standard deviation? If not, the result is within noise.
+        // Below 1ms both values are at the resolution floor of performance.now()
+        // and cannot be meaningfully compared
+        if (sm < 1 && jm < 1) return '<span class="neutral">~equal</span>';
+
+        // Statistical significance: difference must exceed pooled SD
         var pooledSD = Math.sqrt(
           signalStats.stddev * signalStats.stddev + jsonStats.stddev * jsonStats.stddev,
         );
@@ -258,10 +263,14 @@
           return '<span class="neutral">~equal</span>';
         }
 
+        // Guard against division by zero
+        if (sm <= 0) return '<span class="neutral">~equal</span>';
+
+        // Ratio must exceed 10% to be reported (filters rendering noise)
         var ratio = jm / sm;
-        if (ratio >= 1.05) {
+        if (ratio >= 1.1) {
           return '<span class="faster">' + fmt(ratio) + "x faster</span>";
-        } else if (ratio <= 0.95) {
+        } else if (ratio <= 0.9) {
           return '<span class="slower">' + fmt(1 / ratio) + "x slower</span>";
         }
         return '<span class="neutral">~equal</span>';
