@@ -29,7 +29,10 @@ function asInternal(self: SignalListBinding): ListBindingInternal {
 }
 
 // Microtask batching for list bindings
-let pendingQueue: Array<SignalListBinding> = [];
+const pendingUpdates = new Map<
+  SignalListBinding,
+  Signal.State<unknown> | Signal.Computed<unknown>
+>();
 let flushScheduled = false;
 
 function scheduleFlush(): void {
@@ -37,16 +40,11 @@ function scheduleFlush(): void {
     flushScheduled = true;
     queueMicrotask(() => {
       flushScheduled = false;
-      const queue = pendingQueue;
-      pendingQueue = [];
-      for (let i = 0; i < queue.length; i++) {
-        const binding = queue[i];
-        binding.pending = false;
-        const s = binding.trackedSignal;
-        if (s) {
-          s.get();
-          binding.watcher?.watch();
-        }
+      const entries = [...pendingUpdates.entries()];
+      pendingUpdates.clear();
+      for (const [binding, signal] of entries) {
+        signal.get();
+        binding.watcher?.watch();
         binding.checkUpdate();
       }
     });
@@ -61,8 +59,6 @@ function scheduleFlush(): void {
  */
 export default class SignalListBinding extends ClientListBinding {
   watcher: Signal.subtle.Watcher | null = null;
-  trackedSignal: Signal.State<unknown> | Signal.Computed<unknown> | null = null;
-  pending = false;
 
   update(): void {
     const internal = asInternal(this);
@@ -109,20 +105,15 @@ export default class SignalListBinding extends ClientListBinding {
       internal.oModel._getObject(resolvedPath),
     );
 
-    this.trackedSignal = signal;
     this.watcher = new Signal.subtle.Watcher(() => {
-      if (!this.pending) {
-        this.pending = true;
-        pendingQueue.push(this);
-        scheduleFlush();
-      }
+      pendingUpdates.set(this, signal);
+      scheduleFlush();
     });
     this.watcher.watch(signal);
   }
 
   unsubscribe(): void {
-    this.pending = false;
-    this.trackedSignal = null;
+    pendingUpdates.delete(this);
     if (this.watcher) {
       const sources = Signal.subtle.introspectSources(this.watcher);
       if (sources.length) {
