@@ -67,7 +67,7 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 
 ## Results (500 bindings, 500 iterations, 10 rounds)
 
-![Benchmark Results](../../../docs/benchmark-full-results.png)
+![Benchmark Results](../../../../docs/benchmark-full-results.png)
 
 | Binding Type            | Scenario                         | JSONModel   | SignalModel | Comparison       |
 | ----------------------- | -------------------------------- | ----------- | ----------- | ---------------- |
@@ -102,7 +102,7 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), an
 
 1. **Correct by default.** Developers do not need to remember to pass `bAsyncUpdate=true`. SAP added a runtime performance warning (`checkPerformanceOfUpdate`) specifically because developers keep using the synchronous default. SignalModel is always O(1) per notification regardless of how `setProperty` is called.
 
-2. **Per-path notification.** Even with `bAsyncUpdate=true`, JSONModel's single `checkUpdate` pass still iterates ALL bindings and runs `deepEqual` on each. With 3,000+ bindings (the scale reported in [openui5#2600](https://github.com/SAP/openui5/issues/2600)), this single pass alone takes ~200ms. SignalModel notifies only the bindings on changed paths.
+2. **Per-path notification.** Even with `bAsyncUpdate=true`, JSONModel's single `checkUpdate` pass still iterates ALL bindings and runs `deepEqual` on each. With 3,000+ bindings (the scale reported in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600)), this single pass alone takes ~200ms. SignalModel notifies only the bindings on changed paths.
 
 3. **Computed signals.** Model-layer derived values (`createComputed`) that update reactively. JSONModel has no equivalent (formatters are view-layer and do not participate in the model's dependency graph).
 
@@ -110,6 +110,6 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), an
 
 ## Background
 
-- [SAP/openui5#2600](https://github.com/SAP/openui5/issues/2600) - documents the `checkUpdate` O(N) bottleneck
-- [SAP/openui5#4351](https://github.com/SAP/openui5/issues/4351) - related DOM accumulation problem in large apps
+- [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600) - documents the `checkUpdate` O(N) bottleneck
+- [openui5 issue 4351](https://github.com/UI5/openui5/issues/4351) - related DOM accumulation problem in large apps
 - SAP commit `cb6c7f7a` - added `checkPerformanceOfUpdate` warning at 100,000 cumulative binding checks

@@ -1207,7 +1207,7 @@
         // Binding check analysis (the metric SAP tracks in their checkPerformanceOfUpdate)
         html += "<h2>Binding Check Analysis</h2>";
         html +=
-          '<p style="font-size:0.85rem;color:#6a6d70;">Reference: <a href="https://github.com/SAP/openui5/issues/2600">SAP/openui5#2600</a> documents this bottleneck. ';
+          '<p style="font-size:0.85rem;color:#6a6d70;">Reference: <a href="https://github.com/UI5/openui5/issues/2600">openui5 issue 2600</a> documents this bottleneck. ';
         html +=
           "SAP added <code>checkPerformanceOfUpdate</code> (commit <code>cb6c7f7a</code>) which warns when cumulative binding checks exceed 100,000. ";
         html += "Real-world report: 3,449 bindings = ~200ms per setProperty call.</p>";
@@ -1245,7 +1245,7 @@
           "Read performance. SignalModel checks for computed signals; JSONModel reads directly.</li>";
         html += "<li><strong>Single-path update with N bindings</strong>: ";
         html +=
-          "The key benchmark, directly measuring the problem from <a href='https://github.com/SAP/openui5/issues/2600'>openui5#2600</a>. " +
+          "The key benchmark, directly measuring the problem from <a href='https://github.com/UI5/openui5/issues/2600'>openui5 issue 2600</a>. " +
           "JSONModel's <code>checkUpdate</code> iterates ALL " +
           n +
           " bindings (O(n)), " +
@@ -1299,10 +1299,10 @@
           "<li><strong>Identical data:</strong> Both models receive structurally identical data (deep-copied via JSON.parse/stringify).</li>";
         html += "</ul>";
 
-        html += "<h2>Relation to SAP/openui5#2600</h2>";
+        html += "<h2>Relation to openui5 issue 2600</h2>";
         html += "<ul>";
         html +=
-          "<li>Issue <a href='https://github.com/SAP/openui5/issues/2600'>#2600</a> identified that <code>Model#checkUpdate</code> iterates <strong>all</strong> bindings on every <code>setProperty</code> call, performing <code>deepEqual</code> on each.</li>";
+          "<li>Issue <a href='https://github.com/UI5/openui5/issues/2600'>#2600</a> identified that <code>Model#checkUpdate</code> iterates <strong>all</strong> bindings on every <code>setProperty</code> call, performing <code>deepEqual</code> on each.</li>";
         html +=
           "<li>SAP's response (commit <code>cb6c7f7a</code>, JIRA CPOUI5MODELS-1947): made <code>checkUpdate</code> return the number of bindings checked, and added <code>checkPerformanceOfUpdate</code> which logs a warning when consecutive sync <code>setProperty</code> calls cause > 100,000 cumulative binding checks.</li>";
         html +=

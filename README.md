@@ -56,7 +56,7 @@ model.setProperty("/customer/age", 31); // type-checked
 model.setProperty("/customer/age", "x"); // compile error
 ```
 
-Path types follow the same conventions as UI5's [TypedJSONModel](https://github.com/nicolo-ribaudo/ui5-typescript).
+Path types follow the same conventions as UI5's typed model patterns from `@openui5/types`.
 
 ### Declarative Binding
 
@@ -217,7 +217,7 @@ A self-contained benchmark page compares SignalModel vs JSONModel across 10 scen
 npm run start:bench  # opens benchmark page
 ```
 
-The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected sample statistics, and a three-stage async flush protocol. It directly measures the `checkUpdate` bottleneck documented in [SAP/openui5#2600](https://github.com/SAP/openui5/issues/2600).
+The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected sample statistics, and a three-stage async flush protocol. It directly measures the `checkUpdate` bottleneck documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
 ![Benchmark Results](docs/benchmark-full-results.png)
 
