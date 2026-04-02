@@ -219,7 +219,7 @@ npm run start:bench  # opens benchmark page
 
 The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected sample statistics, and a three-stage async flush protocol. It directly measures the `checkUpdate` bottleneck documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-![Benchmark Results](docs/benchmark-full-results.png)
+![Benchmark Results - 1000 bindings](docs/img/benchmark-1000-bindings.png)
 
 The key result: with default synchronous `setProperty`, **"Update all N bindings"** shows ~10x improvement at 1000 bindings (202ms vs 19ms). The benchmark also tests JSONModel's `bAsyncUpdate=true` workaround for an honest comparison. For list/table/tree replace operations, both models perform equivalently because DOM rendering cost dominates.
 

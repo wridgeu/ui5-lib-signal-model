@@ -20,6 +20,29 @@ function asInternal(self: SignalTreeBinding): TreeBindingInternal {
   return self as unknown as TreeBindingInternal;
 }
 
+// Microtask batching for tree bindings
+const pendingUpdates = new Map<
+  SignalTreeBinding,
+  Signal.State<unknown> | Signal.Computed<unknown>
+>();
+let flushScheduled = false;
+
+function scheduleFlush(): void {
+  if (!flushScheduled) {
+    flushScheduled = true;
+    queueMicrotask(() => {
+      flushScheduled = false;
+      const entries = [...pendingUpdates.entries()];
+      pendingUpdates.clear();
+      for (const [binding, signal] of entries) {
+        signal.get();
+        binding.watcher?.watch();
+        binding.checkUpdate();
+      }
+    });
+  }
+}
+
 /**
  * Tree binding that subscribes to a signal for push-based change notification.
  * Reuses ClientTreeBinding's filter/sort/tree traversal logic.
@@ -27,8 +50,7 @@ function asInternal(self: SignalTreeBinding): TreeBindingInternal {
  * @namespace ui5.model.signal
  */
 export default class SignalTreeBinding extends ClientTreeBinding {
-  private watcher: Signal.subtle.Watcher | null = null;
-  private needsEnqueue = true;
+  watcher: Signal.subtle.Watcher | null = null;
 
   checkUpdate(bForceUpdate?: boolean): void {
     const internal = asInternal(this);
@@ -50,22 +72,15 @@ export default class SignalTreeBinding extends ClientTreeBinding {
       internal.oModel._getObject(resolvedPath),
     );
 
-    this.needsEnqueue = true;
     this.watcher = new Signal.subtle.Watcher(() => {
-      if (this.needsEnqueue) {
-        this.needsEnqueue = false;
-        queueMicrotask(() => {
-          this.needsEnqueue = true;
-          signal.get();
-          this.watcher?.watch();
-          this.checkUpdate();
-        });
-      }
+      pendingUpdates.set(this, signal);
+      scheduleFlush();
     });
     this.watcher.watch(signal);
   }
 
   unsubscribe(): void {
+    pendingUpdates.delete(this);
     if (this.watcher) {
       const sources = Signal.subtle.introspectSources(this.watcher);
       if (sources.length) {

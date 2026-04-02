@@ -25,6 +25,30 @@ function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal 
   return self as unknown as ClientPropertyBindingInternal;
 }
 
+// Microtask batching: collect all pending binding updates and process them
+// in a single microtask instead of scheduling one microtask per signal change.
+const pendingUpdates = new Map<
+  SignalPropertyBinding,
+  Signal.State<unknown> | Signal.Computed<unknown>
+>();
+let flushScheduled = false;
+
+function scheduleFlush(): void {
+  if (!flushScheduled) {
+    flushScheduled = true;
+    queueMicrotask(() => {
+      flushScheduled = false;
+      const entries = [...pendingUpdates.entries()];
+      pendingUpdates.clear();
+      for (const [binding, signal] of entries) {
+        signal.get();
+        binding.watcher?.watch();
+        binding.checkUpdate();
+      }
+    });
+  }
+}
+
 /**
  * Property binding that subscribes to a signal for push-based change notification.
  *
@@ -32,8 +56,7 @@ function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal 
  */
 export default class SignalPropertyBinding extends ClientPropertyBinding {
   declare oModel: SignalModel;
-  private watcher: Signal.subtle.Watcher | null = null;
-  private needsEnqueue = true;
+  watcher: Signal.subtle.Watcher | null = null;
 
   checkUpdate(bForceUpdate?: boolean): void {
     const self = asInternal(this);
@@ -82,22 +105,15 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     const self = asInternal(this);
     const signal = this.oModel._getOrCreateSignal(resolvedPath, self._getValue());
 
-    this.needsEnqueue = true;
     this.watcher = new Signal.subtle.Watcher(() => {
-      if (this.needsEnqueue) {
-        this.needsEnqueue = false;
-        queueMicrotask(() => {
-          this.needsEnqueue = true;
-          signal.get();
-          this.watcher?.watch();
-          this.checkUpdate();
-        });
-      }
+      pendingUpdates.set(this, signal);
+      scheduleFlush();
     });
     this.watcher.watch(signal);
   }
 
   unsubscribe(): void {
+    pendingUpdates.delete(this);
     if (this.watcher) {
       const sources = Signal.subtle.introspectSources(this.watcher);
       if (sources.length) {
