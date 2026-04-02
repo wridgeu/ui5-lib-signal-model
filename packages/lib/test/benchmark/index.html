@@ -237,11 +237,28 @@
         return n.toFixed(2);
       }
 
-      /** Format a ratio as "Nx faster" or "Nx slower". */
-      function fmtRatio(signalMs, jsonMs) {
-        if (signalMs <= 0.01 && jsonMs <= 0.01) return '<span class="neutral">equal</span>';
-        if (signalMs <= 0.01) return '<span class="faster">&gt;100x faster</span>';
-        var ratio = jsonMs / signalMs;
+      /**
+       * Format a ratio as "Nx faster", "Nx slower", or "~equal".
+       * Uses statistical significance: the difference must exceed the pooled
+       * standard error to be reported as meaningful, not just noise.
+       */
+      function fmtRatio(signalStats, jsonStats) {
+        var sm = signalStats.median;
+        var jm = jsonStats.median;
+        if (sm <= 0.01 && jm <= 0.01) return '<span class="neutral">equal</span>';
+        if (sm <= 0.01) return '<span class="faster">&gt;100x faster</span>';
+
+        // Check statistical significance: is the difference larger than the
+        // pooled standard deviation? If not, the result is within noise.
+        var pooledSD = Math.sqrt(
+          signalStats.stddev * signalStats.stddev + jsonStats.stddev * jsonStats.stddev,
+        );
+        var diff = Math.abs(jm - sm);
+        if (diff < pooledSD) {
+          return '<span class="neutral">~equal</span>';
+        }
+
+        var ratio = jm / sm;
         if (ratio >= 1.05) {
           return '<span class="faster">' + fmt(ratio) + "x faster</span>";
         } else if (ratio <= 0.95) {
@@ -1077,7 +1094,7 @@
             " <small>(\u00b1" +
             fmt(r.signal.stddev) +
             ")</small></td>";
-          html += "<td>" + fmtRatio(r.signal.median, r.json.median) + "</td>";
+          html += "<td>" + fmtRatio(r.signal, r.json) + "</td>";
           html += "</tr>";
         }
         html += "</table>";
