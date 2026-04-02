@@ -16,6 +16,10 @@ type TreeBindingInternal = ClientTreeBinding & {
   isRelative(): boolean;
 };
 
+/**
+ * Casts to an internal type that includes UI5 runtime properties not exposed
+ * by `@openui5/types` (e.g. `sPath`, `bSuspended`, `_fireChange`).
+ */
 function asInternal(self: SignalTreeBinding): TreeBindingInternal {
   return self as unknown as TreeBindingInternal;
 }

@@ -20,7 +20,10 @@ type ClientPropertyBindingInternal = ClientPropertyBinding & {
   _fireChange(oEvent: { reason: ChangeReason }): void;
 };
 
-/** Cast `this` to access undeclared UI5 internals. */
+/**
+ * Casts to an internal type that includes UI5 runtime properties not exposed
+ * by `@openui5/types` (e.g. `oValue`, `bSuspended`, `_fireChange`).
+ */
 function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal {
   return self as unknown as ClientPropertyBindingInternal;
 }

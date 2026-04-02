@@ -24,6 +24,10 @@ type ListBindingInternal = ClientListBinding & {
   isRelative(): boolean;
 };
 
+/**
+ * Casts to an internal type that includes UI5 runtime properties not exposed
+ * by `@openui5/types` (e.g. `oList`, `bSuspended`, `_fireChange`).
+ */
 function asInternal(self: SignalListBinding): ListBindingInternal {
   return self as unknown as ListBindingInternal;
 }

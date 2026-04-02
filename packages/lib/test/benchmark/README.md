@@ -83,25 +83,25 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 
 | Bindings | JSON sync | Signal sync | Signal advantage | JSON async | Signal async |
 | -------- | --------- | ----------- | ---------------- | ---------- | ------------ |
-| 500      | 79.15ms   | 18.00ms     | **4.4x faster**  | 15.85ms    | 17.40ms      |
-| 1000     | 195.75ms  | 18.60ms     | **10.5x faster** | 12.70ms    | 18.85ms      |
-| 2000     | 906.15ms  | 55.55ms     | **16.3x faster** | 28.05ms    | 60.15ms      |
+| 500      | 53.90ms   | 11.05ms     | **4.9x faster**  | 10.15ms    | 11.70ms      |
+| 1000     | 198.05ms  | 18.70ms     | **10.6x faster** | 12.25ms    | 19.40ms      |
+| 2000     | 893.25ms  | 56.00ms     | **16.0x faster** | 29.25ms    | 54.85ms      |
 
 ### Full results at 1000 bindings (20 rounds)
 
 | Binding Type            | Scenario                          | JSONModel | SignalModel | Comparison        |
 | ----------------------- | --------------------------------- | --------- | ----------- | ----------------- |
-| Model API               | setProperty (no bindings)         | 0.20ms    | 0.30ms      | ~equal            |
-| Model API               | getProperty                       | 0.15ms    | 0.15ms      | ~equal            |
-| Property (sap.m.Text)   | Single-path update, 1000 bindings | 4.60ms    | 4.85ms      | ~equal            |
-| Property (sap.m.Text)   | Update all 1000 (sync)            | 195.75ms  | 18.60ms     | **10.52x faster** |
-| Property (sap.m.Text)   | Update all 1000 (async)           | 12.70ms   | 18.85ms     | **1.48x slower**  |
-| List (sap.m.List)       | List binding replace, 500 items   | 19.20ms   | 20.00ms     | ~equal            |
-| List (sap.m.Table)      | Table binding replace, 500 rows   | 18.35ms   | 18.75ms     | ~equal            |
-| Tree (sap.m.Tree)       | Tree binding replace, 200 nodes   | 21.30ms   | 20.75ms     | ~equal            |
-| Expression (sap.m.Text) | Expression binding, 500 controls  | 5.15ms    | 5.15ms      | ~equal            |
-| Computed (sap.m.Text)   | Computed signals, 500 computeds   | 5.10ms    | 5.05ms      | ~equal            |
-| Property (sap.m.Text)   | setData replace                   | 14.75ms   | 16.25ms     | ~equal            |
+| Model API               | setProperty (no bindings)         | 0.20ms    | 0.20ms      | ~equal            |
+| Model API               | getProperty                       | 0.10ms    | 0.20ms      | ~equal            |
+| Property (sap.m.Text)   | Single-path update, 1000 bindings | 5.20ms    | 4.90ms      | ~equal            |
+| Property (sap.m.Text)   | Update all 1000 (sync)            | 198.05ms  | 18.70ms     | **10.59x faster** |
+| Property (sap.m.Text)   | Update all 1000 (async)           | 12.25ms   | 19.40ms     | **1.58x slower**  |
+| List (sap.m.List)       | List binding replace, 500 items   | 19.05ms   | 19.65ms     | ~equal            |
+| List (sap.m.Table)      | Table binding replace, 500 rows   | 19.15ms   | 18.70ms     | ~equal            |
+| Tree (sap.m.Tree)       | Tree binding replace, 200 nodes   | 21.25ms   | 20.80ms     | ~equal            |
+| Expression (sap.m.Text) | Expression binding, 500 controls  | 5.00ms    | 5.00ms      | ~equal            |
+| Computed (sap.m.Text)   | Computed signals, 500 computeds   | 5.10ms    | 5.00ms      | ~equal            |
+| Property (sap.m.Text)   | setData replace                   | 15.05ms   | 15.65ms     | ~equal            |
 
 ### Honest Observations
 
@@ -113,7 +113,7 @@ The "Update all N bindings (sync)" scenario shows the largest difference: at 100
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it batches all `checkUpdate` calls into a single `setTimeout` pass, collapsing O(N^2) to O(N). The benchmark includes this scenario ("Update all N async") for an honest comparison.
 
-With `bAsyncUpdate=true`, **JSONModel is actually faster than SignalModel** for bulk batch updates. At 1000 bindings: JSONModel-async takes ~13ms while SignalModel takes ~19ms. Both execute ONE batched pass, but the per-binding work differs:
+With `bAsyncUpdate=true`, **JSONModel is actually faster than SignalModel** for bulk batch updates. At 1000 bindings: JSONModel-async takes ~12ms while SignalModel takes ~19ms. Both execute ONE batched pass, but the per-binding work differs:
 
 | Step                         | JSONModel async                 | SignalModel                                                              |
 | ---------------------------- | ------------------------------- | ------------------------------------------------------------------------ |
