@@ -20,32 +20,26 @@ function asInternal(self: SignalTreeBinding): TreeBindingInternal {
   return self as unknown as TreeBindingInternal;
 }
 
-// Shared watcher for all tree bindings
-type AnySignal = Signal.State<unknown> | Signal.Computed<unknown>;
-const signalToBindings = new Map<AnySignal, Set<SignalTreeBinding>>();
+// Microtask batching for tree bindings
+const pendingUpdates = new Map<
+  SignalTreeBinding,
+  Signal.State<unknown> | Signal.Computed<unknown>
+>();
 let flushScheduled = false;
 
-const sharedWatcher = new Signal.subtle.Watcher(() => {
+function scheduleFlush(): void {
   if (!flushScheduled) {
     flushScheduled = true;
-    queueMicrotask(flush);
-  }
-});
-
-function flush(): void {
-  flushScheduled = false;
-  const pending = sharedWatcher.getPending();
-  for (const s of pending) {
-    s.get();
-  }
-  sharedWatcher.watch();
-  for (const s of pending) {
-    const bindings = signalToBindings.get(s as AnySignal);
-    if (bindings) {
-      for (const binding of bindings) {
+    queueMicrotask(() => {
+      flushScheduled = false;
+      const entries = [...pendingUpdates.entries()];
+      pendingUpdates.clear();
+      for (const [binding, signal] of entries) {
+        signal.get();
+        binding.watcher?.watch();
         binding.checkUpdate();
       }
-    }
+    });
   }
 }
 
@@ -56,7 +50,7 @@ function flush(): void {
  * @namespace ui5.model.signal
  */
 export default class SignalTreeBinding extends ClientTreeBinding {
-  private watchedSignal: AnySignal | null = null;
+  watcher: Signal.subtle.Watcher | null = null;
 
   checkUpdate(bForceUpdate?: boolean): void {
     const internal = asInternal(this);
@@ -77,29 +71,22 @@ export default class SignalTreeBinding extends ClientTreeBinding {
       resolvedPath,
       internal.oModel._getObject(resolvedPath),
     );
-    this.watchedSignal = signal;
 
-    let bindings = signalToBindings.get(signal);
-    if (!bindings) {
-      bindings = new Set();
-      signalToBindings.set(signal, bindings);
-    }
-    bindings.add(this);
-
-    sharedWatcher.watch(signal);
+    this.watcher = new Signal.subtle.Watcher(() => {
+      pendingUpdates.set(this, signal);
+      scheduleFlush();
+    });
+    this.watcher.watch(signal);
   }
 
   unsubscribe(): void {
-    if (this.watchedSignal) {
-      const bindings = signalToBindings.get(this.watchedSignal);
-      if (bindings) {
-        bindings.delete(this);
-        if (bindings.size === 0) {
-          signalToBindings.delete(this.watchedSignal);
-          sharedWatcher.unwatch(this.watchedSignal);
-        }
+    pendingUpdates.delete(this);
+    if (this.watcher) {
+      const sources = Signal.subtle.introspectSources(this.watcher);
+      if (sources.length) {
+        this.watcher.unwatch(...sources);
       }
-      this.watchedSignal = null;
+      this.watcher = null;
     }
   }
 
