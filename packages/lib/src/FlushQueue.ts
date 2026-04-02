@@ -48,7 +48,7 @@ export function scheduleFlush(
         } catch (e) {
           Log.error(
             "SignalModel: checkUpdate failed for binding",
-            e instanceof Error ? e : String(e),
+            e as Error,
             "ui5.model.signal.FlushQueue",
           );
         }
