@@ -13,7 +13,7 @@ type ClientModelInternal = ClientModel & {
   checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): void;
 };
 
-function asInternal(self: SignalModel<Record<string, unknown>>): ClientModelInternal {
+function asInternal(self: ClientModel): ClientModelInternal {
   return self as unknown as ClientModelInternal;
 }
 
@@ -23,9 +23,7 @@ function asInternal(self: SignalModel<Record<string, unknown>>): ClientModelInte
  *
  * @namespace ui5.model.signal
  */
-export default class SignalModel<
-  T extends Record<string, unknown> = Record<string, unknown>,
-> extends ClientModel {
+export default class SignalModel<T extends object = Record<string, unknown>> extends ClientModel {
   private registry: SignalRegistry;
   private strict: boolean;
   declare oData: T;
@@ -172,7 +170,7 @@ export default class SignalModel<
   ): SignalPropertyBinding {
     // ClientPropertyBinding's constructor is protected in type stubs but callable from subclasses at runtime
     return new (SignalPropertyBinding as unknown as new (
-      model: SignalModel,
+      model: SignalModel<any>,
       path: string,
       context?: Context,
       params?: object,
@@ -187,7 +185,7 @@ export default class SignalModel<
     mParameters?: object,
   ): SignalListBinding {
     return new (SignalListBinding as unknown as new (
-      model: SignalModel,
+      model: SignalModel<any>,
       path: string,
       context?: Context,
       sorters?: object | object[],

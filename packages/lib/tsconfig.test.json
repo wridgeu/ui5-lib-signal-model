@@ -7,5 +7,6 @@
     },
     "types": ["@openui5/types", "@types/qunit"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["test/**/wdio*.conf.ts"]
 }
