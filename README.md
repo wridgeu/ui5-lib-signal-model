@@ -369,6 +369,8 @@ The browser event loop processes work in this order: **current JS → all microt
 
 The total work is identical — the same `checkUpdate` runs on the same bindings. The difference is whether the user sees one correct frame (microtask) or one stale frame followed by one correct frame (macrotask). For UI5 form applications, microtask scheduling eliminates an entire class of visual glitches where the UI briefly shows inconsistent state between model data and rendered controls.
 
+Benchmarking confirmed this: swapping SignalModel's `queueMicrotask` for `setTimeout` at 2000 bindings showed ~equal wall-clock time (55.6ms vs 51.9ms, within standard deviation). The scheduling choice has no performance cost — it is purely a visual consistency improvement.
+
 ## Development
 
 ```bash
