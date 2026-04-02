@@ -117,22 +117,15 @@ QUnit.module("SignalRegistry", () => {
     registry.destroy();
   });
 
-  QUnit.test("addComputed on existing computed replaces it", (assert) => {
+  QUnit.test("addComputed on existing computed throws", (assert) => {
     const registry = new SignalRegistry();
     registry.getOrCreate("/a", 1);
 
     registry.addComputed("/sum", ["/a"], (a) => (a as number) + 10);
-    assert.strictEqual(
-      (registry.get("/sum") as Signal.Computed<unknown>).get(),
-      11,
-      "first computed",
-    );
-
-    registry.addComputed("/sum", ["/a"], (a) => (a as number) + 20);
-    assert.strictEqual(
-      (registry.get("/sum") as Signal.Computed<unknown>).get(),
-      21,
-      "replaced computed",
+    assert.throws(
+      () => registry.addComputed("/sum", ["/a"], (a) => (a as number) + 20),
+      TypeError,
+      "throws when computed already exists",
     );
     registry.destroy();
   });
