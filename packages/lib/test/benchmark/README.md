@@ -12,20 +12,34 @@ This starts the library dev server and opens the benchmark page in your browser.
 
 ## What It Tests
 
-The benchmark covers 10 scenarios across all binding types and model operations:
+The benchmark covers 15 scenarios across all binding types, model operations, and merge strategies:
 
-| #   | Binding Type              | Scenario                             | What It Measures                                      |
-| --- | ------------------------- | ------------------------------------ | ----------------------------------------------------- |
-| 1   | Model API                 | setProperty throughput (no bindings) | Raw per-call overhead of model layer                  |
-| 2   | Model API                 | getProperty throughput               | Read performance                                      |
-| 3   | Property (`sap.m.Text`)   | Single-path update, N bindings       | O(1) vs O(N) notification - the key benchmark         |
-| 4   | Property (`sap.m.Text`)   | Update all N bindings                | O(N) vs O(N^2) cumulative cost                        |
-| 5   | List (`sap.m.List`)       | List binding replace                 | Array replacement with `StandardListItem` template    |
-| 6   | List (`sap.m.Table`)      | Table binding replace                | Row replacement with 3 `ColumnListItem` cells         |
-| 7   | Tree (`sap.m.Tree`)       | Tree binding replace                 | Hierarchical data replacement with `StandardTreeItem` |
-| 8   | Expression (`sap.m.Text`) | Expression binding                   | Composite `{= ${/path1} + ${/path2}}` re-evaluation   |
-| 9   | Computed (`sap.m.Text`)   | Computed signals                     | `createComputed` dependency chain propagation         |
-| 10  | Property (`sap.m.Text`)   | setData replace                      | Full data replacement propagation                     |
+| #   | Binding Type              | Scenario                                | What It Measures                                       |
+| --- | ------------------------- | --------------------------------------- | ------------------------------------------------------ |
+| 1   | Model API                 | setProperty throughput (no bindings)    | Raw per-call overhead of model layer                   |
+| 2   | Model API                 | getProperty throughput                  | Read performance                                       |
+| 3   | Property (`sap.m.Text`)   | Single-path update, N bindings          | O(1) vs O(N) notification — the key benchmark          |
+| 4   | Property (`sap.m.Text`)   | Update all N bindings (sync)            | O(N) vs O(N^2) cumulative cost                         |
+| 5   | Property (`sap.m.Text`)   | Update all N bindings (async)           | JSONModel `bAsyncUpdate=true` vs signals               |
+| 6   | List (`sap.m.List`)       | List binding replace                    | Array replacement with `StandardListItem` template     |
+| 7   | List (`sap.m.Table`)      | Table binding replace                   | Row replacement with 3 `ColumnListItem` cells          |
+| 8   | Tree (`sap.m.Tree`)       | Tree binding replace                    | Hierarchical data replacement with `StandardTreeItem`  |
+| 9   | Expression (`sap.m.Text`) | Expression binding                      | Composite `{= ${/path1} + ${/path2}}` re-evaluation    |
+| 10  | Computed (`sap.m.Text`)   | Computed signals                        | `createComputed` dependency chain propagation          |
+| 11  | Property (`sap.m.Text`)   | setData replace                         | Full data replacement propagation                      |
+| 12  | Property (`sap.m.Text`)   | setData merge (shallow)                 | Merge 5 items into N — small payload into large data   |
+| 13  | Property (`sap.m.Text`)   | setData merge (deep)                    | Merge all N items — full payload, worst case for merge |
+| 14  | Property (`sap.m.Text`)   | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree     |
+| 15  | Property (`sap.m.Text`)   | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N — tests O(k) vs O(n) merge    |
+
+### Merge Scenario Design
+
+The merge scenarios (12–15) are designed to test different payload shapes that exercise the `setData(data, true)` code path with varying data-to-payload ratios:
+
+- **Shallow (12)**: Small flat payload into a large flat array. Both models pay the `deepExtend`/in-place merge cost, but the binding notification cost dominates because all N bindings exist. Tests the common "update a few fields in a form" pattern.
+- **Deep (13)**: Payload covers every item. This is the worst case for merge — no savings from targeted invalidation. Both models must process all N items.
+- **Nested config (14)**: A realistic deeply nested configuration object (5 levels: `app.features.notifications.push`). The merge payload touches only 3 leaf paths. Tests recursive merge depth traversal.
+- **Large dataset, pinpoint (15)**: The key merge benchmark. Creates 10x N items (e.g., 10,000 for N=1000) with complex objects (7 properties, nested `metadata`), then merges only 3 items. JSONModel's `deepExtend` must deep-clone all 10,000 objects. SignalModel's in-place merge walks only the 3 payload items. This isolates the O(n) vs O(k) architectural difference.
 
 ## How It Works
 
@@ -65,43 +79,29 @@ After each timed operation, a three-stage async drain ensures all notifications 
 
 Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviation, min, max, P5, P95. Median is the primary metric as it is robust to GC-caused outliers.
 
-## Results (500 bindings, 500 iterations, 10 rounds)
-
-**500 bindings:**
-
-![Benchmark Results - 500 bindings](../../../../docs/img/benchmark-500-bindings.png)
-
-**1000 bindings:**
+## Results (1000 bindings, 500 iterations, 10 rounds)
 
 ![Benchmark Results - 1000 bindings](../../../../docs/img/benchmark-1000-bindings.png)
 
-**2000 bindings:**
+### Full results at 1000 bindings
 
-![Benchmark Results - 2000 bindings](../../../../docs/img/benchmark-2000-bindings.png)
-
-### "Update all" scaling across binding counts (the key scenario)
-
-| Bindings | JSON sync | Signal sync | Signal advantage | JSON async | Signal async |
-| -------- | --------- | ----------- | ---------------- | ---------- | ------------ |
-| 500      | 53.90ms   | 11.05ms     | **4.9x faster**  | 10.15ms    | 11.70ms      |
-| 1000     | 198.05ms  | 18.70ms     | **10.6x faster** | 12.25ms    | 19.40ms      |
-| 2000     | 893.25ms  | 56.00ms     | **16.0x faster** | 29.25ms    | 54.85ms      |
-
-### Full results at 1000 bindings (20 rounds)
-
-| Binding Type            | Scenario                          | JSONModel | SignalModel | Comparison        |
-| ----------------------- | --------------------------------- | --------- | ----------- | ----------------- |
-| Model API               | setProperty (no bindings)         | 0.20ms    | 0.20ms      | ~equal            |
-| Model API               | getProperty                       | 0.10ms    | 0.20ms      | ~equal            |
-| Property (sap.m.Text)   | Single-path update, 1000 bindings | 5.20ms    | 4.90ms      | ~equal            |
-| Property (sap.m.Text)   | Update all 1000 (sync)            | 198.05ms  | 18.70ms     | **10.59x faster** |
-| Property (sap.m.Text)   | Update all 1000 (async)           | 12.25ms   | 19.40ms     | **1.58x slower**  |
-| List (sap.m.List)       | List binding replace, 500 items   | 19.05ms   | 19.65ms     | ~equal            |
-| List (sap.m.Table)      | Table binding replace, 500 rows   | 19.15ms   | 18.70ms     | ~equal            |
-| Tree (sap.m.Tree)       | Tree binding replace, 200 nodes   | 21.25ms   | 20.80ms     | ~equal            |
-| Expression (sap.m.Text) | Expression binding, 500 controls  | 5.00ms    | 5.00ms      | ~equal            |
-| Computed (sap.m.Text)   | Computed signals, 500 computeds   | 5.10ms    | 5.00ms      | ~equal            |
-| Property (sap.m.Text)   | setData replace                   | 15.05ms   | 15.65ms     | ~equal            |
+| Binding Type            | Scenario                            | JSONModel | SignalModel | Comparison        |
+| ----------------------- | ----------------------------------- | --------- | ----------- | ----------------- |
+| Model API               | setProperty (no bindings)           | 0.20ms    | 0.20ms      | ~equal            |
+| Model API               | getProperty                         | 0.10ms    | 0.20ms      | ~equal            |
+| Property (sap.m.Text)   | Single-path update, 1000 bindings   | 5.00ms    | 4.90ms      | ~equal            |
+| Property (sap.m.Text)   | Update all 1000 (sync)              | 204.60ms  | 18.50ms     | **11.06x faster** |
+| Property (sap.m.Text)   | Update all 1000 (async)             | 13.00ms   | 18.60ms     | **1.43x slower**  |
+| List (sap.m.List)       | List binding replace, 500 items     | 20.10ms   | 19.60ms     | ~equal            |
+| List (sap.m.Table)      | Table binding replace, 500 rows     | 17.80ms   | 19.40ms     | ~equal            |
+| Tree (sap.m.Tree)       | Tree binding replace, 200 nodes     | 21.60ms   | 21.90ms     | ~equal            |
+| Expression (sap.m.Text) | Expression binding, 500 controls    | 5.20ms    | 5.10ms      | ~equal            |
+| Computed (sap.m.Text)   | Computed signals, 500 computeds     | 4.70ms    | 4.90ms      | ~equal            |
+| Property (sap.m.Text)   | setData replace                     | 15.90ms   | 15.70ms     | ~equal            |
+| Property (sap.m.Text)   | setData merge (shallow), 5 into 1k  | 5.40ms    | 5.50ms      | ~equal            |
+| Property (sap.m.Text)   | setData merge (deep), all 1k        | 13.50ms   | 14.80ms     | ~equal            |
+| Property (sap.m.Text)   | setData merge (nested config)       | 5.30ms    | 4.30ms      | **1.23x faster**  |
+| Property (sap.m.Text)   | setData merge (large, pinpoint) 10k | 12.90ms   | 5.30ms      | **2.43x faster**  |
 
 ### Honest Observations
 
@@ -122,11 +122,17 @@ With `bAsyncUpdate=true`, **JSONModel is actually faster than SignalModel** for 
 
 The overhead comes from the TC39 `Signal.subtle.Watcher` API contract: after a signal notifies its watcher, the watcher must be explicitly re-armed by calling `signal.get()` (to acknowledge the change) then `watcher.watch()` (to re-register). This is inherent to the polyfill's design and cannot be optimized away without changes to the signal-polyfill itself. JSONModel's `deepEqual` comparison is a single function call per binding with no re-registration overhead.
 
+**Where SignalModel's in-place merge wins:**
+
+The "large dataset, pinpoint merge" scenario (3 items into 10,000) shows **2.43x faster** performance. JSONModel's `deepExtend` deep-clones the entire 10,000-item array (each item has 7 properties including a nested `metadata` object) just to overlay 3 items. SignalModel's `_mergeInPlace` walks only the 3 payload keys and modifies them in-place — O(k) instead of O(n). The advantage grows linearly with the data-to-payload ratio: real Fiori apps with large OData entity sets and form-level edits (e.g., editing 3 fields in a 5,000-row table) would see similar or larger improvements.
+
+The nested config merge also shows a consistent **1.23x edge** — the in-place merge recurses only into the 3 payload branches rather than cloning the full config tree.
+
 **Where both models are equivalent:**
 
 For list, table, and tree binding scenarios where the entire aggregation is replaced, both models perform equivalently. The DOM rendering cost (destroying and recreating list items, table rows, tree nodes) dominates the model notification cost by an order of magnitude. The model layer is not the bottleneck in these scenarios.
 
-Expression binding, computed signals, getProperty, setProperty (no bindings), and setData replace are all equivalent between the two models.
+Expression binding, computed signals, getProperty, setProperty (no bindings), setData replace, and equal-sized merges (shallow and deep at 1000 items) are all equivalent between the two models.
 
 **What SignalModel still offers over JSONModel with `bAsyncUpdate`:**
 
@@ -136,7 +142,9 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), an
 
 3. **Computed signals.** Model-layer derived values (`createComputed`) that update reactively. JSONModel has no equivalent (formatters are view-layer and do not participate in the model's dependency graph).
 
-4. **TC39 Signals alignment.** When the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) ships natively in browsers, `signal-polyfill` can be swapped for the native implementation with zero API changes.
+4. **In-place merge.** `setData(partial, true)` uses an O(k) in-place recursive merge instead of O(n) `deepExtend` clone. For large datasets with small merge payloads, this is measurably faster (2.4x at 10k items).
+
+5. **TC39 Signals alignment.** When the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) ships natively in browsers, `signal-polyfill` can be swapped for the native implementation with zero API changes.
 
 ## Background
 

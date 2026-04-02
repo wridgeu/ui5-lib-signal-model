@@ -1,6 +1,5 @@
 import ClientModel from "sap/ui/model/ClientModel";
 import Context from "sap/ui/model/Context";
-import deepExtend from "sap/base/util/deepExtend";
 import SignalRegistry from "./SignalRegistry";
 import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
@@ -26,23 +25,125 @@ function asInternal(self: ClientModel): ClientModelInternal {
  */
 export default class SignalModel<T extends object = Record<string, unknown>> extends ClientModel {
   private registry: SignalRegistry;
-  private strict: boolean;
+  private autoCreatePaths: boolean;
+  private strictLeafCheck: boolean;
   declare oData: T;
 
-  constructor(oData?: T, mOptions?: SignalModelOptions) {
+  constructor(sURL: string);
+  constructor(oData?: T, mOptions?: SignalModelOptions);
+  constructor(oDataOrURL?: T | string, mOptions?: SignalModelOptions) {
     super();
-    this.oData = (oData || {}) as T;
     this.registry = new SignalRegistry();
-    this.strict = mOptions?.strict ?? false;
+    this.autoCreatePaths = mOptions?.autoCreatePaths ?? false;
+    this.strictLeafCheck = mOptions?.strictLeafCheck ?? false;
+
+    if (typeof oDataOrURL === "string") {
+      this.oData = {} as T;
+      this.loadData(oDataOrURL);
+    } else {
+      this.oData = (oDataOrURL || {}) as T;
+    }
   }
+
+  /**
+   * Load data from a URL. JSONModel-compatible API.
+   *
+   * Uses `fetch()` internally. Fires `requestSent`, `requestCompleted`,
+   * and `requestFailed` events matching the JSONModel contract.
+   *
+   * @param sURL URL to load JSON from
+   * @param oParameters Query parameters (appended to URL for GET, sent as body for POST)
+   * @param _bAsync Deprecated — always async. Kept for JSONModel signature compatibility.
+   * @param sType HTTP method: "GET" (default) or "POST"
+   * @param bMerge Whether to merge loaded data instead of replacing
+   * @param bCache Set to false to append a cache-busting timestamp
+   * @param mHeaders Additional HTTP headers
+   * @returns Promise that resolves when data is loaded
+   */
+  loadData(
+    sURL: string,
+    oParameters?: Record<string, string> | string,
+    _bAsync?: boolean,
+    sType?: string,
+    bMerge?: boolean,
+    bCache?: boolean,
+    mHeaders?: Record<string, string>,
+  ): Promise<void> {
+    const sMethod = sType || "GET";
+    let sFullURL = sURL;
+
+    // Append parameters to URL for GET, matching JSONModel behavior
+    if (oParameters && sMethod === "GET") {
+      const paramString =
+        typeof oParameters === "string" ? oParameters : new URLSearchParams(oParameters).toString();
+      sFullURL += (sURL.includes("?") ? "&" : "?") + paramString;
+    }
+
+    if (bCache === false) {
+      sFullURL += (sFullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
+    }
+
+    const headers: Record<string, string> = { Accept: "application/json", ...mHeaders };
+
+    this.fireRequestSent({ url: sURL, type: sMethod, async: true });
+
+    const promise = fetch(sFullURL, {
+      method: sMethod,
+      headers,
+      body:
+        sMethod !== "GET" && oParameters
+          ? typeof oParameters === "string"
+            ? oParameters
+            : JSON.stringify(oParameters)
+          : undefined,
+    })
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        return res.json();
+      })
+      .then((data: T) => {
+        if (bMerge) {
+          this.setData(data as Partial<T>, true);
+        } else {
+          this.setData(data);
+        }
+        this.fireRequestCompleted({ url: sURL, type: sMethod, async: true });
+      })
+      .catch((error: Error) => {
+        this.fireRequestFailed({
+          message: error.message,
+          statusCode: "0",
+          statusText: error.message,
+        });
+      });
+
+    this._pLoadData = promise;
+    return promise;
+  }
+
+  /**
+   * Returns a Promise that resolves when all pending loadData calls complete.
+   * JSONModel-compatible API.
+   */
+  dataLoaded(): Promise<void> {
+    return this._pLoadData ?? Promise.resolve();
+  }
+
+  private _pLoadData: Promise<void> | null = null;
 
   setData(oData: T): void;
   setData(oData: Partial<T>, bMerge: true): void;
   setData(oData: T | Partial<T>, bMerge?: boolean): void {
     if (bMerge) {
-      this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData, oData) as T;
-      // Only invalidate paths that were part of the merge payload
-      this._invalidateMergePayload(oData as Record<string, unknown>, "");
+      // In-place merge: walk the payload and apply changes directly to this.oData.
+      // O(k) where k = payload size, instead of O(n) deep clone of all data.
+      this._mergeInPlace(
+        this.oData as Record<string, unknown>,
+        oData as Record<string, unknown>,
+        "",
+      );
     } else {
       this.oData = oData as T;
       this.registry.invalidateAll((path: string) => this._getObject(path));
@@ -102,20 +203,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     let oObject = this._getObject(sObjectPath) as Record<string, unknown> | undefined;
 
     if (!oObject) {
-      if (this.strict) {
-        throw new TypeError(
-          `Cannot set property at "${sResolvedPath}": path does not exist (strict mode)`,
-        );
+      if (!this.autoCreatePaths) {
+        return false;
       }
       oObject = this._createPath(sObjectPath);
     }
 
     if (oObject) {
-      // Strict mode: also check that the leaf property exists
-      if (this.strict && !(sPropertyName in oObject)) {
-        throw new TypeError(
-          `Cannot set property at "${sResolvedPath}": path does not exist (strict mode)`,
-        );
+      if (this.strictLeafCheck && !(sPropertyName in oObject)) {
+        return false;
       }
       oObject[sPropertyName] = oValue;
 
@@ -152,18 +248,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     const existing = this._getObject(sResolvedPath);
     if (existing && typeof existing === "object" && typeof oValue === "object" && oValue !== null) {
-      const merged = deepExtend(Array.isArray(existing) ? [] : {}, existing, oValue) as Record<
-        string,
-        unknown
-      >;
-
-      const oParent = this._getObject(
-        sResolvedPath.substring(0, sResolvedPath.lastIndexOf("/") || 1),
-      ) as Record<string, unknown>;
-      const prop = sResolvedPath.substring(sResolvedPath.lastIndexOf("/") + 1);
-      oParent[prop] = merged;
-
-      this._invalidateMergedPaths(sResolvedPath, existing as Record<string, unknown>, merged);
+      // In-place merge: walk the payload, compare, overwrite, and fire signals in one pass.
+      this._mergeInPlace(
+        existing as Record<string, unknown>,
+        oValue as Record<string, unknown>,
+        sResolvedPath,
+      );
       this._invalidateParentSignals(sResolvedPath);
 
       return true;
@@ -247,11 +337,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     aDeps: string[],
     fn: (...args: unknown[]) => unknown,
   ): Signal.Computed<unknown> {
-    // Ensure dependency signals exist before creating the computed
+    // Ensure dependency signals exist before creating the computed.
+    // Skip deps that already exist — they may be computed signals from
+    // a chained computed, and getOrCreate would shadow them with orphaned state signals.
     for (const dep of aDeps) {
-      this.registry.getOrCreate(dep, this._getObject(dep));
+      if (!this.registry.has(dep)) {
+        this.registry.getOrCreate(dep, this._getObject(dep));
+      }
     }
-    return this.registry.addComputed(sPath, aDeps, fn, this.strict);
+    return this.registry.addComputed(sPath, aDeps, fn, this.strictLeafCheck);
   }
 
   removeComputed(sPath: string): void {
@@ -330,58 +424,54 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
-  private _invalidateMergedPaths(
+  /**
+   * In-place merge + signal notification in a single pass.
+   *
+   * Walks the payload, compares against existing data, overwrites in-place,
+   * and fires signals for changed paths. O(k) where k = payload keys,
+   * instead of O(n) deep clone of the entire data tree.
+   *
+   * Incoming object/array values are cloned via structuredClone to prevent
+   * the caller from holding references into the model's internal data.
+   */
+  private _mergeInPlace(
+    target: Record<string, unknown>,
+    source: Record<string, unknown>,
     basePath: string,
-    oldData: Record<string, unknown>,
-    newData: Record<string, unknown>,
   ): void {
-    for (const key of Object.keys(newData)) {
-      const childPath = `${basePath}/${key}`;
-      const oldValue = oldData[key];
-      const newValue = newData[key];
+    for (const key of Object.keys(source)) {
+      const childPath = basePath ? `${basePath}/${key}` : `/${key}`;
+      const oldValue = target[key];
+      const newValue = source[key];
 
-      if (oldValue !== newValue) {
-        this.registry.set(childPath, newValue);
-
-        // Recurse into nested objects for deep invalidation
-        if (
-          typeof oldValue === "object" &&
-          oldValue !== null &&
-          !Array.isArray(oldValue) &&
-          typeof newValue === "object" &&
-          newValue !== null &&
-          !Array.isArray(newValue)
-        ) {
-          this._invalidateMergedPaths(
-            childPath,
-            oldValue as Record<string, unknown>,
-            newValue as Record<string, unknown>,
-          );
-        } else if (typeof newValue === "object" && newValue !== null) {
-          // New value is an object but old was not - invalidate all children
+      if (
+        typeof oldValue === "object" &&
+        oldValue !== null &&
+        typeof newValue === "object" &&
+        newValue !== null &&
+        Array.isArray(oldValue) === Array.isArray(newValue)
+      ) {
+        // Same container type (both arrays or both plain objects): recurse in-place.
+        // Arrays are merged by index, matching deepExtend behavior.
+        this._mergeInPlace(
+          oldValue as Record<string, unknown>,
+          newValue as Record<string, unknown>,
+          childPath,
+        );
+      } else if (oldValue !== newValue) {
+        // Clone incoming objects/arrays to prevent external mutation
+        target[key] =
+          typeof newValue === "object" && newValue !== null ? structuredClone(newValue) : newValue;
+        this.registry.set(childPath, target[key]);
+        // If old was an object and new is not (or vice versa), invalidate children
+        if (typeof oldValue === "object" && oldValue !== null) {
           this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
         }
       }
     }
-    this.registry.set(basePath, newData);
-  }
-
-  private _invalidateMergePayload(payload: Record<string, unknown>, basePath: string): void {
-    for (const key of Object.keys(payload)) {
-      const childPath = `${basePath}/${key}`;
-      this.registry.set(childPath, this._getObject(childPath));
-
-      const value = payload[key];
-      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        this._invalidateMergePayload(value as Record<string, unknown>, childPath);
-      }
-
-      // Also invalidate any registered child signals under this path
-      this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
-    }
-    // Invalidate the base path itself (including root)
+    // Update the base path signal (the object reference hasn't changed, but contents have)
     const effectivePath = basePath || "/";
-    this.registry.set(effectivePath, this._getObject(effectivePath));
+    this.registry.set(effectivePath, target);
     if (basePath) {
       this._invalidateParentSignals(basePath);
     }

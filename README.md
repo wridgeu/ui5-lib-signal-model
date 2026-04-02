@@ -106,36 +106,64 @@ model.mergeProperty("/customer", { age: 30 });
 
 ## Feature Comparison: SignalModel vs JSONModel
 
-| Feature                        | JSONModel                                                         | SignalModel                                                            |
-| ------------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified via signals    |
-| **Notification granularity**   | O(n) on total bindings per `setProperty` call                     | O(k) where k = bindings to changed path + parent paths                 |
-| **Change detection**           | `deepEqual` comparison on every binding                           | Signal-based: no comparison for primitives, object-aware for mutations |
-| **Property binding**           | `{/path}` in XML views                                            | Identical                                                              |
-| **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                              |
-| **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                         |
-| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)           |
-| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                         |
-| **Declarative XML binding**    | Supported                                                         | Supported (full lifecycle: one-way, two-way, list, tree)               |
-| **Named models**               | `{modelName>/path}`                                               | Identical                                                              |
-| **Binding modes**              | OneWay, TwoWay, OneTime                                           | Same (inherits from ClientModel)                                       |
-| **Nested bindings**            | Relative paths with context                                       | Same (relative and absolute)                                           |
-| **setProperty / getProperty**  | Standard API                                                      | Same signatures, typed overloads with generics                         |
-| **setData (replace)**          | Replaces data, notifies all bindings                              | Replaces data, fires all signals                                       |
-| **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                                |
-| **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals                 |
-| **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state      |
-| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying Signal.State                   |
-| **Strict mode**                | Not available                                                     | `{ strict: true }` throws on nonexistent paths                         |
-| **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion          |
-| **TC39 Signals alignment**     | N/A                                                               | Uses signal-polyfill; swap for native Signal when spec ships           |
+| Feature                        | JSONModel                                                         | SignalModel                                                                      |
+| ------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified via signals              |
+| **Notification granularity**   | O(n) on total bindings per `setProperty` call                     | O(k) where k = bindings to changed path + parent paths                           |
+| **Change detection**           | `deepEqual` comparison on every binding                           | Signal-based: no comparison for primitives, object-aware for mutations           |
+| **Property binding**           | `{/path}` in XML views                                            | Identical                                                                        |
+| **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                        |
+| **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                                   |
+| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)                     |
+| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                                   |
+| **Declarative XML binding**    | Supported                                                         | Supported (full lifecycle: one-way, two-way, list, tree)                         |
+| **Named models**               | `{modelName>/path}`                                               | Identical                                                                        |
+| **Binding modes**              | OneWay, TwoWay, OneTime                                           | Same (inherits from ClientModel)                                                 |
+| **Nested bindings**            | Relative paths with context                                       | Same (relative and absolute)                                                     |
+| **setProperty / getProperty**  | Standard API                                                      | Same signatures, typed overloads with generics                                   |
+| **setData (replace)**          | Replaces data, notifies all bindings                              | Replaces data, fires all signals                                                 |
+| **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                                          |
+| **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals                           |
+| **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state                |
+| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying Signal.State                             |
+| **Path auto-creation**         | Returns `false` for nonexistent parent paths                      | Same by default; `{ autoCreatePaths: true }` creates intermediates automatically |
+| **Leaf property guard**        | Not available                                                     | `{ strictLeafCheck: true }` rejects writes to nonexistent leaf properties        |
+| **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion                    |
+| **TC39 Signals alignment**     | N/A                                                               | Uses signal-polyfill; swap for native Signal when spec ships                     |
+
+### Configuration Modes
+
+SignalModel's default configuration provides **full JSONModel parity** — `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Two opt-in flags independently extend this behavior, each controlling a different level of the path:
+
+```
+model.setProperty("/a/b/c", value)
+                   ↑   ↑
+                   │   └── LEAF: "c" on parent {b}     ← strictLeafCheck controls this
+                   └────── INTERMEDIATE: {a}, {b}       ← autoCreatePaths controls this
+```
+
+- **`autoCreatePaths: true`**: Auto-creates intermediate objects when setting a deeply nested path. `model.setProperty("/a/b/c", value)` creates `{a: {b: {}}}` if the parent path doesn't exist, instead of returning `false`. Useful for dynamic form models where the schema isn't known upfront.
+- **`strictLeafCheck: true`**: Rejects `setProperty` writes to leaf properties that don't exist on the parent object (returns `false`). JSONModel allows creating new properties on existing parents; this flag prevents it. Useful for catching typos in property names against a known schema.
+
+| `autoCreatePaths` | `strictLeafCheck` | Missing parent | New leaf on existing parent | Use case                         |
+| ----------------- | ----------------- | -------------- | --------------------------- | -------------------------------- |
+| `false` (default) | `false` (default) | `false`        | creates it                  | JSONModel parity                 |
+| `true`            | `false`           | creates it     | creates it                  | Dynamic forms                    |
+| `false`           | `true`            | `false`        | `false`                     | Typed schemas                    |
+| `true`            | `true`            | creates it     | `false`                     | Scaffold structure, guard leaves |
+
+All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`, `bindTree`) behave identically regardless of configuration.
+
+### TypeScript Generics
+
+SignalModel's typed path system is based on the patterns established by UI5's `TypedJSONModel` wrapper from `@openui5/types`. The `ModelPath<T>` and `PathValue<T, P>` utility types follow the same conventions for extracting absolute binding paths and resolving value types at those paths. The key difference is that `TypedJSONModel` is a wrapper around JSONModel requiring a separate class, while SignalModel has generics built in — `new SignalModel<T>(data)` gives typed `getProperty` and `setProperty` with path autocompletion directly.
 
 ## API
 
 ### Constructor
 
 ```typescript
-new SignalModel<T>(data?: T, options?: { strict?: boolean })
+new SignalModel<T>(data?: T, options?: { autoCreatePaths?: boolean; strictLeafCheck?: boolean })
 ```
 
 ### JSONModel-Compatible Methods
@@ -221,7 +249,7 @@ The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected
 
 ![Benchmark Results - 1000 bindings](docs/img/benchmark-1000-bindings.png)
 
-With default synchronous `setProperty`, **"Update all N bindings"** shows ~10x improvement at 1000 bindings (204ms vs 19ms). However, with JSONModel's `bAsyncUpdate=true`, JSONModel is faster (~13ms vs ~19ms) because it collapses all updates into one bulk `deepEqual` loop, while SignalModel still pays per-binding overhead from the `signal.get()` + `watcher.watch()` re-arm cycle required by the signal-polyfill Watcher API. For list/table/tree replace operations, both models perform equivalently because DOM rendering cost dominates.
+With default synchronous `setProperty`, **"Update all N bindings"** shows ~11x improvement at 1000 bindings (201ms vs 18ms). However, with JSONModel's `bAsyncUpdate=true`, JSONModel is faster (~14ms vs ~20ms) because it collapses all updates into one bulk `deepEqual` loop, while SignalModel still pays per-binding overhead from the `signal.get()` + `watcher.watch()` re-arm cycle required by the signal-polyfill Watcher API. For list/table/tree replace operations, both models perform equivalently because DOM rendering cost dominates.
 
 See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for the full analysis.
 
@@ -240,6 +268,42 @@ See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.m
 ```bash
 npm run start  # opens demo app
 ```
+
+## Learnings
+
+Beyond the core signal-based architecture, several implementation-level optimizations contribute meaningfully to SignalModel's performance profile. These are documented here as reference for anyone building reactive primitives on top of UI5 or the TC39 Signals proposal.
+
+### Unified Microtask Flush Queue
+
+Each binding type (property, list, tree) subscribes to its path's signal via `Signal.subtle.Watcher`. When a signal changes, the Watcher callback fires synchronously — but we don't call `checkUpdate()` immediately. Instead, all bindings share a single flush queue (`FlushQueue.ts`) that batches updates into one `queueMicrotask`:
+
+- **One microtask per synchronous block**, regardless of how many bindings or binding types are notified. Previously, each binding type maintained its own queue, producing up to 3 separate microtasks.
+- **Map-based deduplication**: `Map<binding, signal>` ensures each binding appears at most once. Rapid-fire `setProperty` calls (e.g., updating 10 fields in a loop) produce exactly one `checkUpdate` per affected binding.
+- **Watcher re-arm protocol**: The TC39 Watcher fires at most once between `watch()` calls. The flush reads the current value (`signal.get()`), re-arms the watcher (`watcher.watch()`), then fires the UI change (`checkUpdate()`). This is the per-binding cost that the signal-polyfill imposes — it will disappear when native signals ship.
+
+### In-Place Merge (Eliminating `deepExtend`)
+
+UI5's `JSONModel.setData(data, true)` uses `sap/base/util/deepExtend` to deep-clone the entire model data and then overlay the merge payload. For a model with 1000 items where you merge 5, this clones all 1000 items — O(n) work for an O(k) operation.
+
+SignalModel replaces this with an **in-place recursive merge** (`_mergeInPlace`) that:
+
+1. Walks only the merge payload keys (not the entire data tree)
+2. Compares old vs new values inline (no separate invalidation pass)
+3. Overwrites changed values directly in `this.oData`
+4. Fires signals for changed paths as it goes
+5. Uses `structuredClone()` for incoming object/array values to prevent external mutation
+
+This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload size. The improvement is most significant for shallow merges into large datasets (common in form-based Fiori apps that update a few fields at a time).
+
+### `structuredClone` over `deepExtend` for Deep Copies
+
+Where a pure deep clone is needed (not a merge), `structuredClone()` replaces `deepExtend({}, source)`. This applies to `SignalListBinding.update()` which copies list data for UI5's extended change detection. `structuredClone` is implemented natively in C++ by the browser engine and avoids the overhead of UI5's JavaScript-based recursive clone.
+
+### Batching and `bAsyncUpdate`
+
+JSONModel's `setProperty` accepts a `bAsyncUpdate` flag that defers `checkUpdate` into a `setTimeout`, collapsing N synchronous `setProperty` calls into a single binding check pass. This is SAP's recommended workaround for the O(N²) problem documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
+
+SignalModel ignores this flag — signals are inherently push-based and already batched via the microtask flush queue. Each `setProperty` does O(1) signal work regardless of sync/async mode. However, when JSONModel uses `bAsyncUpdate=true`, it achieves O(N) total (one bulk `deepEqual` pass over all bindings), while SignalModel's per-binding `signal.get()` + `watcher.watch()` re-arm cycle adds constant overhead per binding. This is why JSONModel with `bAsyncUpdate=true` is faster for the "update all N bindings" scenario — the polyfill's Watcher re-arm cost is the bottleneck, not the architectural approach.
 
 ## Development
 

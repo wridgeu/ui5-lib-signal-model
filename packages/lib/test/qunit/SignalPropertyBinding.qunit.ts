@@ -125,6 +125,64 @@ QUnit.module("SignalPropertyBinding", () => {
     }, 50);
   });
 
+  QUnit.test("rapid-fire setProperty calls are batched into single change event", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ count: 0 });
+    const binding = model.bindProperty("/count");
+    let changeCount = 0;
+
+    binding.attachChange(() => {
+      changeCount++;
+    });
+
+    model.setProperty("/count", 1);
+    model.setProperty("/count", 2);
+    model.setProperty("/count", 3);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 1, "only one change event despite 3 setProperty calls");
+      assert.strictEqual(binding.getValue(), 3, "final value is 3");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("setContext resubscribes to new signal path", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      items: [{ name: "Alice" }, { name: "Bob" }],
+    });
+    const listBinding = model.bindList("/items");
+    const contexts = listBinding.getContexts(0, 10);
+
+    const binding = model.bindProperty("name", contexts[0]);
+    assert.strictEqual(binding.getValue(), "Alice", "initial value from first context");
+
+    binding.setContext(contexts[1]);
+
+    let changeCount = 0;
+    binding.attachChange(() => {
+      changeCount++;
+    });
+
+    // Change to old path should NOT fire (binding now watches /items/1/name)
+    model.setProperty("/items/0/name", "Carol");
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "old path change does not fire");
+
+      // Change to new path should fire
+      model.setProperty("/items/1/name", "Dave");
+
+      setTimeout(() => {
+        assert.strictEqual(changeCount, 1, "new path change fires");
+        assert.strictEqual(binding.getValue(), "Dave", "value from new context path");
+        model.destroy();
+        done();
+      }, 50);
+    }, 50);
+  });
+
   QUnit.test("destroy cleans up watcher", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     const binding = model.bindProperty("/name");

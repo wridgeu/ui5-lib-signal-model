@@ -28,8 +28,15 @@ QUnit.module("SignalModel", () => {
     model.destroy();
   });
 
-  QUnit.test("setProperty creates intermediate paths", (assert) => {
+  QUnit.test("default: setProperty returns false for nonexistent parent", (assert) => {
     const model = new SignalModel({});
+    const result = model.setProperty("/customer/name", "Alice");
+    assert.notOk(result, "returns false for nonexistent parent");
+    model.destroy();
+  });
+
+  QUnit.test("autoCreatePaths: setProperty creates intermediate paths", (assert) => {
+    const model = new SignalModel({}, { autoCreatePaths: true });
     model.setProperty("/customer/name", "Alice");
     assert.strictEqual(model.getProperty("/customer/name"), "Alice", "created nested path");
     model.destroy();

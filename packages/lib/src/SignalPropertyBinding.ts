@@ -3,16 +3,17 @@ import ChangeReason from "sap/ui/model/ChangeReason";
 import Context from "sap/ui/model/Context";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
+import { scheduleFlush, cancelFlush } from "./FlushQueue";
 
-// Type alias for the undeclared internal shape of the base class at runtime
+// Runtime properties/methods not exposed by @openui5/types.
+// setValue and initialize are @ui5-protected on PropertyBinding and don't need casting.
+// setContext exists at runtime on PropertyBinding.prototype but is missing from type stubs.
 type ClientPropertyBindingInternal = ClientPropertyBinding & {
   bSuspended: boolean;
   oValue: unknown;
   oContext: Context | undefined;
   sPath: string;
   checkUpdate(bForceUpdate?: boolean): void;
-  setValue(oValue: unknown): void;
-  initialize(): ClientPropertyBindingInternal;
   setContext(oContext?: Context): void;
   getDataState(): { setValue(v: unknown): void };
   checkDataState(): void;
@@ -26,30 +27,6 @@ type ClientPropertyBindingInternal = ClientPropertyBinding & {
  */
 function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal {
   return self as unknown as ClientPropertyBindingInternal;
-}
-
-// Microtask batching: collect all pending binding updates and process them
-// in a single microtask instead of scheduling one microtask per signal change.
-const pendingUpdates = new Map<
-  SignalPropertyBinding,
-  Signal.State<unknown> | Signal.Computed<unknown>
->();
-let flushScheduled = false;
-
-function scheduleFlush(): void {
-  if (!flushScheduled) {
-    flushScheduled = true;
-    queueMicrotask(() => {
-      flushScheduled = false;
-      const entries = [...pendingUpdates.entries()];
-      pendingUpdates.clear();
-      for (const [binding, signal] of entries) {
-        signal.get();
-        binding.watcher?.watch();
-        binding.checkUpdate();
-      }
-    });
-  }
 }
 
 /**
@@ -109,14 +86,13 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     const signal = this.oModel._getOrCreateSignal(resolvedPath, self._getValue());
 
     this.watcher = new Signal.subtle.Watcher(() => {
-      pendingUpdates.set(this, signal);
-      scheduleFlush();
+      scheduleFlush(this, signal);
     });
     this.watcher.watch(signal);
   }
 
   unsubscribe(): void {
-    pendingUpdates.delete(this);
+    cancelFlush(this);
     if (this.watcher) {
       const sources = Signal.subtle.introspectSources(this.watcher);
       if (sources.length) {
@@ -136,7 +112,9 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     const self = asInternal(this);
     if (self.oContext !== oContext) {
       const oldResolved = this.getResolvedPath();
-      // Delegate to the prototype's setContext if available
+      // Walk the prototype chain to reach ClientPropertyBinding.prototype.setContext.
+      // Assumes: SignalPropertyBinding → ClientPropertyBinding → PropertyBinding.
+      // Falls back to direct context assignment if the chain differs.
       const proto = Object.getPrototypeOf(
         Object.getPrototypeOf(this),
       ) as ClientPropertyBindingInternal;

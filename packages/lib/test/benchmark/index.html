@@ -305,7 +305,7 @@
       // ---------------------------------------------------------------
 
       /**
-       * Scenario 1: setProperty throughput (no bindings)
+       * setProperty throughput (no bindings)
        * Pure model-layer cost of setting a property value.
        */
       async function benchSetPropertyNoBindings(
@@ -340,7 +340,7 @@
       }
 
       /**
-       * Scenario 2: getProperty throughput (no bindings)
+       * getProperty throughput (no bindings)
        * Pure read performance.
        */
       async function benchGetProperty(ModelClass, iterations, warmupRounds, measuredRounds) {
@@ -368,7 +368,7 @@
       }
 
       /**
-       * Scenario 3: Single-path update with N bindings (KEY BENCHMARK)
+       * Single-path update with N bindings (KEY BENCHMARK)
        *
        * Creates N property bindings to N different paths, then changes ONE path.
        * JSONModel: checkUpdate iterates ALL N bindings -> O(N)
@@ -405,7 +405,7 @@
       }
 
       /**
-       * Scenario 4: Update ALL N bindings sequentially
+       * Update ALL N bindings sequentially
        *
        * Changes every bound path one by one.
        * JSONModel: each setProperty triggers O(N) check -> total O(N^2)
@@ -446,7 +446,7 @@
       }
 
       /**
-       * Scenario 5: Update ALL N bindings with bAsyncUpdate=true
+       * Update ALL N bindings with bAsyncUpdate=true
        *
        * Same as Scenario 4 but passes bAsyncUpdate=true to setProperty.
        * JSONModel: batches all checkUpdate calls into one setTimeout pass,
@@ -494,7 +494,7 @@
       }
 
       /**
-       * Scenario 6: List binding - replace array with N items
+       * List binding - replace array with N items
        *
        * Creates a sap.m.List with N items via list binding, then replaces the array.
        * Tests SignalListBinding vs JSONListBinding notification.
@@ -555,7 +555,7 @@
       }
 
       /**
-       * Scenario 6: Table binding - replace table rows with N items
+       * Table binding - replace table rows with N items
        *
        * Creates a sap.m.Table with N rows via list binding (multiple columns),
        * then replaces the data. Tables are the most common heavy binding case in Fiori apps.
@@ -642,7 +642,7 @@
       }
 
       /**
-       * Scenario 7: Tree binding - replace tree data
+       * Tree binding - replace tree data
        *
        * Creates a sap.m.Tree with hierarchical data via tree binding, then replaces it.
        * Tests SignalTreeBinding vs ClientTreeBinding notification.
@@ -721,7 +721,7 @@
       }
 
       /**
-       * Scenario 8: Expression binding - N Text controls with expression syntax
+       * Expression binding - N Text controls with expression syntax
        *
        * Creates N controls using expression binding "{= ${/items/N/id} + ': ' + ${/items/N/value}}".
        * Each control has a composite binding with two parts. Tests expression evaluation overhead.
@@ -766,7 +766,7 @@
       }
 
       /**
-       * Scenario 9: Computed signals (SignalModel only, uses getProperty for JSONModel)
+       * Computed signals (SignalModel only, uses getProperty for JSONModel)
        *
        * Creates N computed signals, each depending on a source path.
        * Measures update propagation through the computed dependency chain.
@@ -825,7 +825,7 @@
       }
 
       /**
-       * Scenario 10: setData replace with N bindings
+       * setData replace with N bindings
        *
        * Replaces the entire model data and measures propagation to all bindings.
        */
@@ -853,6 +853,253 @@
           }
           var start = performance.now();
           model.setData(newData);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * setData merge (shallow) with N bindings
+       *
+       * Merges a small, flat payload into the model data. Only a fraction of
+       * paths are in the merge payload — measures the benefit of SignalModel's
+       * targeted invalidation vs JSONModel's full checkUpdate.
+       * Payload: updates counter + first 5 items' values (constant size regardless of N).
+       */
+      async function benchSetDataMergeShallow(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          var warmupPayload = { counter: w };
+          model.setData(warmupPayload, true);
+          await flush();
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          // Shallow merge: update counter + first 5 items
+          var items = [];
+          for (var k = 0; k < Math.min(5, n); k++) {
+            items.push({ id: k, value: "shallow-" + round + "-" + k });
+          }
+          var payload = { counter: round, items: items };
+          var start = performance.now();
+          model.setData(payload, true);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * setData merge (deep) with N bindings
+       *
+       * Merges a large payload that touches every item in the array.
+       * Payload: updates all N items' values — measures worst-case merge where
+       * every bound path is in the payload. Both models must propagate to all
+       * bindings, but SignalModel uses recursive change detection on the merge
+       * payload while JSONModel runs deepEqual on every binding.
+       */
+      async function benchSetDataMergeDeep(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          var warmupItems = [];
+          for (var i = 0; i < n; i++) {
+            warmupItems.push({ id: i, value: "warm-" + w + "-" + i });
+          }
+          model.setData({ items: warmupItems }, true);
+          await flush();
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          // Deep merge: update every item
+          var items = [];
+          for (var j = 0; j < n; j++) {
+            items.push({ id: j, value: "deep-" + round + "-" + j });
+          }
+          var payload = { items: items };
+          var start = performance.now();
+          model.setData(payload, true);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * setData merge (deeply nested config) with N bindings
+       *
+       * Merges into a deeply nested config object (5 levels deep, ~20 leaf properties).
+       * Tests recursive merge performance with deep object hierarchies rather than flat arrays.
+       * The merge payload only touches 3 leaf paths deep in the tree.
+       */
+      async function benchSetDataMergeNested(ModelClass, n, warmupRounds, measuredRounds) {
+        var config = {
+          app: {
+            display: { theme: "sap_horizon", density: "cozy", language: "en", rtl: false },
+            network: {
+              timeout: 5000,
+              retries: 3,
+              baseUrl: "https://api.example.com",
+              headers: { authorization: "Bearer token", accept: "application/json" },
+            },
+            features: {
+              darkMode: false,
+              analytics: true,
+              notifications: { email: true, push: false, sms: false },
+            },
+          },
+          user: {
+            profile: { name: "Alice", role: "admin", department: "Engineering" },
+            preferences: {
+              homepage: "/dashboard",
+              pageSize: 25,
+              columns: { visible: ["name", "status", "date"], frozen: 1 },
+            },
+          },
+        };
+        // Generate flat items alongside config for binding targets
+        var data = generateData(n);
+        data.config = JSON.parse(JSON.stringify(config));
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setData(
+            {
+              config: {
+                app: { display: { theme: "sap_horizon_dark" } },
+                user: { preferences: { pageSize: 50 } },
+              },
+            },
+            true,
+          );
+          await flush();
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          // Merge payload: 3 leaf paths deep in the tree
+          var payload = {
+            config: {
+              app: {
+                display: { theme: round % 2 === 0 ? "sap_horizon" : "sap_horizon_dark" },
+                features: { notifications: { push: round % 2 === 0 } },
+              },
+              user: { preferences: { pageSize: 25 + round } },
+            },
+          };
+          var start = performance.now();
+          model.setData(payload, true);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * setData merge (large dataset, pinpoint payload)
+       *
+       * Creates a model with 10x the binding count as data items (e.g. 10,000 items
+       * for N=1000 bindings), then merges a payload that touches only 3 items.
+       * This isolates the O(n) vs O(k) difference:
+       * - JSONModel: deepExtend clones ALL 10,000 items, then checkUpdate on all bindings
+       * - SignalModel: in-place merge walks only the 3 payload items
+       */
+      async function benchSetDataMergeLargeDataset(ModelClass, n, warmupRounds, measuredRounds) {
+        var dataSize = n * 10; // 10x the binding count
+        var data = { items: [] };
+        for (var i = 0; i < dataSize; i++) {
+          data.items.push({
+            id: i,
+            name: "item-" + i,
+            description:
+              "Description for item " + i + " with some extra text to make the object heavier",
+            price: (i * 1.5).toFixed(2),
+            category: "cat-" + (i % 20),
+            active: i % 3 !== 0,
+            metadata: { created: "2025-01-01", modified: "2025-06-15", version: i },
+          });
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        // Only bind to the first N items (not all dataSize)
+        var controls = [];
+        for (var b = 0; b < n; b++) {
+          var text = new sap.m.Text({ text: "{/items/" + b + "/name}" });
+          text.setModel(model);
+          text.placeAt(container);
+          controls.push(text);
+        }
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setData(
+            {
+              items: [
+                { id: 0, name: "warm-" + w + "-0" },
+                { id: 1, name: "warm-" + w + "-1" },
+                { id: 2, name: "warm-" + w + "-2" },
+              ],
+            },
+            true,
+          );
+          await flush();
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          // Pinpoint merge: only 3 items out of 10,000
+          var payload = {
+            items: [
+              { id: 0, name: "measured-" + round + "-0" },
+              { id: 1, name: "measured-" + round + "-1" },
+              { id: 2, name: "measured-" + round + "-2" },
+            ],
+          };
+          var start = performance.now();
+          model.setData(payload, true);
           await flush();
           times.push(performance.now() - start);
         }
@@ -1029,7 +1276,7 @@
         // --- Scenario 6: List binding ---
         var listN = Math.min(n, 500); // Cap list items to avoid DOM explosion
         setStatus("Running: list binding replace with " + listN + " items (alternating)...");
-        var r5 = await runAlternating(
+        var r6 = await runAlternating(
           benchListBindingReplace,
           Object.assign({}, base, { params: [listN] }),
           measuredRounds,
@@ -1038,14 +1285,14 @@
           name: "List binding replace, " + listN + " items",
           detail: "Replace array, re-render list",
           category: "List (sap.m.List)",
-          json: stats(r5.jsonTimes),
-          signal: stats(r5.signalTimes),
+          json: stats(r6.jsonTimes),
+          signal: stats(r6.signalTimes),
         });
 
-        // --- Scenario 6: Table binding ---
+        // --- Scenario 7: Table binding ---
         var tableN = Math.min(n, 500); // Cap table rows
         setStatus("Running: table binding replace with " + tableN + " rows (alternating)...");
-        var r6 = await runAlternating(
+        var r7 = await runAlternating(
           benchTableBindingReplace,
           Object.assign({}, base, { params: [tableN] }),
           measuredRounds,
@@ -1054,14 +1301,14 @@
           name: "Table binding replace, " + tableN + " rows",
           detail: "Replace rows, 3 columns each",
           category: "List (sap.m.Table)",
-          json: stats(r6.jsonTimes),
-          signal: stats(r6.signalTimes),
+          json: stats(r7.jsonTimes),
+          signal: stats(r7.signalTimes),
         });
 
-        // --- Scenario 7: Tree binding ---
+        // --- Scenario 8: Tree binding ---
         var treeN = Math.min(n, 200); // Cap tree nodes to avoid DOM explosion
         setStatus("Running: tree binding replace with " + treeN + " root nodes (alternating)...");
-        var r7 = await runAlternating(
+        var r8 = await runAlternating(
           benchTreeBindingReplace,
           Object.assign({}, base, { params: [treeN] }),
           measuredRounds,
@@ -1070,14 +1317,14 @@
           name: "Tree binding replace, " + treeN + " nodes",
           detail: "Replace tree, re-render hierarchy",
           category: "Tree (sap.m.Tree)",
-          json: stats(r7.jsonTimes),
-          signal: stats(r7.signalTimes),
+          json: stats(r8.jsonTimes),
+          signal: stats(r8.signalTimes),
         });
 
-        // --- Scenario 8: Expression binding ---
+        // --- Scenario 9: Expression binding ---
         var exprN = Math.min(n, 500);
         setStatus("Running: expression binding with " + exprN + " controls (alternating)...");
-        var r8 = await runAlternating(
+        var r9 = await runAlternating(
           benchExpressionBinding,
           Object.assign({}, base, { params: [exprN] }),
           measuredRounds,
@@ -1086,11 +1333,11 @@
           name: "Expression binding, " + exprN + " controls",
           detail: "Change 1 path, expression re-evaluates",
           category: "Expression (sap.m.Text)",
-          json: stats(r8.jsonTimes),
-          signal: stats(r8.signalTimes),
+          json: stats(r9.jsonTimes),
+          signal: stats(r9.signalTimes),
         });
 
-        // --- Scenario 9: Computed signals ---
+        // --- Scenario 10: Computed signals ---
         var compN = Math.min(n, 500);
         setStatus("Running: computed signals with " + compN + " computeds (alternating)...");
         // Computed needs special handling: isSignal flag differs per model
@@ -1118,9 +1365,9 @@
           signal: stats(compSignalTimes),
         });
 
-        // --- Scenario 10: setData replace ---
+        // --- Scenario 11: setData replace ---
         setStatus("Running: setData replace with " + n + " bindings (alternating)...");
-        var r10 = await runAlternating(
+        var r11 = await runAlternating(
           benchSetDataReplace,
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
@@ -1129,8 +1376,77 @@
           name: "setData replace, " + n + " bindings",
           detail: "Full data replacement",
           category: "Property (sap.m.Text)",
-          json: stats(r10.jsonTimes),
-          signal: stats(r10.signalTimes),
+          json: stats(r11.jsonTimes),
+          signal: stats(r11.signalTimes),
+        });
+
+        // --- Scenario 12: setData merge (shallow) ---
+        setStatus("Running: setData merge (shallow) with " + n + " bindings (alternating)...");
+        var r12 = await runAlternating(
+          benchSetDataMergeShallow,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "setData merge (shallow), " + n + " bindings",
+          detail: "Merge 5 items into " + n,
+          category: "Property (sap.m.Text)",
+          json: stats(r12.jsonTimes),
+          signal: stats(r12.signalTimes),
+        });
+
+        // --- Scenario 13: setData merge (deep) ---
+        setStatus("Running: setData merge (deep) with " + n + " bindings (alternating)...");
+        var r13 = await runAlternating(
+          benchSetDataMergeDeep,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "setData merge (deep), " + n + " bindings",
+          detail: "Merge all " + n + " items",
+          category: "Property (sap.m.Text)",
+          json: stats(r13.jsonTimes),
+          signal: stats(r13.signalTimes),
+        });
+
+        // --- Scenario 14: setData merge (deeply nested config) ---
+        setStatus(
+          "Running: setData merge (deeply nested config) with " + n + " bindings (alternating)...",
+        );
+        var r14 = await runAlternating(
+          benchSetDataMergeNested,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "setData merge (nested config), " + n + " bindings",
+          detail: "Merge 3 deep leaf paths",
+          category: "Property (sap.m.Text)",
+          json: stats(r14.jsonTimes),
+          signal: stats(r14.signalTimes),
+        });
+
+        // --- Scenario 15: setData merge (large dataset, pinpoint) ---
+        var largeN = n * 10;
+        setStatus(
+          "Running: setData merge (large dataset " +
+            largeN +
+            " items, 3 changed) with " +
+            n +
+            " bindings (alternating)...",
+        );
+        var r15 = await runAlternating(
+          benchSetDataMergeLargeDataset,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "setData merge (large, pinpoint), " + largeN + " items",
+          detail: "Merge 3 items into " + largeN,
+          category: "Property (sap.m.Text)",
+          json: stats(r15.jsonTimes),
+          signal: stats(r15.signalTimes),
         });
 
         renderResults(results, n, iters, measuredRounds);

@@ -10,7 +10,7 @@ export default class StrictMode extends Controller {
   private strictModel: SignalModel | null = null;
 
   override onInit(): void {
-    this.strictModel = new SignalModel({ name: "Alice", age: 28 }, { strict: true });
+    this.strictModel = new SignalModel({ name: "Alice", age: 28 }, { strictLeafCheck: true });
     this.getView()!.setModel(this.strictModel, "strict");
   }
 
@@ -19,13 +19,13 @@ export default class StrictMode extends Controller {
     const value = (this.byId("valueInput") as Input).getValue();
     const result = this.byId("result") as MessageStrip;
 
-    try {
-      this.strictModel!.setProperty(path, value);
+    const success = this.strictModel!.setProperty(path, value);
+    if (success) {
       result.setText(`Set "${path}" = "${value}"`);
       result.setType("Success");
-    } catch (e) {
-      result.setText(`Error: ${(e as Error).message}`);
-      result.setType("Error");
+    } else {
+      result.setText(`Rejected: "${path}" does not exist (strictLeafCheck)`);
+      result.setType("Warning");
     }
     result.setVisible(true);
   }

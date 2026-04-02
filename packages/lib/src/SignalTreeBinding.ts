@@ -3,8 +3,10 @@ import ChangeReason from "sap/ui/model/ChangeReason";
 import Context from "sap/ui/model/Context";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
+import { scheduleFlush, cancelFlush } from "./FlushQueue";
 
-// ClientTreeBinding internals not exposed by @openui5/types
+// Runtime properties/methods not exposed by @openui5/types.
+// getResolvedPath, isRelative are on the public API and don't need casting.
 type TreeBindingInternal = ClientTreeBinding & {
   sPath: string;
   oContext: Context | undefined;
@@ -12,8 +14,6 @@ type TreeBindingInternal = ClientTreeBinding & {
   bSuspended: boolean;
   applyFilter(): void;
   _fireChange(params: { reason: string }): void;
-  getResolvedPath(): string | undefined;
-  isRelative(): boolean;
 };
 
 /**
@@ -22,29 +22,6 @@ type TreeBindingInternal = ClientTreeBinding & {
  */
 function asInternal(self: SignalTreeBinding): TreeBindingInternal {
   return self as unknown as TreeBindingInternal;
-}
-
-// Microtask batching for tree bindings
-const pendingUpdates = new Map<
-  SignalTreeBinding,
-  Signal.State<unknown> | Signal.Computed<unknown>
->();
-let flushScheduled = false;
-
-function scheduleFlush(): void {
-  if (!flushScheduled) {
-    flushScheduled = true;
-    queueMicrotask(() => {
-      flushScheduled = false;
-      const entries = [...pendingUpdates.entries()];
-      pendingUpdates.clear();
-      for (const [binding, signal] of entries) {
-        signal.get();
-        binding.watcher?.watch();
-        binding.checkUpdate();
-      }
-    });
-  }
 }
 
 /**
@@ -67,24 +44,23 @@ export default class SignalTreeBinding extends ClientTreeBinding {
   subscribe(): void {
     this.unsubscribe();
 
-    const internal = asInternal(this);
-    const resolvedPath = internal.getResolvedPath();
+    const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;
 
+    const internal = asInternal(this);
     const signal = internal.oModel._getOrCreateSignal(
       resolvedPath,
       internal.oModel._getObject(resolvedPath),
     );
 
     this.watcher = new Signal.subtle.Watcher(() => {
-      pendingUpdates.set(this, signal);
-      scheduleFlush();
+      scheduleFlush(this, signal);
     });
     this.watcher.watch(signal);
   }
 
   unsubscribe(): void {
-    pendingUpdates.delete(this);
+    cancelFlush(this);
     if (this.watcher) {
       const sources = Signal.subtle.introspectSources(this.watcher);
       if (sources.length) {
@@ -105,7 +81,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     const internal = asInternal(this);
     if (internal.oContext !== oContext) {
       internal.oContext = oContext as Context;
-      if (internal.isRelative()) {
+      if (this.isRelative()) {
         this.subscribe();
         internal._fireChange({ reason: ChangeReason.Context });
       }

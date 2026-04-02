@@ -66,6 +66,27 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
+  QUnit.test("chained computed: computed depending on another computed", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ a: 5 });
+    model.createComputed("/double", ["/a"], (a) => (a as number) * 2);
+    model.createComputed("/quad", ["/double"], (d) => (d as number) * 2);
+
+    const doubleBinding = model.bindProperty("/double");
+    const quadBinding = model.bindProperty("/quad");
+    assert.strictEqual(doubleBinding.getValue(), 10, "double = 5 * 2 = 10");
+    assert.strictEqual(quadBinding.getValue(), 20, "quad = 10 * 2 = 20");
+
+    quadBinding.attachChange(() => {
+      assert.strictEqual(doubleBinding.getValue(), 14, "double updated to 7 * 2 = 14");
+      assert.strictEqual(quadBinding.getValue(), 28, "quad updated to 14 * 2 = 28");
+      model.destroy();
+      done();
+    });
+
+    model.setProperty("/a", 7);
+  });
+
   QUnit.test("computed with multiple dependencies", (assert) => {
     const done = assert.async();
     const model = new SignalModel({ price: 100, tax: 0.2 });

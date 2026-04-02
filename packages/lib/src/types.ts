@@ -68,8 +68,22 @@ export type PathValue<T, P extends string> = P extends `/${number}`
 
 /**
  * Options for the SignalModel constructor.
+ *
+ * Default configuration matches JSONModel behavior (drop-in parity).
+ * Both flags opt-in to extended behavior beyond JSONModel.
  */
 export interface SignalModelOptions {
-  /** When true, setProperty on nonexistent paths throws TypeError. Default: false. */
-  strict?: boolean;
+  /**
+   * Auto-create intermediate objects for deeply nested setProperty paths.
+   * When false (default): missing parent path → returns false (JSONModel behavior).
+   * When true: missing parent path → creates intermediate objects automatically.
+   */
+  autoCreatePaths?: boolean;
+  /**
+   * Reject setProperty writes to leaf properties that don't exist on the parent object.
+   * When false (default): new properties are created on existing parents (JSONModel behavior).
+   * When true: writing to a nonexistent leaf returns false, and replacing an existing
+   * computed signal throws instead of warning.
+   */
+  strictLeafCheck?: boolean;
 }

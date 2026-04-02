@@ -1,0 +1,17 @@
+{
+  "name": "Alice",
+  "age": 28,
+  "customer": {
+    "firstName": "Alice",
+    "lastName": "Smith",
+    "address": {
+      "city": "Berlin",
+      "zip": "10115"
+    }
+  },
+  "items": [
+    { "id": 1, "label": "Alpha" },
+    { "id": 2, "label": "Beta" },
+    { "id": 3, "label": "Gamma" }
+  ]
+}

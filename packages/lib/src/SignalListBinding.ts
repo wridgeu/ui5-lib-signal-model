@@ -1,11 +1,12 @@
 import ClientListBinding from "sap/ui/model/ClientListBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
 import Context from "sap/ui/model/Context";
-import deepExtend from "sap/base/util/deepExtend";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
+import { scheduleFlush, cancelFlush } from "./FlushQueue";
 
-// ClientListBinding internals not exposed by @openui5/types
+// Runtime properties/methods not exposed by @openui5/types.
+// getResolvedPath, isRelative are on the public API and don't need casting.
 type ListBindingInternal = ClientListBinding & {
   oList: unknown[] | Record<string, unknown>;
   aIndices: number[];
@@ -20,8 +21,6 @@ type ListBindingInternal = ClientListBinding & {
   applySort(): void;
   _getLength(): number;
   _fireChange(params: { reason: string }): void;
-  getResolvedPath(): string | undefined;
-  isRelative(): boolean;
 };
 
 /**
@@ -30,29 +29,6 @@ type ListBindingInternal = ClientListBinding & {
  */
 function asInternal(self: SignalListBinding): ListBindingInternal {
   return self as unknown as ListBindingInternal;
-}
-
-// Microtask batching for list bindings
-const pendingUpdates = new Map<
-  SignalListBinding,
-  Signal.State<unknown> | Signal.Computed<unknown>
->();
-let flushScheduled = false;
-
-function scheduleFlush(): void {
-  if (!flushScheduled) {
-    flushScheduled = true;
-    queueMicrotask(() => {
-      flushScheduled = false;
-      const entries = [...pendingUpdates.entries()];
-      pendingUpdates.clear();
-      for (const [binding, signal] of entries) {
-        signal.get();
-        binding.watcher?.watch();
-        binding.checkUpdate();
-      }
-    });
-  }
 }
 
 /**
@@ -70,11 +46,11 @@ export default class SignalListBinding extends ClientListBinding {
     if (oList) {
       if (Array.isArray(oList)) {
         internal.oList = internal.bUseExtendedChangeDetection
-          ? (deepExtend([], oList) as unknown[])
+          ? (structuredClone(oList) as unknown[])
           : oList.slice();
       } else {
         internal.oList = internal.bUseExtendedChangeDetection
-          ? (deepExtend({}, oList) as Record<string, unknown>)
+          ? (structuredClone(oList) as Record<string, unknown>)
           : Object.assign({}, oList);
       }
       internal.updateIndices();
@@ -100,24 +76,23 @@ export default class SignalListBinding extends ClientListBinding {
   subscribe(): void {
     this.unsubscribe();
 
-    const internal = asInternal(this);
-    const resolvedPath = internal.getResolvedPath();
+    const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;
 
+    const internal = asInternal(this);
     const signal = internal.oModel._getOrCreateSignal(
       resolvedPath,
       internal.oModel._getObject(resolvedPath),
     );
 
     this.watcher = new Signal.subtle.Watcher(() => {
-      pendingUpdates.set(this, signal);
-      scheduleFlush();
+      scheduleFlush(this, signal);
     });
     this.watcher.watch(signal);
   }
 
   unsubscribe(): void {
-    pendingUpdates.delete(this);
+    cancelFlush(this);
     if (this.watcher) {
       const sources = Signal.subtle.introspectSources(this.watcher);
       if (sources.length) {
@@ -139,7 +114,7 @@ export default class SignalListBinding extends ClientListBinding {
     const internal = asInternal(this);
     if (internal.oContext !== oContext) {
       internal.oContext = oContext as Context;
-      if (internal.isRelative()) {
+      if (this.isRelative()) {
         this.update();
         this.subscribe();
         internal._fireChange({ reason: ChangeReason.Context });
