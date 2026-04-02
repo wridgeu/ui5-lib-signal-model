@@ -27,6 +27,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private registry: SignalRegistry;
   private autoCreatePaths: boolean;
   private strictLeafCheck: boolean;
+  private _pathSubscribers = new Map<string, Set<() => void>>();
   declare oData: T;
 
   constructor(sURL: string, mOptions?: SignalModelOptions);
@@ -357,7 +358,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         this.registry.getOrCreate(dep, this._getObject(dep));
       }
     }
-    return this.registry.addComputed(sPath, aDeps, fn);
+    const result = this.registry.addComputed(sPath, aDeps, fn);
+    // Re-subscribe any bindings that were watching a previous computed at this path.
+    // No-op if no bindings exist (Map lookup returns undefined).
+    this._firePathResubscribe(sPath);
+    return result;
   }
 
   removeComputed(sPath: string): void {
@@ -493,7 +498,28 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
+  _onPathResubscribe(path: string, cb: () => void): void {
+    let set = this._pathSubscribers.get(path);
+    if (!set) {
+      set = new Set();
+      this._pathSubscribers.set(path, set);
+    }
+    set.add(cb);
+  }
+
+  _offPathResubscribe(path: string, cb: () => void): void {
+    this._pathSubscribers.get(path)?.delete(cb);
+  }
+
+  private _firePathResubscribe(path: string): void {
+    const cbs = this._pathSubscribers.get(path);
+    if (cbs) {
+      for (const cb of Array.from(cbs)) cb();
+    }
+  }
+
   override destroy(): void {
+    this._pathSubscribers.clear();
     this.registry.destroy();
     super.destroy();
   }

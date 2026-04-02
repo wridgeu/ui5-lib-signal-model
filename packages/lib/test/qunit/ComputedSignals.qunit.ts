@@ -126,6 +126,32 @@ QUnit.module("ComputedSignals", () => {
     },
   );
 
+  QUnit.test(
+    "existing binding updates after removeComputed + createComputed (different deps)",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({ a: 5, b: 100 });
+      model.createComputed("/result", ["/a"], (a) => (a as number) + 10);
+
+      const binding = model.bindProperty("/result");
+      assert.strictEqual(binding.getValue(), 15, "binding reads original computed");
+
+      // Redefine with DIFFERENT dependencies — the real test.
+      // Without re-subscribe, changing /b would never fire the old watcher.
+      model.removeComputed("/result");
+      model.createComputed("/result", ["/b"], (b) => (b as number) * 2);
+
+      binding.attachChange(() => {
+        assert.strictEqual(binding.getValue(), 400, "binding sees new computed (200 * 2 = 400)");
+        model.destroy();
+        done();
+      });
+
+      // Change the NEW dependency — binding must update
+      model.setProperty("/b", 200);
+    },
+  );
+
   QUnit.test("computed with multiple dependencies", (assert) => {
     const done = assert.async();
     const model = new SignalModel({ price: 100, tax: 0.2 });

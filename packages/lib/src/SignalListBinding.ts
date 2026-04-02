@@ -39,6 +39,8 @@ function asInternal(self: SignalListBinding): ListBindingInternal {
  */
 export default class SignalListBinding extends ClientListBinding {
   watcher: Signal.subtle.Watcher | null = null;
+  private _resubscribeCb: (() => void) | null = null;
+  private _subscribedPath: string | null = null;
 
   update(): void {
     const internal = asInternal(this);
@@ -89,9 +91,18 @@ export default class SignalListBinding extends ClientListBinding {
       scheduleFlush(this, signal);
     });
     this.watcher.watch(signal);
+
+    this._subscribedPath = resolvedPath;
+    this._resubscribeCb = () => this.subscribe();
+    internal.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
   }
 
   unsubscribe(): void {
+    if (this._resubscribeCb && this._subscribedPath) {
+      asInternal(this).oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
+      this._resubscribeCb = null;
+      this._subscribedPath = null;
+    }
     cancelFlush(this);
     if (this.watcher) {
       const sources = Signal.subtle.introspectSources(this.watcher);
