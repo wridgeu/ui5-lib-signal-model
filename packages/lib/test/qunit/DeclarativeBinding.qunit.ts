@@ -128,7 +128,7 @@ QUnit.test("list binding: List control renders items from model array", (assert)
     list.destroy();
     model.destroy();
     done();
-  }, 2000);
+  }, 500);
 });
 
 QUnit.test("list binding: model update re-renders list items", (assert) => {
@@ -161,8 +161,8 @@ QUnit.test("list binding: model update re-renders list items", (assert) => {
       list.destroy();
       model.destroy();
       done();
-    }, 2000);
-  }, 2000);
+    }, 500);
+  }, 500);
 });
 
 QUnit.test("multiple controls share same model and stay in sync", (assert) => {

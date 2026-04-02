@@ -126,6 +126,8 @@ export default class SignalListBinding extends ClientListBinding {
   override initialize(): this {
     this.update();
     this.subscribe();
+    // Fire initial change so controls (e.g. sap.m.List) populate their aggregation
+    asInternal(this)._fireChange({ reason: ChangeReason.Change });
     return this;
   }
 

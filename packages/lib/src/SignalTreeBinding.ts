@@ -92,6 +92,8 @@ export default class SignalTreeBinding extends ClientTreeBinding {
 
   override initialize(): this {
     this.subscribe();
+    // Fire initial change so controls (e.g. sap.m.Tree) populate their aggregation
+    asInternal(this)._fireChange({ reason: ChangeReason.Change });
     return this;
   }
 
