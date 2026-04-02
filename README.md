@@ -35,45 +35,117 @@ const model = new SignalModel({
 // {/customer/name}, {/orders}, etc.
 ```
 
+### Typed Model
+
+```typescript
+interface AppData {
+  customer: { name: string; age: number };
+  orders: Array<{ id: number; total: number }>;
+}
+
+const model = new SignalModel<AppData>({
+  customer: { name: "Alice", age: 28 },
+  orders: [],
+});
+
+model.getProperty("/customer/name"); // string (typed)
+model.setProperty("/customer/age", 31); // type-checked
+model.setProperty("/customer/age", "x"); // compile error
+```
+
+Path types follow the same conventions as UI5's [TypedJSONModel](https://github.com/nicolo-ribaudo/ui5-typescript).
+
+### Declarative Binding
+
+SignalModel works with standard UI5 declarative bindings in XML views, one-way and two-way:
+
+```xml
+<!-- Property binding -->
+<Input value="{/customer/name}" />
+<Text text="{/customer/name}" />
+
+<!-- List binding -->
+<List items="{/orders}">
+  <StandardListItem title="{id}" description="{total}" />
+</List>
+
+<!-- Tree binding -->
+<Tree items="{path: '/org', parameters: {arrayNames: ['children']}}">
+  <StandardTreeItem title="{name}" />
+</Tree>
+
+<!-- Named model -->
+<Text text="{signals>/customer/name}" />
+
+<!-- Expression binding -->
+<Text text="{= ${/customer/name} + ' (' + ${/customer/age} + ')'}" />
+```
+
+### Computed Signals
+
+Derived values that update automatically when dependencies change:
+
+```typescript
+model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => `${first} ${last}`);
+
+// Bind to it like any other path
+// <Text text="{/fullName}" />
+```
+
+### Merge Writes
+
+Surgical updates that only notify changed paths:
+
+```typescript
+// Only /customer/age fires, /customer/name stays untouched
+model.mergeProperty("/customer", { age: 30 });
+```
+
 ## Feature Comparison: SignalModel vs JSONModel
 
-| Feature                        | JSONModel                                                         | SignalModel                                                              |
-| ------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified                  |
-| **Notification granularity**   | O(n) on total bindings per `setProperty` call                     | O(k) where k = bindings to changed path + parent paths (vs all bindings) |
-| **Change detection**           | `deepEqual` comparison on every binding                           | Signal identity: no comparison needed                                    |
-| **Binding API**                | `{/path}` in XML views                                            | Identical: `{/path}` in XML views                                        |
-| **setProperty / getProperty**  | Standard API                                                      | Same API, same signatures                                                |
-| **setData (replace)**          | Replaces data, notifies all bindings                              | Replaces data, fires all signals                                         |
-| **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                                  |
-| **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals                   |
-| **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state        |
-| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying Signal.State                     |
-| **Strict mode**                | Not available                                                     | `{ strict: true }` throws on nonexistent paths                           |
-| **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion            |
-| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                           |
-| **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                |
-| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)             |
-| **TC39 Signals alignment**     | N/A                                                               | Uses signal-polyfill; swap for native Signal when spec ships             |
+| Feature                        | JSONModel                                                         | SignalModel                                                            |
+| ------------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified via signals    |
+| **Notification granularity**   | O(n) on total bindings per `setProperty` call                     | O(k) where k = bindings to changed path + parent paths                 |
+| **Change detection**           | `deepEqual` comparison on every binding                           | Signal-based: no comparison for primitives, object-aware for mutations |
+| **Property binding**           | `{/path}` in XML views                                            | Identical                                                              |
+| **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                              |
+| **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                         |
+| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)           |
+| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                         |
+| **Declarative XML binding**    | Supported                                                         | Supported (full lifecycle: one-way, two-way, list, tree)               |
+| **Named models**               | `{modelName>/path}`                                               | Identical                                                              |
+| **Binding modes**              | OneWay, TwoWay, OneTime                                           | Same (inherits from ClientModel)                                       |
+| **Nested bindings**            | Relative paths with context                                       | Same (relative and absolute)                                           |
+| **setProperty / getProperty**  | Standard API                                                      | Same signatures, typed overloads with generics                         |
+| **setData (replace)**          | Replaces data, notifies all bindings                              | Replaces data, fires all signals                                       |
+| **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                                |
+| **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals                 |
+| **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state      |
+| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying Signal.State                   |
+| **Strict mode**                | Not available                                                     | `{ strict: true }` throws on nonexistent paths                         |
+| **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion          |
+| **TC39 Signals alignment**     | N/A                                                               | Uses signal-polyfill; swap for native Signal when spec ships           |
 
 ## API
 
 ### Constructor
 
 ```typescript
-new SignalModel(data, options?)
-// options: { strict?: boolean }
+new SignalModel<T>(data?: T, options?: { strict?: boolean })
 ```
 
 ### JSONModel-Compatible Methods
 
 ```typescript
-model.setProperty("/path", value)
-model.getProperty("/path")
-model.setData(data, merge?)
-model.getData()
-model.bindProperty("/path")
-model.bindList("/path")
+model.setProperty("/path", value);
+model.getProperty("/path");
+model.setData(data); // replace
+model.setData(partial, true); // merge
+model.getData();
+model.bindProperty("/path");
+model.bindList("/path");
+model.bindTree("/path", context, filters, { arrayNames: ["children"] }, sorters);
 ```
 
 ### Extended Methods
@@ -86,10 +158,84 @@ model.mergeProperty("/customer", { age: 30 });
 model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => `${first} ${last}`);
 model.removeComputed("/fullName");
 
-// Direct signal access
+// Direct signal access (read-only recommended)
 const signal = model.getSignal("/path");
-signal.get(); // read
-signal.set(v); // write
+signal.get(); // read current value
+```
+
+### Binding Classes
+
+| Class                   | Extends                 | Purpose                                              |
+| ----------------------- | ----------------------- | ---------------------------------------------------- |
+| `SignalPropertyBinding` | `ClientPropertyBinding` | Single-value bindings with Watcher push              |
+| `SignalListBinding`     | `ClientListBinding`     | List bindings with filter/sort, Watcher push         |
+| `SignalTreeBinding`     | `ClientTreeBinding`     | Tree bindings with hierarchy traversal, Watcher push |
+
+## Architecture
+
+```
+XML View bindings: {/customer/name}, {/orders}, {path: '/tree', ...}
+        |
+        | bindProperty / bindList / bindTree
+        v
+SignalPropertyBinding / SignalListBinding / SignalTreeBinding
+  - Each subscribes to its path's signal via Signal.subtle.Watcher
+  - Push-based: queueMicrotask batching, no polling
+        |
+        | reads / subscribes
+        v
+Signal Registry (Map<string, Signal.State | Signal.Computed>)
+  - Signals created lazily on first bind
+  - Custom equality: primitives use Object.is, objects always notify
+        |
+        | setProperty / setData / mergeProperty
+        v
+SignalModel (extends ClientModel)
+  - this.oData = raw JS object (source of truth)
+  - setProperty -> update oData + set signal + invalidate parents
+  - setData replace -> update oData + invalidate all signals
+  - setData merge -> update oData + invalidate only merge payload paths
+  - mergeProperty -> deep merge + recursive change detection
+```
+
+## Testing
+
+11 QUnit test modules covering unit, integration, and declarative binding:
+
+| Module                | Tests | Coverage                                                                       |
+| --------------------- | ----- | ------------------------------------------------------------------------------ |
+| SignalRegistry        | 12    | Lazy creation, get/set/has, invalidation, computed CRUD                        |
+| SignalPropertyBinding | 8     | Initial value, push notification, two-way, suspend/resume                      |
+| SignalModel           | 16    | Constructor, get/set, setData replace/merge, branch writes, parent propagation |
+| SignalListBinding     | 6     | Contexts, getLength, change notification, filter, sort, path isolation         |
+| SignalTreeBinding     | 7     | Root contexts, child nodes, hasChildren, deep traversal, filter, sort          |
+| ComputedSignals       | 7     | Derived values, reactive updates, write protection, conflicts, chaining        |
+| MergeProperty         | 5     | Preserve unchanged, selective notification, deep merge                         |
+| StrictMode            | 5     | Permissive default, strict throw, nested paths                                 |
+| NestedBinding         | 5     | Relative paths, nested lists, deep access, parent modification                 |
+| ExpressionBinding     | 6     | Composite values, computed expressions, dependency chains                      |
+| DeclarativeBinding    | 10    | One-way, two-way, list rendering, named models, binding modes, control sync    |
+
+Run tests:
+
+```bash
+npm run test:qunit  # automated via WDIO + headless Chrome
+```
+
+## Demo Application
+
+7 interactive showcase pages:
+
+- **Properties** -- two-way form binding with live display
+- **List** -- table with filter, sort, add item
+- **Tree** -- org chart hierarchy with add employee
+- **Computed** -- derived fullName and birthYear
+- **Programmatic** -- getSignal() direct access
+- **Strict** -- error display for invalid paths
+- **Comparison** -- side-by-side SignalModel vs JSONModel
+
+```bash
+npm run start  # opens demo app
 ```
 
 ## Development
@@ -98,8 +244,9 @@ signal.set(v); // write
 npm install
 npm run start       # demo app
 npm run start:lib   # library dev server
-npm run test:qunit  # run QUnit tests
+npm run test:qunit  # QUnit tests via WDIO
 npm run check       # lint + typecheck
+npm run build       # production build
 ```
 
 ## License
