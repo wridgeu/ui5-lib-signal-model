@@ -1,4 +1,4 @@
-import { Signal } from "./thirdparty/signal-polyfill";
+import { Signal } from "signal-polyfill";
 
 type ValueResolver = (path: string) => unknown;
 

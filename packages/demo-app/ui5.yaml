@@ -17,6 +17,8 @@ server:
       configuration:
         transpileDependencies: true
         transformModulesToUI5: true
+    - name: ui5-tooling-modules-middleware
+      afterMiddleware: ui5-tooling-transpile-middleware
     - name: ui5-middleware-livereload
       afterMiddleware: compression
 resources:
@@ -29,3 +31,5 @@ builder:
       afterTask: replaceVersion
       configuration:
         transformModulesToUI5: true
+    - name: ui5-tooling-modules-task
+      afterTask: ui5-tooling-transpile-task

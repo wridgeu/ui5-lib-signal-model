@@ -1,7 +1,7 @@
 import ClientPropertyBinding from "sap/ui/model/ClientPropertyBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
 import Context from "sap/ui/model/Context";
-import { Signal } from "./thirdparty/signal-polyfill";
+import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
 
 // Type alias for the undeclared internal shape of the base class at runtime

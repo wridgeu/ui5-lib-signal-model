@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .ui5/
+.ui5-tooling-modules/
 coverage/
 *.js.map
 *.d.ts
@@ -9,8 +10,6 @@ coverage/
 
 # Build output in src directories (transpiled .ts -> .js)
 packages/lib/src/**/*.js
-!packages/lib/src/thirdparty/signal-polyfill.js
-!packages/lib/src/thirdparty/signal-polyfill.d.ts
 packages/demo-app/webapp/**/*.js
 
 # IDE
