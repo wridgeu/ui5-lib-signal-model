@@ -27,6 +27,9 @@
       "libs": {
         "sap.ui.core": {}
       }
+    },
+    "library": {
+      "i18n": false
     }
   }
 }
