@@ -825,6 +825,76 @@
       }
 
       /**
+       * Computed signals with redefinition (removeComputed + createComputed).
+       *
+       * Creates N computeds bound to controls, then redefines each computed
+       * with a different dependency via removeComputed + createComputed.
+       * Measures that bindings still update after redefinition.
+       * SignalModel-only — JSONModel has no computed equivalent.
+       */
+      async function benchComputedRedefine(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
+        var data = { values: [], alt: [] };
+        for (var i = 0; i < n; i++) {
+          data.values.push(i);
+          data.alt.push(i * 100);
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        if (isSignal && model.createComputed) {
+          // Create N computeds on /values/i
+          for (var i = 0; i < n; i++) {
+            model.createComputed("/computed" + i, ["/values/" + i], function (v) {
+              return "original:" + v;
+            });
+          }
+        }
+
+        // Bind controls
+        var controls = [];
+        for (var j = 0; j < n; j++) {
+          var path = isSignal && model.createComputed ? "/computed" + j : "/values/" + j;
+          var text = new sap.m.Text({ text: "{" + path + "}" });
+          text.setModel(model);
+          text.placeAt(container);
+          controls.push(text);
+        }
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        if (isSignal && model.removeComputed) {
+          // Redefine all computeds: switch dependency from /values/i to /alt/i
+          for (var i = 0; i < n; i++) {
+            model.removeComputed("/computed" + i);
+            model.createComputed("/computed" + i, ["/alt/" + i], function (v) {
+              return "redefined:" + v;
+            });
+          }
+        }
+
+        // Warmup — update the NEW dependency
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setProperty(isSignal ? "/alt/0" : "/values/0", 5000 + w);
+          await flush();
+        }
+
+        // Measure: update new dependency source, redefined computed re-evaluates
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          model.setProperty(isSignal ? "/alt/0" : "/values/0", 6000 + round);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
        * setData replace with N bindings
        *
        * Replaces the entire model data and measures propagation to all bindings.
@@ -1365,7 +1435,34 @@
           signal: stats(compSignalTimes),
         });
 
-        // --- Scenario 11: setData replace ---
+        // --- Scenario 11: Computed signals with redefinition ---
+        setStatus(
+          "Running: computed (redefined) with " + compN + " computeds (alternating)...",
+        );
+        var compRedefJsonTimes = [];
+        var compRedefSignalTimes = [];
+        for (var cr = 0; cr < compHalf; cr++) {
+          if (cr % 2 === 0) {
+            var crjt = await benchComputedRedefine(base.JSONModel, false, compN, warmup, 1);
+            compRedefJsonTimes.push(crjt[0]);
+            var crst = await benchComputedRedefine(base.SignalModel, true, compN, warmup, 1);
+            compRedefSignalTimes.push(crst[0]);
+          } else {
+            var crst2 = await benchComputedRedefine(base.SignalModel, true, compN, warmup, 1);
+            compRedefSignalTimes.push(crst2[0]);
+            var crjt2 = await benchComputedRedefine(base.JSONModel, false, compN, warmup, 1);
+            compRedefJsonTimes.push(crjt2[0]);
+          }
+        }
+        results.push({
+          name: "Computed (redefined), " + compN + " computeds",
+          detail: "Redefine all computeds, change 1 new dep",
+          category: "Computed (sap.m.Text)",
+          json: stats(compRedefJsonTimes),
+          signal: stats(compRedefSignalTimes),
+        });
+
+        // --- Scenario 12: setData replace ---
         setStatus("Running: setData replace with " + n + " bindings (alternating)...");
         var r11 = await runAlternating(
           benchSetDataReplace,
