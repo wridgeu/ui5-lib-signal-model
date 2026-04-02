@@ -2,7 +2,7 @@ import ClientListBinding from "sap/ui/model/ClientListBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
 import Context from "sap/ui/model/Context";
 import deepExtend from "sap/base/util/deepExtend";
-import { Signal } from "signal-polyfill";
+import { Signal } from "./thirdparty/signal-polyfill";
 import type SignalModel from "./SignalModel";
 
 // ClientListBinding internals not exposed by @openui5/types

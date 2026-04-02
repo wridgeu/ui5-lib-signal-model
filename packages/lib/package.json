@@ -41,12 +41,10 @@
     "test": "echo \"Run tests from monorepo root: npm run test:qunit\" && exit 1",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "signal-polyfill": "^0.2.2"
-  },
   "devDependencies": {
     "@types/qunit": "^2.19.13",
     "@ui5/cli": "^4.0.0",
+    "signal-polyfill": "^0.2.2",
     "ui5-tooling-transpile": "^3.0.0"
   }
 }

@@ -5,7 +5,7 @@ import SignalRegistry from "./SignalRegistry";
 import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
 import type { SignalModelOptions, ModelPath, PathValue } from "./types";
-import type { Signal } from "signal-polyfill";
+import type { Signal } from "./thirdparty/signal-polyfill";
 
 // `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
 type ClientModelInternal = ClientModel & {
