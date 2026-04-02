@@ -1,52 +1,70 @@
 /**
- * Recursively builds "/" separated path strings from an object type.
- * Handles nested objects and arrays with numeric indices.
+ * Extracts property names of a type, excluding Function and symbol properties.
+ * Aligns with UI5 TypedJSONModel conventions.
  */
-type PathImpl<T, Key extends keyof T> = Key extends string | number
-  ? T[Key] extends Record<string, unknown>
-    ? `${Key}` | `${Key}/${PathImpl<T[Key], Exclude<keyof T[Key], keyof unknown[]>>}`
-    : T[Key] extends Array<infer U>
-      ?
-          | `${Key}`
-          | `${Key}/${number}`
-          | (U extends Record<string, unknown>
-              ? `${Key}/${number}/${PathImpl<U, Exclude<keyof U, keyof unknown[]>>}`
-              : never)
-      : `${Key}`
-  : never;
+type PropertiesOf<T> = {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  [Key in keyof T]: T[Key] extends Function ? never : T[Key] extends symbol ? never : Key;
+}[keyof T];
 
 /**
- * All valid absolute paths for a data type T.
- * Paths start with "/" and use "/" as separator: "/customer/name"
+ * All valid absolute binding paths for a data type T.
+ * Paths start with "/" and use "/" as separator: "/customer/name".
+ *
+ * Follows the same conventions as UI5's TypedJSONModel AbsoluteBindingPath.
+ *
+ * @example
+ * type Person = { name: string; orders: Array<{ id: number }> };
+ * type Paths = ModelPath<Person>;
+ * // "/name" | "/orders" | "/orders/${number}" | "/orders/${number}/id"
  */
 export type ModelPath<T> =
-  | "/"
-  | (T extends object ? `/${PathImpl<T, Exclude<keyof T, keyof unknown[]>>}` : never);
+  T extends Array<unknown>
+    ? `/${number}` | `/${number}${ModelPath<T[number]>}`
+    : T extends object
+      ? {
+          [Key in string & PropertiesOf<T>]: T[Key] extends Array<unknown>
+            ? `/${Key}` | `/${Key}/${number}` | `/${Key}/${number}${ModelPath<T[Key][number]>}`
+            : `/${Key}` | `/${Key}${ModelPath<T[Key]>}`;
+        }[string & PropertiesOf<T>]
+      : never;
 
 /**
- * Resolves the value type at a given path P within type T.
+ * Resolves the value type at an absolute path P within type T.
+ *
+ * @example
+ * type Person = { name: string; age: number };
+ * type Name = PathValue<Person, "/name">; // string
  */
-export type PathValue<T, P extends string> = P extends "/"
-  ? T
-  : P extends `/${infer Rest}`
-    ? PathValueImpl<T, Rest>
-    : never;
-
-type PathValueImpl<T, P extends string> = P extends `${infer Key}/${infer Rest}`
-  ? Key extends keyof T
-    ? PathValueImpl<T[Key], Rest>
-    : Key extends `${number}`
-      ? T extends Array<infer U>
-        ? PathValueImpl<U, Rest>
-        : never
+export type PathValue<T, P extends string> = P extends `/${number}`
+  ? T extends Array<infer U>
+    ? U
+    : never
+  : P extends `/${number}${infer Rest}`
+    ? T extends Array<infer U>
+      ? PathValue<U, Rest>
       : never
-  : P extends keyof T
-    ? T[P]
-    : P extends `${number}`
-      ? T extends Array<infer U>
-        ? U
+    : P extends `/${infer Key}/${number}/${infer Rest}`
+      ? Key extends keyof T
+        ? T[Key] extends Array<infer U>
+          ? PathValue<U, `/${Rest}`>
+          : never
         : never
-      : never;
+      : P extends `/${infer Key}/${number}`
+        ? Key extends keyof T
+          ? T[Key] extends Array<infer U>
+            ? U
+            : never
+          : never
+        : P extends `/${infer Key}/${infer Rest}`
+          ? Key extends keyof T
+            ? PathValue<T[Key], `/${Rest}`>
+            : never
+          : P extends `/${infer Key}`
+            ? Key extends keyof T
+              ? T[Key]
+              : never
+            : never;
 
 /**
  * Options for the SignalModel constructor.

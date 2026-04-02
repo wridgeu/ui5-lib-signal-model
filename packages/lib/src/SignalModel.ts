@@ -35,7 +35,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     this.strict = mOptions?.strict ?? false;
   }
 
-  setData(oData: Partial<T>, bMerge?: boolean): void {
+  setData(oData: T): void;
+  setData(oData: Partial<T>, bMerge: true): void;
+  setData(oData: T | Partial<T>, bMerge?: boolean): void {
     if (bMerge) {
       this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData, oData) as T;
       // Only invalidate paths that were part of the merge payload
@@ -50,7 +52,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return this.oData;
   }
 
-  getProperty<P extends string & ModelPath<T>>(sPath: P): PathValue<T, P>;
+  getProperty<P extends string & ModelPath<T>>(sPath: P, oContext?: undefined): PathValue<T, P>;
   getProperty(sPath: string, oContext?: Context): unknown;
   getProperty(sPath: string, oContext?: Context): unknown {
     const sResolvedPath = asInternal(this).resolve(sPath, oContext);
@@ -60,7 +62,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return this._getObject(sPath, oContext);
   }
 
-  setProperty<P extends string & ModelPath<T>>(sPath: P, oValue: PathValue<T, P>): boolean;
+  setProperty<P extends string & ModelPath<T>>(
+    sPath: P,
+    oValue: PathValue<T, P>,
+    oContext?: undefined,
+    bAsyncUpdate?: boolean,
+  ): boolean;
   setProperty(sPath: string, oValue: unknown, oContext?: Context, bAsyncUpdate?: boolean): boolean;
   setProperty(
     sPath: string,
@@ -74,7 +81,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
 
     if (sResolvedPath === "/") {
-      this.setData(oValue as Partial<T>);
+      this.setData(oValue as T);
       return true;
     }
 
@@ -135,7 +142,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Root path: delegate to setData with merge
     if (sResolvedPath === "/") {
       if (typeof oValue === "object" && oValue !== null) {
-        this.setData(oValue as Partial<T>, true);
+        this.setData(oValue as T, true);
         return true;
       }
       return false;
