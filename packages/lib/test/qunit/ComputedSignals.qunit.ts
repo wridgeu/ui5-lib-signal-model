@@ -48,12 +48,25 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
-  QUnit.test("createComputed on existing computed replaces it", (assert) => {
+  QUnit.test("createComputed on existing computed throws", (assert) => {
+    const model = new SignalModel({ a: 5 });
+    model.createComputed("/result", ["/a"], (a) => (a as number) + 10);
+    assert.throws(
+      () => model.createComputed("/result", ["/a"], (a) => (a as number) * 2),
+      TypeError,
+      "throws when computed already exists",
+    );
+    model.destroy();
+  });
+
+  QUnit.test("removeComputed then createComputed redefines the derivation", (assert) => {
     const model = new SignalModel({ a: 5 });
     model.createComputed("/result", ["/a"], (a) => (a as number) + 10);
     assert.strictEqual(model.bindProperty("/result").getValue(), 15, "first computed");
+
+    model.removeComputed("/result");
     model.createComputed("/result", ["/a"], (a) => (a as number) * 2);
-    assert.strictEqual(model.bindProperty("/result").getValue(), 10, "replaced computed");
+    assert.strictEqual(model.bindProperty("/result").getValue(), 10, "redefined computed");
     model.destroy();
   });
 

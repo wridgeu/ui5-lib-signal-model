@@ -186,10 +186,13 @@ QUnit.module("SignalPropertyBinding", () => {
   QUnit.test("destroy cleans up watcher", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     const binding = model.bindProperty("/name");
-    binding.attachChange(() => {});
 
     binding.destroy();
-    assert.ok(true, "destroy completes without error");
+    assert.strictEqual(
+      (binding as unknown as { watcher: unknown }).watcher,
+      null,
+      "watcher is null after destroy",
+    );
     model.destroy();
   });
 

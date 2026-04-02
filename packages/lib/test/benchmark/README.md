@@ -120,7 +120,7 @@ With `bAsyncUpdate=true`, **JSONModel is actually faster than SignalModel** for 
 | During N `setProperty` calls | Sets data, schedules 1 timer    | Sets data, fires N watcher callbacks, each does `Map.set()`              |
 | Batched flush                | 1 loop: `deepEqual` per binding | 1 loop: `signal.get()` + `watcher.watch()` + `checkUpdate()` per binding |
 
-The overhead comes from the TC39 `Signal.subtle.Watcher` API contract: after a signal notifies its watcher, the watcher must be explicitly re-armed by calling `signal.get()` (to acknowledge the change) then `watcher.watch()` (to re-register). This is inherent to the polyfill's design and cannot be optimized away without changes to the signal-polyfill itself. JSONModel's `deepEqual` comparison is a single function call per binding with no re-registration overhead.
+The overhead comes from the TC39 `Signal.subtle.Watcher` API contract: after a signal notifies its watcher, the watcher must be explicitly re-armed by calling `signal.get()` (to acknowledge the change) then `watcher.watch()` (to re-register). This is inherent to the Watcher API design itself (not a polyfill limitation) and cannot be optimized away at the application level. JSONModel's `deepEqual` comparison is a single function call per binding with no re-registration overhead.
 
 **Where SignalModel's in-place merge wins:**
 

@@ -59,7 +59,6 @@ export default class SignalRegistry {
     path: string,
     deps: string[],
     fn: (...args: unknown[]) => unknown,
-    strict?: boolean,
   ): Signal.Computed<unknown> {
     if (this.signals.has(path)) {
       throw new TypeError(
@@ -67,15 +66,10 @@ export default class SignalRegistry {
       );
     }
 
-    const existing = this.computeds.get(path);
-    if (existing) {
-      if (strict) {
-        throw new TypeError(
-          `Cannot create computed signal at "${path}": a computed signal already exists (strict mode)`,
-        );
-      }
-      console.warn(`Replacing existing computed signal at "${path}"`);
-      this.computeds.delete(path);
+    if (this.computeds.has(path)) {
+      throw new TypeError(
+        `Cannot create computed at "${path}": already exists (call removeComputed first)`,
+      );
     }
 
     const computed = new Signal.Computed(() => {

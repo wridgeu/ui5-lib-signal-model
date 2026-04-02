@@ -29,7 +29,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private strictLeafCheck: boolean;
   declare oData: T;
 
-  constructor(sURL: string);
+  constructor(sURL: string, mOptions?: SignalModelOptions);
   constructor(oData?: T, mOptions?: SignalModelOptions);
   constructor(oDataOrURL?: T | string, mOptions?: SignalModelOptions) {
     super();
@@ -116,6 +116,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           message: error.message,
           statusCode: "0",
           statusText: error.message,
+        });
+        // JSONModel fires requestCompleted on both success and failure
+        this.fireRequestCompleted({
+          url: sURL,
+          type: sMethod,
+          async: true,
+          success: false,
+          errorobject: { message: error.message },
         });
       });
 
@@ -326,9 +334,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return 0;
   }
 
-  getSignal<P extends string & ModelPath<T>>(sPath: P): Signal.State<PathValue<T, P>>;
-  getSignal(sPath: string): Signal.State<unknown>;
-  getSignal(sPath: string): Signal.State<unknown> {
+  getSignal<P extends string & ModelPath<T>>(
+    sPath: P,
+  ): Signal.State<PathValue<T, P>> | Signal.Computed<PathValue<T, P>>;
+  getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown>;
+  getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown> {
+    const existing = this.registry.get(sPath);
+    if (existing) return existing;
     return this.registry.getOrCreate(sPath, this._getObject(sPath));
   }
 
@@ -345,7 +357,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         this.registry.getOrCreate(dep, this._getObject(dep));
       }
     }
-    return this.registry.addComputed(sPath, aDeps, fn, this.strictLeafCheck);
+    return this.registry.addComputed(sPath, aDeps, fn);
   }
 
   removeComputed(sPath: string): void {
@@ -463,8 +475,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         target[key] =
           typeof newValue === "object" && newValue !== null ? structuredClone(newValue) : newValue;
         this.registry.set(childPath, target[key]);
-        // If old was an object and new is not (or vice versa), invalidate children
-        if (typeof oldValue === "object" && oldValue !== null) {
+        // Type changed: invalidate child signals in either direction
+        // (object→primitive: children are gone, primitive→object: children are now valid)
+        if (
+          (typeof oldValue === "object" && oldValue !== null) ||
+          (typeof newValue === "object" && newValue !== null)
+        ) {
           this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
         }
       }

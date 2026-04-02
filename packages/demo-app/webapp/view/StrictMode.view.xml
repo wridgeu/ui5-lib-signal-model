@@ -12,7 +12,7 @@
 			<MessageStrip id="result" text="" type="None" class="sapUiSmallMarginTop" visible="false" />
 		</VBox>
 		<MessageStrip
-			text="In strict mode, setProperty on a nonexistent path throws a TypeError. Try setting /nonexistent to see the error."
+			text="With strictLeafCheck enabled, setProperty returns false for nonexistent leaf properties. Try setting /nonexistent to see the rejection."
 			type="Information"
 			class="sapUiSmallMargin" />
 	</Panel>

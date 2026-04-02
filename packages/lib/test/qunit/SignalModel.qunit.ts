@@ -224,9 +224,25 @@ QUnit.module("SignalModel", () => {
   });
 
   QUnit.test("destroy cleans up registry", (assert) => {
+    const done = assert.async();
     const model = new SignalModel({ name: "Alice" });
-    model.bindProperty("/name");
+    const binding = model.bindProperty("/name");
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
     model.destroy();
-    assert.ok(true, "destroy completes without error");
+
+    // After destroy, setting property should not notify binding
+    // (registry is cleared, signals no longer exist)
+    try {
+      model.setProperty("/name", "Bob");
+    } catch {
+      // setProperty may throw after destroy — that's acceptable
+    }
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no change events after destroy");
+      done();
+    }, 50);
   });
 });
