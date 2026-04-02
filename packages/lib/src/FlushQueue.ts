@@ -15,6 +15,12 @@ interface FlushableBinding {
  * instead of scheduling one microtask per signal change. Multiple signal
  * notifications within the same synchronous block are collapsed into a
  * single checkUpdate per binding.
+ *
+ * Uses queueMicrotask (not setTimeout) deliberately: microtasks run before
+ * the browser paints, so the first rendered frame always shows correct data.
+ * JSONModel's bAsyncUpdate uses setTimeout, which can flash one stale frame
+ * before the checkUpdate pass runs. See README "Microtask vs Macrotask
+ * Scheduling" for the full rationale.
  */
 const pendingUpdates = new Map<
   FlushableBinding,

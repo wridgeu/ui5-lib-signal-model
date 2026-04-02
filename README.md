@@ -358,6 +358,17 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` flag that defers `checkUpdate
 
 SignalModel ignores this flag — signals are inherently push-based and already batched via the microtask flush queue. Each `setProperty` does O(1) signal work regardless of sync/async mode. However, when JSONModel uses `bAsyncUpdate=true`, it achieves O(_n_) total (one bulk `deepEqual` pass over all bindings), while SignalModel's Watcher re-arm cycle adds constant overhead per binding. At 2000 bindings, this gap is ~2.5x (~20ms vs ~50ms) — see the [benchmark section](#performance-benchmark) for the full analysis.
 
+### Microtask vs Macrotask Scheduling
+
+JSONModel's `bAsyncUpdate` uses `setTimeout` (macrotask). SignalModel's flush queue uses `queueMicrotask` (microtask). This is not just an implementation detail — it affects visual consistency.
+
+The browser event loop processes work in this order: **current JS → all microtasks → render (paint) → next macrotask**. This means:
+
+- **`queueMicrotask` (SignalModel):** binding updates run _before_ the browser paints. The first frame the user sees already has the correct data. One paint, always consistent.
+- **`setTimeout` (JSONModel async):** binding updates run _after_ the browser paints. The browser renders one frame with stale DOM (bindings haven't been checked yet), then a second frame with the correct data. This can cause a visible flash of outdated content.
+
+The total work is identical — the same `checkUpdate` runs on the same bindings. The difference is whether the user sees one correct frame (microtask) or one stale frame followed by one correct frame (macrotask). For UI5 form applications, microtask scheduling eliminates an entire class of visual glitches where the UI briefly shows inconsistent state between model data and rendered controls.
+
 ## Development
 
 ```bash
