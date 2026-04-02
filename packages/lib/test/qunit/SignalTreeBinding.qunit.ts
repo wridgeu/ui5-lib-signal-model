@@ -1,0 +1,140 @@
+import SignalModel from "ui5/model/signal/SignalModel";
+
+QUnit.module("SignalTreeBinding", () => {
+  QUnit.test("getRootContexts returns root-level nodes", (assert) => {
+    const model = new SignalModel({
+      tree: [
+        { name: "Root 1", children: [{ name: "Child 1.1" }] },
+        { name: "Root 2", children: [] },
+      ],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    const roots = binding.getRootContexts();
+
+    assert.strictEqual(roots.length, 2, "2 root nodes");
+    assert.strictEqual(model.getProperty("name", roots[0]), "Root 1", "first root");
+    assert.strictEqual(model.getProperty("name", roots[1]), "Root 2", "second root");
+    model.destroy();
+  });
+
+  QUnit.test("getNodeContexts returns child nodes", (assert) => {
+    const model = new SignalModel({
+      tree: [
+        {
+          name: "Parent",
+          children: [{ name: "Child A" }, { name: "Child B" }, { name: "Child C" }],
+        },
+      ],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    const roots = binding.getRootContexts();
+    const children = binding.getNodeContexts(roots[0]);
+
+    assert.strictEqual(children.length, 3, "3 children");
+    assert.strictEqual(model.getProperty("name", children[0]), "Child A", "first child");
+    assert.strictEqual(model.getProperty("name", children[2]), "Child C", "third child");
+    model.destroy();
+  });
+
+  QUnit.test("hasChildren returns correct values", (assert) => {
+    const model = new SignalModel({
+      tree: [{ name: "Parent", children: [{ name: "Child" }] }, { name: "Leaf" }],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    const roots = binding.getRootContexts();
+
+    assert.ok(binding.hasChildren(roots[0]), "parent has children");
+    assert.notOk(binding.hasChildren(roots[1]), "leaf has no children");
+    model.destroy();
+  });
+
+  QUnit.test("deeply nested tree traversal", (assert) => {
+    const model = new SignalModel({
+      tree: [
+        {
+          name: "L1",
+          children: [
+            {
+              name: "L2",
+              children: [{ name: "L3", children: [] }],
+            },
+          ],
+        },
+      ],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    const roots = binding.getRootContexts();
+    const level2 = binding.getNodeContexts(roots[0]);
+    const level3 = binding.getNodeContexts(level2[0]);
+
+    assert.strictEqual(model.getProperty("name", level3[0]), "L3", "deep traversal works");
+    model.destroy();
+  });
+
+  QUnit.test("tree binding fires change when data is modified", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      tree: [{ name: "Original" }],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
+
+    binding.attachChange(() => {
+      const roots = binding.getRootContexts();
+      assert.strictEqual(roots.length, 2, "tree updated to 2 roots");
+      model.destroy();
+      done();
+    });
+
+    model.setProperty("/tree", [{ name: "Original" }, { name: "Added" }]);
+  });
+
+  QUnit.test("tree binding with filter", (assert) => {
+    const done = assert.async();
+    sap.ui.require(
+      ["sap/ui/model/Filter", "sap/ui/model/FilterOperator"],
+      (Filter: any, FilterOperator: any) => {
+        const model = new SignalModel({
+          tree: [
+            { name: "Alice", active: true, children: [] },
+            { name: "Bob", active: false, children: [] },
+            { name: "Carol", active: true, children: [] },
+          ],
+        });
+        const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+
+        binding.filter([new Filter("active", FilterOperator.EQ, true)]);
+        const roots = binding.getRootContexts();
+
+        assert.strictEqual(roots.length, 2, "filtered to 2 active nodes");
+        assert.strictEqual(model.getProperty("name", roots[0]), "Alice", "first is Alice");
+        assert.strictEqual(model.getProperty("name", roots[1]), "Carol", "second is Carol");
+        model.destroy();
+        done();
+      },
+    );
+  });
+
+  QUnit.test("tree binding with sort", (assert) => {
+    const done = assert.async();
+    sap.ui.require(["sap/ui/model/Sorter"], (Sorter: any) => {
+      const model = new SignalModel({
+        tree: [
+          { name: "Carol", children: [] },
+          { name: "Alice", children: [] },
+          { name: "Bob", children: [] },
+        ],
+      });
+      const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+
+      binding.sort(new Sorter("name"));
+      const roots = binding.getRootContexts();
+
+      assert.strictEqual(model.getProperty("name", roots[0]), "Alice", "sorted first");
+      assert.strictEqual(model.getProperty("name", roots[1]), "Bob", "sorted second");
+      assert.strictEqual(model.getProperty("name", roots[2]), "Carol", "sorted third");
+      model.destroy();
+      done();
+    });
+  });
+});

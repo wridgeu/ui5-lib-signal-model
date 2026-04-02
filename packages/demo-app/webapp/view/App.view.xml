@@ -16,6 +16,7 @@
 								<SegmentedButtonItem key="programmatic" text="Programmatic" />
 								<SegmentedButtonItem key="strict" text="Strict" />
 								<SegmentedButtonItem key="comparison" text="Comparison" />
+								<SegmentedButtonItem key="tree" text="Tree" />
 							</items>
 						</SegmentedButton>
 					</headerContent>

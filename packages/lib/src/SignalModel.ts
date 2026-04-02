@@ -4,6 +4,7 @@ import deepExtend from "sap/base/util/deepExtend";
 import SignalRegistry from "./SignalRegistry";
 import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
+import SignalTreeBinding from "./SignalTreeBinding";
 import type { SignalModelOptions, ModelPath, PathValue } from "./types";
 import type { Signal } from "signal-polyfill";
 
@@ -206,6 +207,30 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     ) => SignalListBinding)(this, sPath, oContext, aSorters, aFilters, mParameters);
     binding.subscribe();
     return binding;
+  }
+
+  override bindTree(
+    sPath: string,
+    oContext?: Context,
+    aFilters?: object | object[],
+    mParameters?: object,
+    aSorters?: object | object[],
+  ): SignalTreeBinding {
+    const binding = new (SignalTreeBinding as unknown as new (
+      model: SignalModel<any>,
+      path: string,
+      context?: Context,
+      filters?: object | object[],
+      params?: object,
+      sorters?: object | object[],
+    ) => SignalTreeBinding)(this, sPath, oContext, aFilters, mParameters, aSorters);
+    binding.subscribe();
+    return binding;
+  }
+
+  isList(sPath: string, oContext?: Context): boolean {
+    const sAbsolutePath = asInternal(this).resolve(sPath, oContext);
+    return Array.isArray(this._getObject(sAbsolutePath!));
   }
 
   checkUpdate(_bForceUpdate?: boolean, _bAsync?: boolean): number {

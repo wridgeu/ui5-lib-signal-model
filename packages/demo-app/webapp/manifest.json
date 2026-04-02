@@ -50,7 +50,8 @@
         { "name": "computed", "pattern": "computed", "target": "computed" },
         { "name": "programmatic", "pattern": "programmatic", "target": "programmatic" },
         { "name": "strict", "pattern": "strict", "target": "strict" },
-        { "name": "comparison", "pattern": "comparison", "target": "comparison" }
+        { "name": "comparison", "pattern": "comparison", "target": "comparison" },
+        { "name": "tree", "pattern": "tree", "target": "tree" }
       ],
       "targets": {
         "propertyBinding": { "name": "PropertyBinding", "id": "propertyBindingView" },
@@ -58,7 +59,8 @@
         "computed": { "name": "ComputedSignals", "id": "computedView" },
         "programmatic": { "name": "ProgrammaticAccess", "id": "programmaticView" },
         "strict": { "name": "StrictMode", "id": "strictModeView" },
-        "comparison": { "name": "Comparison", "id": "comparisonView" }
+        "comparison": { "name": "Comparison", "id": "comparisonView" },
+        "tree": { "name": "TreeBinding", "id": "treeView" }
       }
     }
   }
