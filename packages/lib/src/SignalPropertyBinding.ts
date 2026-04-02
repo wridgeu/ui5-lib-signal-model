@@ -25,27 +25,36 @@ function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal 
   return self as unknown as ClientPropertyBindingInternal;
 }
 
-// Microtask batching: collect all pending binding updates and process them
-// in a single microtask instead of scheduling one microtask per signal change.
-const pendingUpdates = new Map<
-  SignalPropertyBinding,
-  Signal.State<unknown> | Signal.Computed<unknown>
->();
+// Shared watcher: one Watcher instance for all property bindings.
+// Reverse map from signal to bindings allows O(1) lookup on flush.
+type AnySignal = Signal.State<unknown> | Signal.Computed<unknown>;
+const signalToBindings = new Map<AnySignal, Set<SignalPropertyBinding>>();
 let flushScheduled = false;
 
-function scheduleFlush(): void {
+const sharedWatcher = new Signal.subtle.Watcher(() => {
   if (!flushScheduled) {
     flushScheduled = true;
-    queueMicrotask(() => {
-      flushScheduled = false;
-      const entries = [...pendingUpdates.entries()];
-      pendingUpdates.clear();
-      for (const [binding, signal] of entries) {
-        signal.get();
-        binding.watcher?.watch();
+    queueMicrotask(flush);
+  }
+});
+
+function flush(): void {
+  flushScheduled = false;
+  // Get all dirty signals and re-evaluate them in bulk
+  const pending = sharedWatcher.getPending();
+  for (const s of pending) {
+    s.get();
+  }
+  // Re-arm the watcher for all watched signals in one call
+  sharedWatcher.watch();
+  // Now fire UI5 binding updates for the affected bindings
+  for (const s of pending) {
+    const bindings = signalToBindings.get(s as AnySignal);
+    if (bindings) {
+      for (const binding of bindings) {
         binding.checkUpdate();
       }
-    });
+    }
   }
 }
 
@@ -56,7 +65,7 @@ function scheduleFlush(): void {
  */
 export default class SignalPropertyBinding extends ClientPropertyBinding {
   declare oModel: SignalModel;
-  watcher: Signal.subtle.Watcher | null = null;
+  private watchedSignal: AnySignal | null = null;
 
   checkUpdate(bForceUpdate?: boolean): void {
     const self = asInternal(this);
@@ -104,22 +113,31 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
 
     const self = asInternal(this);
     const signal = this.oModel._getOrCreateSignal(resolvedPath, self._getValue());
+    this.watchedSignal = signal;
 
-    this.watcher = new Signal.subtle.Watcher(() => {
-      pendingUpdates.set(this, signal);
-      scheduleFlush();
-    });
-    this.watcher.watch(signal);
+    // Register in reverse map
+    let bindings = signalToBindings.get(signal);
+    if (!bindings) {
+      bindings = new Set();
+      signalToBindings.set(signal, bindings);
+    }
+    bindings.add(this);
+
+    // Watch via shared watcher
+    sharedWatcher.watch(signal);
   }
 
   unsubscribe(): void {
-    pendingUpdates.delete(this);
-    if (this.watcher) {
-      const sources = Signal.subtle.introspectSources(this.watcher);
-      if (sources.length) {
-        this.watcher.unwatch(...sources);
+    if (this.watchedSignal) {
+      const bindings = signalToBindings.get(this.watchedSignal);
+      if (bindings) {
+        bindings.delete(this);
+        if (bindings.size === 0) {
+          signalToBindings.delete(this.watchedSignal);
+          sharedWatcher.unwatch(this.watchedSignal);
+        }
       }
-      this.watcher = null;
+      this.watchedSignal = null;
     }
   }
 
