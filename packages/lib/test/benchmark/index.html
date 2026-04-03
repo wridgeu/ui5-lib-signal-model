@@ -1301,6 +1301,18 @@
         var measuredRounds = parseInt(document.getElementById("rounds").value, 10);
         var warmup = 3;
 
+        // CLI support: expose state for external consumers (WDIO bench runner)
+        window.__bench = {
+          config: { bindings: n, iterations: iters, rounds: measuredRounds },
+          results: [],
+          done: false,
+        };
+
+        function pushResult(result) {
+          results.push(result);
+          window.__bench.results.push(result);
+        }
+
         setStatus("Loading UI5 modules...");
 
         var mods = await new Promise(function (resolve) {
@@ -1339,7 +1351,7 @@
           Object.assign({}, base, { params: [iters] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "setProperty throughput (no bindings)",
           detail: iters + " ops",
           category: "Model API",
@@ -1354,7 +1366,7 @@
           Object.assign({}, base, { params: [iters] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "getProperty throughput",
           detail: iters + " reads",
           category: "Model API",
@@ -1371,7 +1383,7 @@
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "Single-path update, " + n + " bindings",
           detail: "Change 1 path, " + n + " bindings exist",
           category: "Property (sap.m.Text)",
@@ -1386,7 +1398,7 @@
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "Update all " + n + " bindings",
           detail: n + " setProperty calls, " + n + " bindings",
           category: "Property (sap.m.Text)",
@@ -1401,7 +1413,7 @@
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "Update all " + n + " (async)",
           detail: n + " setProperty(bAsync=true)",
           category: "Property (sap.m.Text)",
@@ -1417,7 +1429,7 @@
           Object.assign({}, base, { params: [listN] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "List binding replace, " + listN + " items",
           detail: "Replace array, re-render list",
           category: "List (sap.m.List)",
@@ -1433,7 +1445,7 @@
           Object.assign({}, base, { params: [tableN] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "Table binding replace, " + tableN + " rows",
           detail: "Replace rows, 3 columns each",
           category: "List (sap.m.Table)",
@@ -1449,7 +1461,7 @@
           Object.assign({}, base, { params: [treeN] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "Tree binding replace, " + treeN + " nodes",
           detail: "Replace tree, re-render hierarchy",
           category: "Tree (sap.m.Tree)",
@@ -1465,7 +1477,7 @@
           Object.assign({}, base, { params: [exprN] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "Expression binding, " + exprN + " controls",
           detail: "Change 1 path, expression re-evaluates",
           category: "Expression (sap.m.Text)",
@@ -1493,7 +1505,7 @@
             compJsonTimes.push(cjt2[0]);
           }
         }
-        results.push({
+        pushResult({
           name: "Computed signals, " + compN + " computeds",
           detail: "Change 1 source, computed re-evaluates",
           category: "Computed (sap.m.Text)",
@@ -1518,7 +1530,7 @@
             compRedefJsonTimes.push(crjt2[0]);
           }
         }
-        results.push({
+        pushResult({
           name: "Computed (redefined), " + compN + " computeds",
           detail: "Redefine all computeds, change 1 new dep",
           category: "Computed (sap.m.Text)",
@@ -1533,7 +1545,7 @@
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "setData replace, " + n + " bindings",
           detail: "Full data replacement",
           category: "Property (sap.m.Text)",
@@ -1548,7 +1560,7 @@
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "setData merge (shallow), " + n + " bindings",
           detail: "Merge 5 items into " + n,
           category: "Property (sap.m.Text)",
@@ -1563,7 +1575,7 @@
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "setData merge (deep), " + n + " bindings",
           detail: "Merge all " + n + " items",
           category: "Property (sap.m.Text)",
@@ -1580,7 +1592,7 @@
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "setData merge (nested config), " + n + " bindings",
           detail: "Merge 3 deep leaf paths",
           category: "Property (sap.m.Text)",
@@ -1602,7 +1614,7 @@
           Object.assign({}, base, { params: [n] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "setData merge (large, pinpoint), " + largeN + " items",
           detail: "Merge 3 items into " + largeN,
           category: "Property (sap.m.Text)",
@@ -1619,7 +1631,7 @@
           Object.assign({}, base, { params: [0] }),
           measuredRounds,
         );
-        results.push({
+        pushResult({
           name: "Real-world: checkPerformanceOfUpdate threshold",
           detail: "3,449 bindings, 29 sync setProperty calls (100,021 binding checks)",
           category: "Property (sap.m.Text)",
@@ -1627,6 +1639,7 @@
           signal: stats(r16.signalTimes),
         });
 
+        window.__bench.done = true;
         renderResults(results, n, iters, measuredRounds);
         setStatus("");
         btn.disabled = false;
@@ -1836,6 +1849,25 @@
 
         document.getElementById("results").innerHTML = html;
       }
+      // ---------------------------------------------------------------
+      // CLI support: URL parameters and autorun
+      // ---------------------------------------------------------------
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        if (params.has("n")) document.getElementById("bindingCount").value = params.get("n");
+        if (params.has("iterations"))
+          document.getElementById("iterations").value = params.get("iterations");
+        if (params.has("rounds"))
+          document.getElementById("rounds").value = params.get("rounds");
+        if (params.has("autorun")) {
+          var poll = setInterval(function () {
+            if (typeof sap !== "undefined" && sap.ui && sap.ui.require) {
+              clearInterval(poll);
+              runBenchmark();
+            }
+          }, 100);
+        }
+      })();
     </script>
   </body>
 </html>

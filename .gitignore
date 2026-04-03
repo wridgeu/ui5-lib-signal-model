@@ -22,3 +22,6 @@ packages/demo-app/webapp/**/*.js
 .DS_Store
 Thumbs.db
 NUL
+
+# Plans / tooling artifacts
+docs/plans/
