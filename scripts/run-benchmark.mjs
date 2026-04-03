@@ -49,6 +49,17 @@ Options:
   process.exit(0);
 }
 
+for (const [name, val] of Object.entries({
+  bindings: values.bindings,
+  iterations: values.iterations,
+  rounds: values.rounds,
+})) {
+  if (!Number.isFinite(Number(val)) || Number(val) <= 0) {
+    console.error(`Error: --${name} must be a positive number (got "${val}")`);
+    process.exit(1);
+  }
+}
+
 const env = {
   ...process.env,
   BENCH_BINDINGS: values.bindings,
@@ -75,4 +86,4 @@ const child = spawn(
 );
 
 const code = await new Promise((resolve) => child.on("close", resolve));
-process.exitCode = code;
+process.exitCode = code ?? 1;

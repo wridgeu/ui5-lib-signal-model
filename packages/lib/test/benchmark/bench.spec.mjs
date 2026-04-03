@@ -161,14 +161,14 @@ describe("Benchmark", function () {
         interval: 2_000,
         timeoutMsg:
           "Benchmark did not complete within 10 minutes. " +
-          `Completed ${lastCount}/17 scenarios before timeout.`,
+          `Completed ${lastCount} scenarios before timeout.`,
       },
     );
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(SEP);
     console.log(
-      `\n${GREEN}Done${RESET} in ${elapsed}s \u2014 ${lastCount}/${lastCount} scenarios`,
+      `\n${GREEN}Done${RESET} in ${elapsed}s \u2014 ${lastCount} scenarios`,
     );
 
     // Persist results as JSON if requested via BENCH_JSON env var.

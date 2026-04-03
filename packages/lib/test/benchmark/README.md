@@ -5,10 +5,44 @@ Self-contained benchmark comparing SignalModel and JSONModel across all binding 
 ## Quick Start
 
 ```bash
-npm run start:bench
+npm run start:bench                                        # browser — opens benchmark page
+npm run bench                                              # CLI — headless, streams to terminal
+npm run bench -- --bindings 1000 --iterations 500 --rounds 10
+npm run bench -- --bindings 2000 --json results.json       # save results as JSON
 ```
 
-Starts the library dev server and opens the benchmark page in your browser.
+### Browser mode
+
+`npm run start:bench` starts the dev server and opens the benchmark page. Select binding count, iterations, and rounds from the dropdowns, then click "Run Benchmark".
+
+### CLI mode
+
+`npm run bench` runs all scenarios in headless Chrome via WDIO and streams results to the terminal as each scenario completes. No browser window opens.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--bindings N` | `500` | Number of UI5 property bindings |
+| `--iterations N` | `500` | Iterations per scenario |
+| `--rounds N` | `10` | Measured rounds (alternating A-B) |
+| `--json <file>` | — | Save results as JSON |
+
+The CLI reuses the same benchmark page and WDIO infrastructure as the QUnit tests — no additional dependencies. The benchmark HTML page accepts URL parameters (`?n=&iterations=&rounds=&autorun`) and exposes a `window.__bench` global that the WDIO spec polls for streaming results.
+
+JSON output format:
+
+```json
+{
+  "timestamp": "2026-04-03T...",
+  "config": { "bindings": 1000, "iterations": 500, "rounds": 10 },
+  "results": [
+    {
+      "name": "Update all 1000 bindings",
+      "category": "Property (sap.m.Text)",
+      "json": { "median": 204.6, "mean": 210.3, "stddev": 12.1, "min": 195.0, "max": 240.1, "p5": 196.2, "p95": 235.8 },
+      "signal": { "median": 18.5, "mean": 19.1, "stddev": 1.8, "min": 16.2, "max": 23.4, "p5": 16.5, "p95": 22.9 }
+    }
+  ]
+}
 
 ## What It Tests
 
