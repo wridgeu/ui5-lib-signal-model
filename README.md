@@ -3,7 +3,7 @@
 <p align="center">A reactive, signal-based UI5 model that replaces JSONModel as a drop-in. Uses the <a href="https://github.com/tc39/proposal-signals">TC39 Signals proposal</a> polyfill internally, replacing poll-based <code>checkUpdate()</code> with push-based, path-specific signal notifications.</p>
 
 > [!CAUTION]
-> This is an **experimental proof of concept** exploring reactive primitives in the UI5 ecosystem. It was developed with full AI assistance using speech-to-text during post-surgery recovery. Treat it as a technical exploration and learning exercise, not a production-ready library.
+> This is an **experimental proof of concept** exploring reactive primitives in the UI5 ecosystem. Treat it as a technical exploration and learning exercise, not a production-ready library.
 >
 > A minor version may be published to npm so that others can try it out and experiment. This does **not** indicate production readiness. The API surface may change without notice between releases.
 
@@ -19,15 +19,9 @@
 npm install ui5-lib-signal-model
 ```
 
-Add to your `ui5.yaml` dependencies:
+The library ships its own `ui5.yaml` (`type: library`), so UI5 Tooling auto-discovers it from `node_modules`.
 
-```yaml
-framework:
-  libraries:
-    - name: ui5.model.signal
-```
-
-And to your `manifest.json`:
+Add the runtime dependency to your `manifest.json`:
 
 ```json
 "sap.ui5": {
@@ -325,8 +319,6 @@ npm run start:bench  # opens benchmark page
 
 The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected sample statistics, and a three-stage async flush protocol. It directly measures the `checkUpdate` bottleneck documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-![Benchmark Results - 2000 bindings](docs/img/benchmark-2000-bindings.png)
-
 With default synchronous `setProperty`, **"Update all N bindings"** shows ~15x improvement at 2000 bindings (807ms vs 52ms). The advantage scales super-linearly: JSONModel's cost is O(*n*²) (2000 calls × 2000 bindings checked each), while SignalModel's is O(_n_) (2000 notifications, one per changed path).
 
 With JSONModel's `bAsyncUpdate=true`, JSONModel is faster (~21ms vs ~52ms). `bAsyncUpdate` collapses all pending changes into one bulk `deepEqual` loop over all bindings. SignalModel cannot match this because of the **Watcher re-arm cycle**, a per-binding cost required by the TC39 Signals Watcher API. After each signal change, the Watcher must be re-armed: `signal.get()` to consume the notification, then `watcher.watch()` to listen again. This 2-step overhead runs once per binding per flush and is inherent to the Watcher API design (not a polyfill limitation).
@@ -334,6 +326,8 @@ With JSONModel's `bAsyncUpdate=true`, JSONModel is faster (~21ms vs ~52ms). `bAs
 For full data replacement (`setData`), both models perform equivalently. For list/table/tree replace operations, both are equivalent because DOM rendering cost dominates. In-place merge shines at scale: merging 3 items into 20,000 is **4.20x faster** because JSONModel deep-clones all 20,000 items while SignalModel touches only the 3 payload keys.
 
 The checkPerformanceOfUpdate scenario reproduces SAP's 100k threshold: 3,449 bindings with 29 consecutive sync calls, **3.91x faster** (27ms vs 7ms).
+
+Full-page reference screenshots for each binding count: [100](docs/img/benchmark-100-bindings.png) | [500](docs/img/benchmark-500-bindings.png) | [1000](docs/img/benchmark-1000-bindings.png) | [2000](docs/img/benchmark-2000-bindings.png)
 
 See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for the full analysis.
 

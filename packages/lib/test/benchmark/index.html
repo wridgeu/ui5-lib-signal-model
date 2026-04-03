@@ -171,7 +171,8 @@
 
       /**
        * Wait for all async notification to complete.
-       * SignalModel uses queueMicrotask; JSONModel uses Promise.resolve().then().
+       * SignalModel uses queueMicrotask (microtask queue);
+       * JSONModel's bAsyncUpdate uses setTimeout (macrotask queue).
        * We drain microtasks first, then wait for a setTimeout(0) to catch any
        * scheduled macrotasks, then drain microtasks again for safety.
        */
@@ -1570,7 +1571,7 @@
           signal: stats(r13.signalTimes),
         });
 
-        // --- Scenario 14: setData merge (deeply nested config) ---
+        // --- Scenario 15: setData merge (deeply nested config) ---
         setStatus(
           "Running: setData merge (deeply nested config) with " + n + " bindings (alternating)...",
         );
@@ -1587,7 +1588,7 @@
           signal: stats(r14.signalTimes),
         });
 
-        // --- Scenario 15: setData merge (large dataset, pinpoint) ---
+        // --- Scenario 16: setData merge (large dataset, pinpoint) ---
         var largeN = n * 10;
         setStatus(
           "Running: setData merge (large dataset " +
@@ -1730,7 +1731,7 @@
         html += "<ul>";
         html += "<li><strong>setProperty throughput (no bindings)</strong>: ";
         html +=
-          "Raw model-layer cost with zero active bindings. SignalModel has a small per-call overhead (~0.4 microseconds) because it checks the signal registry and computed map. " +
+          "Raw model-layer cost with zero active bindings. SignalModel has a small per-call overhead because it checks the signal registry and computed map on each call. " +
           "This is a synthetic edge case: in any real application, bindings exist and the signal approach pays for this overhead many times over (see Update All scenario). " +
           "The absolute difference is sub-millisecond for hundreds of operations.</li>";
         html += "<li><strong>getProperty throughput</strong>: ";

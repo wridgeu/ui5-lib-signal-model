@@ -86,8 +86,6 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 
 ## Results (2000 bindings, 500 iterations, 10 rounds)
 
-![Benchmark Results - 2000 bindings](../../../../docs/img/benchmark-2000-bindings.png)
-
 ### Full results at 2000 bindings
 
 | Binding Type            | Scenario                             | JSONModel | SignalModel | Comparison        |
@@ -160,6 +158,15 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), se
 4. **In-place merge.** `setData(partial, true)` uses an O(k) in-place recursive merge instead of O(n) `deepExtend` clone. For large datasets with small merge payloads, measurably faster (4.2x at 20k items, scaling linearly with data size).
 
 5. **TC39 Signals alignment.** When the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) ships natively in browsers, `signal-polyfill` can be swapped for the native implementation with zero API changes.
+
+## Reference Screenshots
+
+Full-page screenshots for each binding count:
+
+- [100 bindings](../../../../docs/img/benchmark-100-bindings.png)
+- [500 bindings](../../../../docs/img/benchmark-500-bindings.png)
+- [1000 bindings](../../../../docs/img/benchmark-1000-bindings.png)
+- [2000 bindings](../../../../docs/img/benchmark-2000-bindings.png)
 
 ## Background
 
