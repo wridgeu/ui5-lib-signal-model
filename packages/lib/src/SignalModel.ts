@@ -84,7 +84,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       sFullURL += (sFullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
     }
 
-    const headers: Record<string, string> = { Accept: "application/json", ...mHeaders };
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      ...(sMethod !== "GET" && oParameters && typeof oParameters !== "string"
+        ? { "Content-Type": "application/json" }
+        : {}),
+      ...mHeaders,
+    };
 
     this.fireRequestSent({ url: sURL, type: sMethod, async: true });
 
@@ -331,8 +337,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return Array.isArray(this._getObject(sAbsolutePath));
   }
 
-  checkUpdate(_bForceUpdate?: boolean, _bAsync?: boolean): number {
-    return 0;
+  checkUpdate(_bForceUpdate?: boolean, _bAsync?: boolean): void {
+    // Signal-based: bindings self-update via watchers, no polling needed.
   }
 
   getSignal<P extends string & ModelPath<T>>(
@@ -508,7 +514,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   _offPathResubscribe(path: string, cb: () => void): void {
-    this._pathSubscribers.get(path)?.delete(cb);
+    const set = this._pathSubscribers.get(path);
+    if (set) {
+      set.delete(cb);
+      if (set.size === 0) {
+        this._pathSubscribers.delete(path);
+      }
+    }
   }
 
   private _firePathResubscribe(path: string): void {

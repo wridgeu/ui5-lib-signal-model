@@ -1186,6 +1186,64 @@
         return times;
       }
 
+      /**
+       * Real-world scenario: checkPerformanceOfUpdate threshold
+       *
+       * Reproduces the exact conditions from SAP's checkPerformanceOfUpdate
+       * warning. Creates 3,449 bindings (the real-world count reported in
+       * openui5 issue 2600) and performs 29 consecutive synchronous
+       * setProperty calls — just enough to exceed SAP's 100,000 cumulative
+       * binding check threshold (29 × 3,449 = 100,021).
+       *
+       * JSONModel: each setProperty call triggers checkUpdate on all 3,449
+       * bindings. After 29 calls: 100,021 cumulative binding checks.
+       * Real-world report: ~200ms per setProperty call at this scale.
+       *
+       * SignalModel: each setProperty triggers O(1) signal notification.
+       * After 29 calls: 29 notifications total.
+       */
+      async function benchCheckPerformanceThreshold(
+        ModelClass,
+        _unused,
+        warmupRounds,
+        measuredRounds,
+      ) {
+        var REAL_WORLD_BINDINGS = 3449;
+        var CALLS_TO_EXCEED_THRESHOLD = 29; // 29 × 3449 = 100,021
+
+        var data = generateData(REAL_WORLD_BINDINGS);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, REAL_WORLD_BINDINGS, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          for (var c = 0; c < CALLS_TO_EXCEED_THRESHOLD; c++) {
+            model.setProperty("/items/" + c + "/value", "warmup-" + w + "-" + c);
+          }
+          await flush();
+        }
+
+        // Measure: 29 consecutive synchronous setProperty calls
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          for (var c = 0; c < CALLS_TO_EXCEED_THRESHOLD; c++) {
+            model.setProperty("/items/" + c + "/value", "measured-" + round + "-" + c);
+          }
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
       // ---------------------------------------------------------------
       // Main runner with alternating execution order
       // ---------------------------------------------------------------
@@ -1497,7 +1555,7 @@
           signal: stats(r12.signalTimes),
         });
 
-        // --- Scenario 13: setData merge (deep) ---
+        // --- Scenario 14: setData merge (deep) ---
         setStatus("Running: setData merge (deep) with " + n + " bindings (alternating)...");
         var r13 = await runAlternating(
           benchSetDataMergeDeep,
@@ -1549,6 +1607,23 @@
           category: "Property (sap.m.Text)",
           json: stats(r15.jsonTimes),
           signal: stats(r15.signalTimes),
+        });
+
+        // --- Scenario 17: Real-world checkPerformanceOfUpdate threshold ---
+        setStatus(
+          "Running: real-world checkPerformanceOfUpdate threshold (3,449 bindings, 29 calls, alternating)...",
+        );
+        var r16 = await runAlternating(
+          benchCheckPerformanceThreshold,
+          Object.assign({}, base, { params: [0] }),
+          measuredRounds,
+        );
+        results.push({
+          name: "Real-world: checkPerformanceOfUpdate threshold",
+          detail: "3,449 bindings, 29 sync setProperty calls (100,021 binding checks)",
+          category: "Property (sap.m.Text)",
+          json: stats(r16.jsonTimes),
+          signal: stats(r16.signalTimes),
         });
 
         renderResults(results, n, iters, measuredRounds);
@@ -1694,6 +1769,12 @@
         html +=
           "Tests <code>SignalTreeBinding</code> vs <code>ClientTreeBinding</code> with a real <code>sap.m.Tree</code> control. " +
           "Replaces hierarchical data (each root has 2 children) and measures full propagation.</li>";
+        html += "<li><strong>Real-world: checkPerformanceOfUpdate threshold</strong>: ";
+        html +=
+          "Reproduces the exact conditions from SAP's <code>checkPerformanceOfUpdate</code> warning. " +
+          "Uses 3,449 bindings (the real-world count reported for this bottleneck) and performs 29 consecutive synchronous <code>setProperty</code> calls — " +
+          "just enough to exceed SAP's 100,000 cumulative binding check threshold (29 &times; 3,449 = 100,021). " +
+          "JSONModel performs ~200ms per <code>setProperty</code> at this scale. SignalModel's per-notification cost is constant regardless of total binding count.</li>";
         html += "<li><strong>setData replace</strong>: ";
         html +=
           "Both models must notify all bindings. SignalModel invalidates all signals; JSONModel runs checkUpdate on all bindings.</li>";

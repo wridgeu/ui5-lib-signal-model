@@ -5,6 +5,11 @@
   "main": "dist/resources/ui5/model/signal/library.js",
   "author": "Marco Beier",
   "description": "Signal-based reactive UI5 model using TC39 Signals polyfill",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wridgeu/ui5-lib-signal-model.git",
+    "directory": "packages/lib"
+  },
   "keywords": [
     "ui5",
     "openui5",

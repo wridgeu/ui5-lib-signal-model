@@ -1,4 +1,7 @@
 import SignalModel from "ui5/model/signal/SignalModel";
+import Filter from "sap/ui/model/Filter";
+import FilterOperator from "sap/ui/model/FilterOperator";
+import Sorter from "sap/ui/model/Sorter";
 
 QUnit.module("SignalTreeBinding", () => {
   QUnit.test("getRootContexts returns root-level nodes", (assert) => {
@@ -89,52 +92,78 @@ QUnit.module("SignalTreeBinding", () => {
     model.setProperty("/tree", [{ name: "Original" }, { name: "Added" }]);
   });
 
-  QUnit.test("tree binding with filter", (assert) => {
-    const done = assert.async();
-    sap.ui.require(
-      ["sap/ui/model/Filter", "sap/ui/model/FilterOperator"],
-      (Filter: any, FilterOperator: any) => {
-        const model = new SignalModel({
-          tree: [
-            { name: "Alice", active: true, children: [] },
-            { name: "Bob", active: false, children: [] },
-            { name: "Carol", active: true, children: [] },
-          ],
-        });
-        const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+  QUnit.test("destroy cleans up watcher", (assert) => {
+    const model = new SignalModel({
+      tree: [{ name: "Root" }],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
 
-        binding.filter([new Filter("active", FilterOperator.EQ, true)]);
-        const roots = binding.getRootContexts();
-
-        assert.strictEqual(roots.length, 2, "filtered to 2 active nodes");
-        assert.strictEqual(model.getProperty("name", roots[0]), "Alice", "first is Alice");
-        assert.strictEqual(model.getProperty("name", roots[1]), "Carol", "second is Carol");
-        model.destroy();
-        done();
-      },
+    binding.destroy();
+    assert.strictEqual(
+      (binding as unknown as { watcher: unknown }).watcher,
+      null,
+      "watcher is null after destroy",
     );
+    model.destroy();
+  });
+
+  QUnit.test("destroyed binding does not fire after setProperty", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      tree: [{ name: "Original" }],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+    binding.destroy();
+
+    model.setProperty("/tree", [{ name: "Original" }, { name: "Added" }]);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no change event after destroy");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("tree binding with filter", (assert) => {
+    const model = new SignalModel({
+      tree: [
+        { name: "Alice", active: true, children: [] },
+        { name: "Bob", active: false, children: [] },
+        { name: "Carol", active: true, children: [] },
+      ],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+
+    binding.filter([new Filter("active", FilterOperator.EQ, true)]);
+    const roots = binding.getRootContexts();
+
+    assert.strictEqual(roots.length, 2, "filtered to 2 active nodes");
+    assert.strictEqual(model.getProperty("name", roots[0]), "Alice", "first is Alice");
+    assert.strictEqual(model.getProperty("name", roots[1]), "Carol", "second is Carol");
+    model.destroy();
   });
 
   QUnit.test("tree binding with sort", (assert) => {
-    const done = assert.async();
-    sap.ui.require(["sap/ui/model/Sorter"], (Sorter: any) => {
-      const model = new SignalModel({
-        tree: [
-          { name: "Carol", children: [] },
-          { name: "Alice", children: [] },
-          { name: "Bob", children: [] },
-        ],
-      });
-      const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
-
-      binding.sort(new Sorter("name"));
-      const roots = binding.getRootContexts();
-
-      assert.strictEqual(model.getProperty("name", roots[0]), "Alice", "sorted first");
-      assert.strictEqual(model.getProperty("name", roots[1]), "Bob", "sorted second");
-      assert.strictEqual(model.getProperty("name", roots[2]), "Carol", "sorted third");
-      model.destroy();
-      done();
+    const model = new SignalModel({
+      tree: [
+        { name: "Carol", children: [] },
+        { name: "Alice", children: [] },
+        { name: "Bob", children: [] },
+      ],
     });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+
+    binding.sort(new Sorter("name"));
+    const roots = binding.getRootContexts();
+
+    assert.strictEqual(model.getProperty("name", roots[0]), "Alice", "sorted first");
+    assert.strictEqual(model.getProperty("name", roots[1]), "Bob", "sorted second");
+    assert.strictEqual(model.getProperty("name", roots[2]), "Carol", "sorted third");
+    model.destroy();
   });
 });

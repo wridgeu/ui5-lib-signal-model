@@ -124,10 +124,10 @@ QUnit.module("SignalModel", () => {
     model.destroy();
   });
 
-  QUnit.test("checkUpdate is a no-op (returns 0)", (assert) => {
+  QUnit.test("checkUpdate is a no-op", (assert) => {
     const model = new SignalModel({ name: "Alice" });
-    const result = model.checkUpdate();
-    assert.strictEqual(result, 0, "checkUpdate returns 0");
+    model.checkUpdate();
+    assert.ok(true, "checkUpdate completes without error");
     model.destroy();
   });
 
@@ -136,6 +136,14 @@ QUnit.module("SignalModel", () => {
     model.bindProperty("/name");
     const signal = model.getSignal("/name");
     assert.ok(signal, "signal exists");
+    assert.strictEqual(signal.get(), "Alice", "signal has correct value");
+    model.destroy();
+  });
+
+  QUnit.test("getSignal creates signal on demand without prior bind", (assert) => {
+    const model = new SignalModel({ name: "Alice" });
+    const signal = model.getSignal("/name");
+    assert.ok(signal, "signal created on demand");
     assert.strictEqual(signal.get(), "Alice", "signal has correct value");
     model.destroy();
   });

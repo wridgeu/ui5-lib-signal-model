@@ -86,6 +86,43 @@ QUnit.module("SignalListBinding", () => {
     model.destroy();
   });
 
+  QUnit.test("destroy cleans up watcher", (assert) => {
+    const model = new SignalModel({
+      items: [{ name: "A" }],
+    });
+    const binding = model.bindList("/items");
+    binding.getContexts(0, 10);
+
+    binding.destroy();
+    assert.strictEqual(
+      (binding as unknown as { watcher: unknown }).watcher,
+      null,
+      "watcher is null after destroy",
+    );
+    model.destroy();
+  });
+
+  QUnit.test("destroyed binding does not fire after setProperty", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      items: [{ name: "A" }],
+    });
+    const binding = model.bindList("/items");
+    binding.getContexts(0, 10);
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+    binding.destroy();
+
+    model.setProperty("/items", [{ name: "A" }, { name: "B" }]);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no change event after destroy");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
   QUnit.test("binding to unrelated path does not fire", (assert) => {
     const done = assert.async();
     const model = new SignalModel({

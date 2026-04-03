@@ -61,6 +61,23 @@ QUnit.module("mergeProperty", () => {
     model.destroy();
   });
 
+  QUnit.test("mergeProperty at root path merges into model data", (assert) => {
+    const model = new SignalModel({ name: "Alice", age: 28 });
+    const result = model.mergeProperty("/", { age: 30 });
+    assert.ok(result, "returns true for root merge");
+    assert.strictEqual(model.getProperty("/name"), "Alice", "name preserved");
+    assert.strictEqual(model.getProperty("/age"), 30, "age updated via root merge");
+    model.destroy();
+  });
+
+  QUnit.test("mergeProperty at root with non-object returns false", (assert) => {
+    const model = new SignalModel({ name: "Alice" });
+    const result = model.mergeProperty("/", "not an object" as any);
+    assert.notOk(result, "returns false for non-object root merge");
+    assert.strictEqual(model.getProperty("/name"), "Alice", "data unchanged");
+    model.destroy();
+  });
+
   QUnit.test("deep merge with nested objects", (assert) => {
     const model = new SignalModel({
       config: {

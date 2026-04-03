@@ -1,11 +1,17 @@
 <h1 align="center">ui5-lib-signal-model</h1>
 
-<p align="center">A reactive, signal-based UI5 model that is a drop-in replacement for JSONModel. Uses the <a href="https://github.com/tc39/proposal-signals">TC39 Signals proposal</a> polyfill internally, replacing poll-based <code>checkUpdate()</code> with push-based, path-specific signal notifications.</p>
+<p align="center">A reactive, signal-based UI5 model that replaces JSONModel as a drop-in. Uses the <a href="https://github.com/tc39/proposal-signals">TC39 Signals proposal</a> polyfill internally, replacing poll-based <code>checkUpdate()</code> with push-based, path-specific signal notifications.</p>
 
 > [!CAUTION]
 > This is an **experimental proof of concept** exploring reactive primitives in the UI5 ecosystem. It was developed with full AI assistance using speech-to-text during post-surgery recovery. Treat it as a technical exploration and learning exercise, not a production-ready library.
 >
-> A minor version may be published to npm so that others can try it out and experiment. This does **not** indicate production readiness — the API surface may change without notice between releases.
+> A minor version may be published to npm so that others can try it out and experiment. This does **not** indicate production readiness. The API surface may change without notice between releases.
+
+## Requirements
+
+- **UI5**: OpenUI5/SAPUI5 >= 1.144.0
+- **Node.js**: >= 22
+- **Runtime dependency**: [`signal-polyfill`](https://github.com/proposal-signals/signal-polyfill) ^0.2.2 (TC39 Signals reference implementation, pre-1.0)
 
 ## Installation
 
@@ -13,7 +19,15 @@
 npm install ui5-lib-signal-model
 ```
 
-Add to your `ui5.yaml` dependencies and `manifest.json`:
+Add to your `ui5.yaml` dependencies:
+
+```yaml
+framework:
+  libraries:
+    - name: ui5.model.signal
+```
+
+And to your `manifest.json`:
 
 ```json
 "sap.ui5": {
@@ -21,6 +35,16 @@ Add to your `ui5.yaml` dependencies and `manifest.json`:
     "libs": {
       "ui5.model.signal": {}
     }
+  }
+}
+```
+
+For **TypeScript** projects, add the library to `types` in your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "types": ["@openui5/types", "ui5-lib-signal-model"]
   }
 }
 ```
@@ -99,7 +123,7 @@ model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => 
 
 ### Computed Signal Immutability
 
-Computed signals are **define-once**: calling `createComputed` on a path that already holds a computed throws a `TypeError`. To redefine, call `removeComputed` first.
+Computed signals are **define-once**: calling `createComputed` on a path that already holds a computed or a state signal (i.e., a path already accessed through a binding or `getSignal`) throws a `TypeError`. To redefine an existing computed, call `removeComputed` first.
 
 ```typescript
 model.createComputed("/total", ["/price", "/tax"], (p, t) => p * (1 + t));
@@ -112,13 +136,13 @@ model.removeComputed("/total");
 model.createComputed("/total", ["/price"], (p) => p);
 ```
 
-> **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction and cannot be changed. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters — the closest existing equivalent — are also fixed in code and never replaced at runtime.
+> **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters, the closest existing equivalent, are also fixed in code and never replaced at runtime.
 >
-> **Declarative binding bridge.** While computed signals follow the immutability semantics of TC39 Signals and MobX, the UI5 world is not purely programmatic. Bindings are often declared in XML views (`{/total}`) and managed by the framework — the developer cannot manually destroy and recreate them. Since computeds are created programmatically in JavaScript but consumed by declarative XML bindings, a bridge is needed: when `removeComputed` + `createComputed` redefines a computed at a path, all existing bindings to that path automatically re-subscribe to the new signal. This ensures XML view bindings see the new derivation even if it has entirely different dependencies. The cost is one `Map<string, Set<callback>>` lookup per `createComputed` call (a no-op when no bindings exist) and one callback registration per binding in `subscribe`/`unsubscribe`.
+> **Declarative binding bridge.** Computed signals follow immutability semantics from TC39 Signals and MobX, but the UI5 world is not purely programmatic. Bindings are often declared in XML views (`{/total}`) and managed by the framework; the developer cannot manually destroy and recreate them. When `removeComputed` + `createComputed` redefines a computed at a path, all existing bindings to that path automatically re-subscribe to the new signal. This way, XML view bindings see the new derivation even if it has entirely different dependencies. The cost is one `Map<string, Set<callback>>` lookup per `createComputed` call (a no-op when no bindings exist) and one callback registration per binding in `subscribe`/`unsubscribe`.
 
 ### Merge Writes
 
-`mergeProperty` performs a **recursive merge** at a specific path — it updates only the properties you provide and leaves the rest untouched. This is different from `setProperty`, which **replaces** the entire value:
+`mergeProperty` performs a **recursive merge** at a specific path. It updates only the properties you provide and leaves the rest untouched. Compare with `setProperty`, which **replaces** the entire value:
 
 ```typescript
 // Given: /customer = { name: "Alice", age: 28, city: "Berlin" }
@@ -134,7 +158,7 @@ model.mergeProperty("/customer", { age: 30 });
 
 `mergeProperty` only fires signals for paths that actually changed (here, only `/customer/age`). Bindings to `/customer/name` and `/customer/city` are not notified.
 
-`setData(partial, true)` uses the same merge logic but starts at the root — it's equivalent to `mergeProperty("/", partial)`.
+`setData(partial, true)` uses the same merge logic starting at the root, equivalent to `mergeProperty("/", partial)`.
 
 ## Feature Comparison: SignalModel vs JSONModel
 
@@ -157,7 +181,7 @@ model.mergeProperty("/customer", { age: 30 });
 | **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                                          |
 | **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals                           |
 | **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state                |
-| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying Signal.State                             |
+| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying `Signal.State` or `Signal.Computed`      |
 | **Path auto-creation**         | Returns `false` for nonexistent parent paths                      | Same by default; `{ autoCreatePaths: true }` creates intermediates automatically |
 | **Leaf property guard**        | Not available                                                     | `{ strictLeafCheck: true }` rejects writes to nonexistent leaf properties        |
 | **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion                    |
@@ -168,11 +192,11 @@ model.mergeProperty("/customer", { age: 30 });
 > - **_n_** = total number of bindings registered on the model (all paths combined)
 > - **_k_** = number of bindings affected by a single change: the changed path itself, plus its parent paths (e.g. `/customer` when changing `/customer/name`), plus its child paths (e.g. `/customer/name` and `/customer/age` when replacing the `/customer` object)
 >
-> JSONModel's `checkUpdate()` iterates **all** _n_ bindings on every write — even if only one path changed. SignalModel notifies only the _k_ bindings whose paths are affected. When _k_ ≪ _n_ (typical in large models), SignalModel avoids O(_n_) work per change.
+> JSONModel's `checkUpdate()` iterates **all** _n_ bindings on every write, even if only one path changed. SignalModel notifies only the _k_ bindings whose paths are affected. When _k_ ≪ _n_ (typical in large models), SignalModel avoids O(_n_) work per change.
 
 ### Configuration Modes
 
-SignalModel's default configuration provides **full JSONModel parity** — `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Two opt-in flags independently extend this behavior, each controlling a different level of the path:
+SignalModel defaults to **full JSONModel parity**: `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Two opt-in flags independently extend this behavior, each controlling a different level of the path:
 
 ```
 model.setProperty("/a/b/c", value)
@@ -195,7 +219,7 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### TypeScript Generics
 
-SignalModel's typed path system is based on the patterns established by UI5's `TypedJSONModel` wrapper from `@openui5/types`. The `ModelPath<T>` and `PathValue<T, P>` utility types follow the same conventions for extracting absolute binding paths and resolving value types at those paths. The key difference is that `TypedJSONModel` is a wrapper around JSONModel requiring a separate class, while SignalModel has generics built in — `new SignalModel<T>(data)` gives typed `getProperty` and `setProperty` with path autocompletion directly.
+SignalModel's typed path system builds on the patterns from UI5's `TypedJSONModel` wrapper in `@openui5/types`. The `ModelPath<T>` and `PathValue<T, P>` utility types follow the same conventions for extracting absolute binding paths and resolving value types. `TypedJSONModel` requires a separate wrapper class; SignalModel has generics built in, so `new SignalModel<T>(data)` gives typed `getProperty` and `setProperty` with path autocompletion directly.
 
 ## API
 
@@ -266,7 +290,7 @@ SignalPropertyBinding / SignalListBinding / SignalTreeBinding
         | reads / subscribes
         v
 Signal Registry (two Maps: State signals + Computed signals)
-  - Signals created lazily on first bind
+  - Signals created lazily on first access (bind, getSignal, or createComputed dependency)
   - Custom equality: primitives use Object.is, objects always notify
   - Computed signals take precedence over state signals at the same path
         |
@@ -290,21 +314,26 @@ npm run test:qunit
 
 ## Performance Benchmark
 
-A self-contained benchmark page compares SignalModel vs JSONModel across 16 scenarios covering all binding types: property bindings (`sap.m.Text`), list bindings (`sap.m.List`, `sap.m.Table`), tree bindings (`sap.m.Tree`), expression bindings, computed signals (including redefinition), and merge strategies.
+A self-contained benchmark page compares SignalModel vs JSONModel across 17 scenarios: property bindings (`sap.m.Text`), list bindings (`sap.m.List`, `sap.m.Table`), tree bindings (`sap.m.Tree`), expression bindings, computed signals (including redefinition), merge strategies, and SAP's `checkPerformanceOfUpdate` threshold (3,449 bindings, 29 consecutive calls exceeding the 100k binding check warning).
 
 ```bash
 npm run start:bench  # opens benchmark page
 ```
 
+> [!NOTE]
+> Results vary by hardware, browser engine, and system load. The numbers below are from a single reference run. Run the benchmarks on your own setup for representative numbers.
+
 The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected sample statistics, and a three-stage async flush protocol. It directly measures the `checkUpdate` bottleneck documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
 ![Benchmark Results - 2000 bindings](docs/img/benchmark-2000-bindings.png)
 
-With default synchronous `setProperty`, **"Update all N bindings"** shows ~17x improvement at 2000 bindings (1252ms vs 75ms). The advantage scales super-linearly because JSONModel's cost is O(*n*²) (2000 calls × 2000 bindings checked each) while SignalModel's is O(_n_) (2000 notifications, one per changed path).
+With default synchronous `setProperty`, **"Update all N bindings"** shows ~15x improvement at 2000 bindings (807ms vs 52ms). The advantage scales super-linearly: JSONModel's cost is O(*n*²) (2000 calls × 2000 bindings checked each), while SignalModel's is O(_n_) (2000 notifications, one per changed path).
 
-However, with JSONModel's `bAsyncUpdate=true`, JSONModel is faster (~38ms vs ~79ms). The reason: `bAsyncUpdate` collapses all pending changes into one bulk `deepEqual` loop over all bindings. SignalModel cannot match this because of the **Watcher re-arm cycle** — a per-binding cost required by the TC39 Signals Watcher API. After each signal change, the Watcher must be "re-armed" before it can detect the next change: `signal.get()` to consume the notification, then `watcher.watch()` to listen again. This 2-step overhead runs once per binding per flush and is inherent to the Watcher API design (not a polyfill limitation).
+With JSONModel's `bAsyncUpdate=true`, JSONModel is faster (~21ms vs ~52ms). `bAsyncUpdate` collapses all pending changes into one bulk `deepEqual` loop over all bindings. SignalModel cannot match this because of the **Watcher re-arm cycle**, a per-binding cost required by the TC39 Signals Watcher API. After each signal change, the Watcher must be re-armed: `signal.get()` to consume the notification, then `watcher.watch()` to listen again. This 2-step overhead runs once per binding per flush and is inherent to the Watcher API design (not a polyfill limitation).
 
-For full data replacement (`setData`), both models perform equivalently. For list/table/tree replace operations, both are also equivalent because DOM rendering cost dominates. The in-place merge shines at scale: merging 3 items into 20,000 is **4.55x faster** because JSONModel deep-clones all 20,000 items while SignalModel touches only the 3 payload keys.
+For full data replacement (`setData`), both models perform equivalently. For list/table/tree replace operations, both are equivalent because DOM rendering cost dominates. In-place merge shines at scale: merging 3 items into 20,000 is **4.20x faster** because JSONModel deep-clones all 20,000 items while SignalModel touches only the 3 payload keys.
+
+The checkPerformanceOfUpdate scenario reproduces SAP's 100k threshold: 3,449 bindings with 29 consecutive sync calls, **3.91x faster** (27ms vs 7ms).
 
 See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for the full analysis.
 
@@ -326,19 +355,19 @@ npm run start  # opens demo app
 
 ## Learnings
 
-Beyond the core signal-based architecture, several implementation-level optimizations contribute meaningfully to SignalModel's performance profile. These are documented here as reference for anyone building reactive primitives on top of UI5 or the TC39 Signals proposal.
+Implementation-level optimizations that contribute to SignalModel's performance, documented as reference for anyone building reactive primitives on top of UI5 or the TC39 Signals proposal.
 
 ### Unified Microtask Flush Queue
 
-Each binding type (property, list, tree) subscribes to its path's signal via `Signal.subtle.Watcher`. When a signal changes, the Watcher callback fires synchronously — but we don't call `checkUpdate()` immediately. Instead, all bindings share a single flush queue (`FlushQueue.ts`) that batches updates into one `queueMicrotask`:
+Each binding type (property, list, tree) subscribes to its path's signal via `Signal.subtle.Watcher`. When a signal changes, the Watcher callback fires synchronously, but `checkUpdate()` is not called immediately. All bindings share a single flush queue (`FlushQueue.ts`) that batches updates into one `queueMicrotask`:
 
-- **One microtask per synchronous block**, regardless of how many bindings or binding types are notified. Previously, each binding type maintained its own queue, producing up to 3 separate microtasks.
+- **One microtask per synchronous block**, regardless of how many bindings or binding types are notified.
 - **Map-based deduplication**: `Map<binding, signal>` ensures each binding appears at most once. Rapid-fire `setProperty` calls (e.g., updating 10 fields in a loop) produce exactly one `checkUpdate` per affected binding.
-- **Watcher re-arm protocol**: The TC39 Watcher fires at most once between `watch()` calls. The flush reads the current value (`signal.get()` — consumes the notification), re-arms the watcher (`watcher.watch()` — listens for the next change), then fires the UI change (`checkUpdate()`). This is the per-binding overhead discussed in the [benchmark section](#performance-benchmark).
+- **Watcher re-arm protocol**: The TC39 Watcher fires at most once between `watch()` calls. The flush reads the current value (`signal.get()`, consuming the notification), re-arms the watcher (`watcher.watch()`, listening for the next change), then fires the UI change (`checkUpdate()`). This is the per-binding overhead discussed in the [benchmark section](#performance-benchmark).
 
 ### In-Place Merge (Eliminating `deepExtend`)
 
-UI5's `JSONModel.setData(data, true)` uses `sap/base/util/deepExtend` to deep-clone the entire model data and then overlay the merge payload. For a model with 1000 items where you merge 5, this clones all 1000 items — O(n) work for an O(k) operation.
+UI5's `JSONModel.setData(data, true)` uses `sap/base/util/deepExtend` to deep-clone the entire model data and then overlay the merge payload. For a model with 1000 items where you merge 5, this clones all 1000, doing O(n) work for an O(k) operation.
 
 SignalModel replaces this with an **in-place recursive merge** (`_mergeInPlace`) that:
 
@@ -348,30 +377,30 @@ SignalModel replaces this with an **in-place recursive merge** (`_mergeInPlace`)
 4. Fires signals for changed paths as it goes
 5. Uses `structuredClone()` for incoming object/array values to prevent external mutation
 
-This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload size. The improvement is most significant for shallow merges into large datasets (common in form-based Fiori apps that update a few fields at a time).
+This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload size. The improvement is largest for shallow merges into large datasets, common in form-based Fiori apps that update a few fields at a time.
 
 ### `structuredClone` over `deepExtend` for Deep Copies
 
-Where a pure deep clone is needed (not a merge), `structuredClone()` replaces `deepExtend({}, source)`. This applies to `SignalListBinding.update()` which copies list data for UI5's extended change detection. `structuredClone` is implemented natively in C++ by the browser engine and avoids the overhead of UI5's JavaScript-based recursive clone.
+Where a pure deep clone is needed (not a merge), `structuredClone()` replaces `deepExtend({}, source)`. This applies to `SignalListBinding.update()`, which copies list data for UI5's extended change detection. `structuredClone` is implemented natively in C++ by the browser engine and avoids the overhead of UI5's JavaScript-based recursive clone.
 
 ### Batching and `bAsyncUpdate`
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` flag that defers `checkUpdate` into a `setTimeout`, collapsing N synchronous `setProperty` calls into a single binding check pass. This is SAP's recommended workaround for the O(N²) problem documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-SignalModel ignores this flag — signals are inherently push-based and already batched via the microtask flush queue. Each `setProperty` does O(1) signal work regardless of sync/async mode. However, when JSONModel uses `bAsyncUpdate=true`, it achieves O(_n_) total (one bulk `deepEqual` pass over all bindings), while SignalModel's Watcher re-arm cycle adds constant overhead per binding. At 2000 bindings, this gap is ~2x (~38ms vs ~79ms) — see the [benchmark section](#performance-benchmark) for the full analysis.
+SignalModel ignores this flag. Signals are inherently push-based and already batched via the microtask flush queue. Each `setProperty` does O(1) signal work regardless of sync/async mode. When JSONModel uses `bAsyncUpdate=true`, it achieves O(_n_) total (one bulk `deepEqual` pass over all bindings), while SignalModel's Watcher re-arm cycle adds constant overhead per binding. At 2000 bindings, this gap is ~2.5x (~21ms vs ~52ms). See the [benchmark section](#performance-benchmark) for the full analysis.
 
 ### Microtask vs Macrotask Scheduling
 
-JSONModel's `bAsyncUpdate` uses `setTimeout` (macrotask). SignalModel's flush queue uses `queueMicrotask` (microtask). This is not just an implementation detail — it affects visual consistency.
+JSONModel's `bAsyncUpdate` uses `setTimeout` (macrotask). SignalModel's flush queue uses `queueMicrotask` (microtask). The difference affects visual consistency.
 
-The browser event loop processes work in this order: **current JS → all microtasks → render (paint) → next macrotask**. This means:
+The browser event loop processes work in this order: **current JS > all microtasks > render (paint) > next macrotask**.
 
 - **`queueMicrotask` (SignalModel):** binding updates run _before_ the browser paints. The first frame the user sees already has the correct data. One paint, always consistent.
 - **`setTimeout` (JSONModel async):** binding updates run _after_ the browser paints. The browser renders one frame with stale DOM (bindings haven't been checked yet), then a second frame with the correct data. This can cause a visible flash of outdated content.
 
-The total work is identical — the same `checkUpdate` runs on the same bindings. The difference is whether the user sees one correct frame (microtask) or one stale frame followed by one correct frame (macrotask). For UI5 form applications, microtask scheduling eliminates an entire class of visual glitches where the UI briefly shows inconsistent state between model data and rendered controls.
+The total work is identical, the same `checkUpdate` runs on the same bindings. The difference is whether the user sees one correct frame (microtask) or one stale frame followed by one correct frame (macrotask). For UI5 form applications, microtask scheduling eliminates visual glitches where the UI briefly shows inconsistent state between model data and rendered controls.
 
-Benchmarking confirmed this: swapping SignalModel's `queueMicrotask` for `setTimeout` at 2000 bindings showed ~equal wall-clock time (55.6ms vs 51.9ms, within standard deviation). The scheduling choice has no performance cost — it is purely a visual consistency improvement.
+Benchmarking confirmed this: swapping SignalModel's `queueMicrotask` for `setTimeout` at 2000 bindings showed ~equal wall-clock time (55.6ms vs 51.9ms, within standard deviation). The scheduling choice has no performance cost; it is purely a visual consistency improvement.
 
 ## Development
 

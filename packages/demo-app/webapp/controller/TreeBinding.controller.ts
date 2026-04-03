@@ -5,6 +5,8 @@ import SignalModel from "ui5/model/signal/SignalModel";
  * @namespace demo.app.controller
  */
 export default class TreeBinding extends Controller {
+  private treeModel: SignalModel | null = null;
+
   override onInit(): void {
     const treeModel = new SignalModel({
       org: [
@@ -29,6 +31,7 @@ export default class TreeBinding extends Controller {
         },
       ],
     });
+    this.treeModel = treeModel;
     this.getView()!.setModel(treeModel, "tree");
   }
 
@@ -37,5 +40,10 @@ export default class TreeBinding extends Controller {
     const ctoReports = model.getProperty("/org/0/reports/0/reports") as unknown[];
     const updated = [...ctoReports, { name: "New Hire", role: "Developer", reports: [] }];
     model.setProperty("/org/0/reports/0/reports", updated);
+  }
+
+  override onExit(): void {
+    this.treeModel?.destroy();
+    this.treeModel = null;
   }
 }

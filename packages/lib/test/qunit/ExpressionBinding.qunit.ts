@@ -1,10 +1,9 @@
 import SignalModel from "ui5/model/signal/SignalModel";
 
 QUnit.module("ExpressionBinding", () => {
-  QUnit.test("composite binding with formatter", (assert) => {
+  QUnit.test("multiple getProperty values can be composed", (assert) => {
     const model = new SignalModel({ firstName: "Alice", lastName: "Smith" });
 
-    // Simulate composite binding by reading both values
     const first = model.getProperty("/firstName");
     const last = model.getProperty("/lastName");
     const formatted = `${first} ${last}`;
