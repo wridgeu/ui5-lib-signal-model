@@ -72,6 +72,16 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
+  QUnit.test("setProperty with bAsyncUpdate on computed sub-path returns false", (assert) => {
+    const model = new SignalModel({ items: [{ name: "Alice" }] });
+    model.createComputed("/first", ["/items"], (items) => (items as { name: string }[])[0]);
+
+    const result = model.setProperty("/first/name", "Bob", undefined, true);
+    assert.notOk(result, "async setProperty on computed sub-path returns false");
+    assert.strictEqual(model.getProperty("/items/0/name"), "Alice", "source data unchanged");
+    model.destroy();
+  });
+
   QUnit.test("createComputed on raw data path throws", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.bindProperty("/name");
