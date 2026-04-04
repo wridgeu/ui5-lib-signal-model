@@ -440,6 +440,23 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
+  QUnit.test("computed shadows pre-existing data at same path", (assert) => {
+    const model = new SignalModel({ c: { name: "from-data" } });
+    model.createComputed("/c", [], () => ({ name: "from-computed" }));
+
+    assert.strictEqual(
+      model.getProperty("/c/name"),
+      "from-computed",
+      "computed value takes precedence over data",
+    );
+    assert.strictEqual(
+      model.getProperty("/c"),
+      model.getSignal("/c").get(),
+      "getProperty returns computed value, not data",
+    );
+    model.destroy();
+  });
+
   QUnit.test("computed returning null — sub-path returns null", (assert) => {
     const model = new SignalModel({ x: 1 });
     model.createComputed("/nullable", ["/x"], () => null);
