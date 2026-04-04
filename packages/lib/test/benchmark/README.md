@@ -46,7 +46,7 @@ JSON output format:
 
 ## What It Tests
 
-22 scenarios across all binding types, model operations, and merge strategies:
+21 scenarios across all binding types, model operations, and merge strategies:
 
 | #   | Binding Type              | Scenario                                | What It Measures                                            |
 | --- | ------------------------- | --------------------------------------- | ----------------------------------------------------------- |
