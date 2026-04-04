@@ -1349,6 +1349,50 @@
         return times;
       }
 
+      /**
+       * Deep-path setProperty overhead (no computeds).
+       *
+       * Measures setProperty on 4-segment paths (/items/0/meta/value) with
+       * N bindings but zero computed signals. Isolates the overhead of
+       * _findComputedAncestor on every write.
+       * For both models, the workload is identical.
+       */
+      async function benchDeepPathSetProperty(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = { items: [] };
+        for (var i = 0; i < n; i++) {
+          data.items.push({ meta: { value: "init" + i } });
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        var controls = [];
+        for (var j = 0; j < n; j++) {
+          var text = new sap.m.Text({ text: "{/items/" + j + "/meta/value}" });
+          text.setModel(model);
+          text.placeAt(container);
+          controls.push(text);
+        }
+        await flush();
+        await new Promise(function (r) { setTimeout(r, 50); });
+
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setProperty("/items/0/meta/value", "warmup" + w);
+          await flush();
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          model.setProperty("/items/0/meta/value", "round" + round);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
       // ---------------------------------------------------------------
       // Main runner with alternating execution order
       // ---------------------------------------------------------------
@@ -1783,6 +1827,21 @@
           category: "Property (sap.m.Text)",
           json: stats(r16.jsonTimes),
           signal: stats(r16.signalTimes),
+        });
+
+        // --- Scenario 20: Deep-path setProperty overhead ---
+        setStatus("Running: deep-path setProperty with " + n + " bindings (alternating)...");
+        var r20 = await runAlternating(
+          benchDeepPathSetProperty,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        pushResult({
+          name: "Deep-path setProperty (no computeds), " + n,
+          detail: "4-segment paths, computed ancestor scan overhead",
+          category: "Property (sap.m.Text)",
+          json: stats(r20.jsonTimes),
+          signal: stats(r20.signalTimes),
         });
 
         window.__bench.done = true;
