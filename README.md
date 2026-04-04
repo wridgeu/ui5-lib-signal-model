@@ -132,7 +132,27 @@ model.createComputed("/total", ["/price"], (p) => p);
 
 > **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters, the closest existing equivalent, are also fixed in code and never replaced at runtime.
 >
-> **Declarative binding bridge.** Computed signals follow immutability semantics from TC39 Signals and MobX, but the UI5 world is not purely programmatic. Bindings are often declared in XML views (`{/total}`) and managed by the framework; the developer cannot manually destroy and recreate them. When `removeComputed` + `createComputed` redefines a computed at a path, all existing bindings to that path automatically re-subscribe to the new signal. This way, XML view bindings see the new derivation even if it has entirely different dependencies. The cost is one `Map<string, Set<callback>>` lookup per `createComputed` call (a no-op when no bindings exist) and one callback registration per binding in `subscribe`/`unsubscribe`.
+> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative — bindings are declared in XML and the developer never touches them directly. SignalModel's automatic resubscription mechanism (described below) ensures that `removeComputed` + `createComputed` works seamlessly regardless of how bindings were created.
+
+### Automatic Resubscription
+
+When a `Signal.Computed` is created, its derivation function is fixed. To change what a computed derives, you must replace it with `removeComputed` + `createComputed`. But the bindings watching that path still hold a watcher on the **old** signal object — they would never see updates from the new one.
+
+SignalModel solves this with **automatic resubscription**. When `createComputed` is called, the model notifies every existing binding to that path (and to any sub-path below it). Each notified binding tears down its watcher on the old signal and subscribes to the new one — transparently, in a single synchronous step.
+
+This means you can redefine a computed at any time and all bindings will see the new derivation, even if it has entirely different dependencies:
+
+```typescript
+// XML view has: <Text text="{/total}" />
+
+model.removeComputed("/total");
+model.createComputed("/total", ["/newPrice", "/newTax"], (p, t) => p * (1 + t));
+// All bindings to /total now track the new formula. No binding manipulation needed.
+```
+
+**Sub-path resubscription.** When a computed returns an object and bindings target sub-paths (e.g., `{/currentUser/name}`), those sub-path bindings also resubscribe automatically when the parent computed is redefined. The model scans for all bindings whose path starts with the computed's path and triggers resubscription for each one.
+
+**Cost.** One `Map` lookup per `createComputed` call plus one `startsWith` scan of registered binding paths. When no bindings exist at the path (or its sub-paths), the cost is effectively zero.
 
 ### Computed Sub-Path Traversal
 
