@@ -379,8 +379,6 @@ For full data replacement (`setData`), both models perform equivalently. For lis
 
 The checkPerformanceOfUpdate scenario reproduces SAP's 100k threshold: 3,449 bindings with 29 consecutive sync calls, **3.91x faster** (27ms vs 7ms).
 
-Full-page reference screenshots for each binding count: [100](docs/img/benchmark-100-bindings.png) | [500](docs/img/benchmark-500-bindings.png) | [1000](docs/img/benchmark-1000-bindings.png) | [2000](docs/img/benchmark-2000-bindings.png)
-
 See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for the full analysis.
 
 ## Demo Application

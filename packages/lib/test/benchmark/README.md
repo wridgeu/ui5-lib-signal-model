@@ -222,15 +222,6 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), se
 > [!NOTE]
 > **Native Signals outlook.** SignalModel currently uses [signal-polyfill](https://github.com/proposal-signals/signal-polyfill), a JavaScript implementation of the [TC39 Signals proposal](https://github.com/tc39/proposal-signals). When signals ship natively in browsers, the polyfill can be swapped for the native implementation with zero API changes. Native signals will be implemented in C++ by the browser engine, eliminating the JavaScript overhead of the polyfill's reactive graph traversal, watcher notification, and dependency tracking. The architectural advantages (O(1) notification, in-place merge) will remain, and the constant factors should improve across all signal-dependent scenarios.
 
-## Reference Screenshots
-
-Full-page screenshots for each binding count:
-
-- [100 bindings](../../../../docs/img/benchmark-100-bindings.png)
-- [500 bindings](../../../../docs/img/benchmark-500-bindings.png)
-- [1000 bindings](../../../../docs/img/benchmark-1000-bindings.png)
-- [2000 bindings](../../../../docs/img/benchmark-2000-bindings.png)
-
 ## Background
 
 - [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600) - documents the `checkUpdate` O(N) bottleneck
