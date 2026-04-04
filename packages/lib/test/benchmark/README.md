@@ -126,39 +126,40 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 ## Results (2000 bindings, 500 iterations, 10 rounds)
 
 > [!IMPORTANT]
-> These numbers are from a single machine and browser configuration. **Results vary** across hardware, OS, browser version, background processes, and JIT warm-up state. Treat them as rough directional guidance, not guarantees. The benchmark was run 4 consecutive times at 2000 bindings to identify which results are stable and which are noise. The table below shows a representative run; scenarios marked "~equal" were confirmed to flip direction across runs. Run the benchmark yourself (`npm run start:bench`) to see how it performs in your environment.
+> These numbers are from a single machine and browser configuration. **Results vary** across hardware, OS, browser version, background processes, and JIT warm-up state. Treat them as rough directional guidance, not guarantees. Run the benchmark yourself (`npm run start:bench` or `npm run bench`) to see how it performs in your environment.
 
 ### Full results at 2000 bindings
 
-| Binding Type            | Scenario                                | JSONModel  | SignalModel | Comparison         |
-| ----------------------- | --------------------------------------- | ---------- | ----------- | ------------------ |
-| Model API               | setProperty (no bindings)               | 0.30ms     | 0.20ms      | ~equal             |
-| Model API               | getProperty                             | 0.10ms     | 0.10ms      | ~equal             |
-| Property (sap.m.Text)   | Single-path update, 2000 bindings       | 15.60ms    | 16.10ms     | ~equal             |
-| Property (sap.m.Text)   | Update all 2000 (sync)                  | 1098.50ms  | 71.50ms     | **~15x faster**    |
-| Property (sap.m.Text)   | Update all 2000 (async)                 | 25.00ms    | 30.20ms     | ~equal             |
-| Property (sap.m.Text)   | Sparse async, 1 of 2000                | 15.90ms    | 15.90ms     | ~equal             |
-| List (sap.m.List)       | List binding replace, 500 items         | 22.50ms    | 19.90ms     | ~equal             |
-| List (sap.m.Table)      | Table binding replace, 500 rows         | 18.60ms    | 20.00ms     | ~equal             |
-| Tree (sap.m.Tree)       | Tree binding replace, 200 nodes         | 19.20ms    | 19.30ms     | ~equal             |
-| Expression (sap.m.Text) | Expression binding, 500 controls        | 16.00ms    | 15.70ms     | ~equal             |
-| Computed (sap.m.Text)   | Computed signals, 2000 computeds        | 15.80ms    | 15.80ms     | ~equal             |
-| Computed (sap.m.Text)   | Computed (redefined), 2000 computeds    | 15.90ms    | 15.90ms     | ~equal             |
-| Computed (sap.m.Text)   | Computed sub-path, 2000 computeds       | 15.80ms    | 15.80ms     | ~equal             |
-| Computed (sap.m.Text)   | Computed redefine + sub-path, 2000      | 16.00ms    | 15.80ms     | ~equal             |
-| Property (sap.m.Text)   | setData replace, 2000 bindings          | 24.10ms    | 34.80ms     | ~equal             |
-| Property (sap.m.Text)   | setData merge (shallow), 5 into 2k      | 15.70ms    | 15.60ms     | ~equal             |
-| Property (sap.m.Text)   | setData merge (deep), all 2k            | 35.10ms    | 34.60ms     | ~equal             |
-| Property (sap.m.Text)   | setData merge (nested config)           | 15.90ms    | 15.70ms     | ~equal             |
-| Property (sap.m.Text)   | setData merge (large, pinpoint) 20k     | 31.80ms    | 15.70ms     | **~2x faster**     |
-| Property (sap.m.Text)   | Real-world: checkPerformanceOfUpdate    | 48.10ms    | 15.60ms     | **~3x faster**     |
-| Property (sap.m.Text)   | Deep-path setProperty (no computeds)    | 15.80ms    | 16.00ms     | ~equal             |
+| Binding Type              | Scenario                                | JSONModel  | SignalModel | Comparison         |
+| ------------------------- | --------------------------------------- | ---------- | ----------- | ------------------ |
+| Model API                 | setProperty (no bindings)               | 0.20ms     | 0.30ms      | ~equal             |
+| Model API                 | getProperty                             | 0.00ms     | 0.10ms      | ~equal             |
+| Property (sap.m.Text)     | Single-path update, 2000 bindings       | 5.20ms     | 4.40ms      | ~equal             |
+| Property (sap.m.Text)     | Update all 2000 (sync)                  | 854.40ms   | 48.90ms     | **~17x faster**    |
+| Property (sap.m.Text)     | Update all 2000 (async)                 | 19.70ms    | 19.10ms     | ~equal             |
+| Property (sap.m.Text)     | Sparse async, 1 of 2000                | 5.10ms     | 5.20ms      | ~equal             |
+| List (sap.m.List)         | List binding replace, 500 items         | 9.00ms     | 8.10ms      | ~equal             |
+| List (sap.m.Table)        | Table binding replace, 500 rows         | 7.20ms     | 7.90ms      | ~equal             |
+| List (sap.ui.table.Table) | Grid table binding replace, 2000 rows   | 7.40ms     | 5.90ms      | ~equal             |
+| Tree (sap.m.Tree)         | Tree binding replace, 200 nodes         | 9.80ms     | 8.30ms      | ~equal             |
+| Expression (sap.m.Text)   | Expression binding, 500 controls        | 5.20ms     | 5.00ms      | ~equal             |
+| Computed (sap.m.Text)     | Computed signals, 2000 computeds        | 5.30ms     | 5.00ms      | ~equal             |
+| Computed (sap.m.Text)     | Computed (redefined), 2000 computeds    | 5.80ms     | 4.90ms      | ~equal             |
+| Computed (sap.m.Text)     | Computed sub-path, 2000 computeds       | 4.90ms     | 4.70ms      | ~equal             |
+| Computed (sap.m.Text)     | Computed redefine + sub-path, 2000      | 4.70ms     | 4.80ms      | ~equal             |
+| Property (sap.m.Text)     | setData replace, 2000 bindings          | 20.50ms    | 21.10ms     | ~equal             |
+| Property (sap.m.Text)     | setData merge (shallow), 5 into 2k      | 5.50ms     | 4.60ms      | ~equal             |
+| Property (sap.m.Text)     | setData merge (deep), all 2k            | 20.30ms    | 21.10ms     | ~equal             |
+| Property (sap.m.Text)     | setData merge (nested config)           | 5.80ms     | 4.40ms      | ~equal             |
+| Property (sap.m.Text)     | setData merge (large, pinpoint) 20k     | 20.60ms    | 4.70ms      | **~4x faster**     |
+| Property (sap.m.Text)     | Real-world: checkPerformanceOfUpdate    | 27.10ms    | 6.80ms      | **~4x faster**     |
+| Property (sap.m.Text)     | Deep-path setProperty (no computeds)    | 5.30ms     | 4.80ms      | ~equal             |
 
 ### Honest Observations
 
 **Where SignalModel is faster:**
 
-"Update all N bindings (sync)" shows the largest difference: at 2000 bindings, JSONModel takes ~1100ms vs SignalModel's ~72ms (**~15x faster**, consistent across 4 runs: 15.7x, 13.1x, 15.4x, 15.4x). JSONModel's default synchronous `setProperty` calls `checkUpdate` after every call, iterating all bindings each time: O(N²) total (2000 calls × 2000 bindings = 4,000,000 binding checks). SignalModel is O(N) total (2000 notifications, one per changed path).
+"Update all N bindings (sync)" shows the largest difference: at 2000 bindings, JSONModel takes ~854ms vs SignalModel's ~49ms (**~17x faster**). JSONModel's default synchronous `setProperty` calls `checkUpdate` after every call, iterating all bindings each time: O(N²) total (2000 calls × 2000 bindings = 4,000,000 binding checks). SignalModel is O(N) total (2000 notifications, one per changed path).
 
 **The `bAsyncUpdate` path:**
 
@@ -181,7 +182,7 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it ba
 
 **In-place merge:**
 
-The "large dataset, pinpoint merge" scenario (3 items into 20,000) shows **~2x faster** performance (consistent across 4 runs: 2.1x, 2.0x, 2.3x, 2.0x). JSONModel's `deepExtend` deep-clones the entire 20,000-item array (each item has 7 properties including nested `metadata`) to overlay 3 items. SignalModel's `_mergeInPlace` walks only the 3 payload keys in-place: O(k) instead of O(n). The advantage grows linearly with the data-to-payload ratio. Fiori apps with large OData entity sets and form-level edits (e.g., editing 3 fields in a 5,000-row table) would see similar improvements.
+The "large dataset, pinpoint merge" scenario (3 items into 20,000) shows **~4x faster** performance. JSONModel's `deepExtend` deep-clones the entire 20,000-item array (each item has 7 properties including nested `metadata`) to overlay 3 items. SignalModel's `_mergeInPlace` walks only the 3 payload keys in-place: O(k) instead of O(n). The advantage grows linearly with the data-to-payload ratio. Fiori apps with large OData entity sets and form-level edits (e.g., editing 3 fields in a 5,000-row table) would see similar improvements.
 
 The "deep merge (all 2k)" scenario, where the entire payload matches the data size, shows ~equal performance across runs (direction flips between runs — sometimes JSON is faster, sometimes Signal is). When the payload covers all items, both models do comparable work.
 
@@ -189,7 +190,7 @@ Nested config merge is ~equal, with both models at the same timing at this scale
 
 **checkPerformanceOfUpdate threshold:**
 
-Scenario 21 reproduces the conditions from SAP's `checkPerformanceOfUpdate` warning: 3,449 bindings with 29 consecutive synchronous `setProperty` calls (100,021 cumulative binding checks, exceeding SAP's 100k threshold). JSONModel takes ~48ms vs SignalModel's ~16ms (**~3x faster**, consistent across 4 runs: 3.0x, 2.9x, 3.1x, 3.1x). This is the scale where SAP added a runtime performance warning.
+Scenario 21 reproduces the conditions from SAP's `checkPerformanceOfUpdate` warning: 3,449 bindings with 29 consecutive synchronous `setProperty` calls (100,021 cumulative binding checks, exceeding SAP's 100k threshold). JSONModel takes ~27ms vs SignalModel's ~7ms (**~4x faster**). This is the scale where SAP added a runtime performance warning.
 
 **Computed redefinition and sub-path traversal have zero overhead:**
 
@@ -201,11 +202,11 @@ Scenario 21 reproduces the conditions from SAP's `checkPerformanceOfUpdate` warn
 
 **Deep-path setProperty confirms zero computed overhead:**
 
-"Deep-path setProperty (no computeds)" uses 4-segment paths (`/items/0/meta/value`) with N bindings but zero computed signals. This isolates the overhead of `_findComputedAncestor` and the `hasComputeds` guard on every write. At 2000 bindings, both models are ~equal across all 4 runs (15.9/16.0, 16.0/15.6, 15.7/15.7, 15.8/16.0), confirming the `hasComputeds` short-circuit eliminates all computed-related overhead for apps that don't use computeds.
+"Deep-path setProperty (no computeds)" uses 4-segment paths (`/items/0/meta/value`) with N bindings but zero computed signals. This isolates the overhead of `_findComputedAncestor` and the `hasComputeds` guard on every write. At 2000 bindings, both models are ~equal, confirming the `hasComputeds` short-circuit eliminates all computed-related overhead for apps that don't use computeds.
 
 **Where both models are equivalent:**
 
-For list, table, grid table, and tree binding scenarios where the entire aggregation is replaced, both models perform equivalently. DOM rendering cost (destroying and recreating list items, table rows, tree nodes) dominates the model notification cost. The model layer is not the bottleneck.
+For list, table, grid table, and tree binding scenarios where the entire aggregation is replaced, both models perform equivalently. DOM rendering cost dominates the model notification cost. The model layer is not the bottleneck. The grid table (`sap.ui.table.Table`) uses row virtualization (20 visible rows out of 2000 total), so DOM cost is constant regardless of dataset size. Both models are ~equal at 2000 rows.
 
 Expression binding, computed signals, getProperty, setProperty (no bindings), setData replace, and equal-sized merges are all equivalent.
 
