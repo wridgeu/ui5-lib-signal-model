@@ -522,10 +522,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // This is needed for FilterProcessor/SorterProcessor which pass raw list items as context.
     if (oContext && typeof (oContext as Context).getPath !== "function") {
       let oNode: unknown = oContext;
-      const aParts = sPath.split("/").filter(Boolean);
-      for (const sPart of aParts) {
+      // Walk the path without allocating arrays. This branch is called
+      // per-row during FilterProcessor/SorterProcessor operations.
+      let start = 0;
+      while (start < sPath.length) {
+        if (sPath[start] === "/") {
+          start++;
+          continue;
+        }
+        const end = sPath.indexOf("/", start);
+        const sPart = end === -1 ? sPath.substring(start) : sPath.substring(start, end);
         if (oNode === null || oNode === undefined) return undefined;
         oNode = (oNode as Record<string, unknown>)[sPart];
+        start = end === -1 ? sPath.length : end + 1;
       }
       return oNode;
     }

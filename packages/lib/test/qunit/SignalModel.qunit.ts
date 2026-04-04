@@ -533,7 +533,7 @@ QUnit.module(
       setTimeout(() => {
         assert.strictEqual(text.getText(), "L1", "text reads from element binding path");
 
-        text.unbindElement();
+        (text as any).unbindElement();
 
         setTimeout(() => {
           // After unbindElement, "text" relative to "/data" → undefined → empty string
@@ -572,7 +572,7 @@ QUnit.module(
       setTimeout(() => {
         assert.strictEqual(text.getText(), "L1", "text reads from element binding");
 
-        text.unbindElement();
+        (text as any).unbindElement();
 
         setTimeout(() => {
           // After unbindElement, "text" relative to "/data" → "from-parent"
@@ -610,7 +610,7 @@ QUnit.module(
       setTimeout(() => {
         assert.strictEqual(text.getText(), "L1", "initial");
 
-        text.unbindElement();
+        (text as any).unbindElement();
 
         setTimeout(() => {
           assert.strictEqual(text.getText(), "", "cleared after unbind");
@@ -649,7 +649,7 @@ QUnit.module(
       setTimeout(() => {
         assert.strictEqual(text.getText(), "L1", "initial from element binding");
 
-        text.unbindElement();
+        (text as any).unbindElement();
 
         setTimeout(() => {
           assert.strictEqual(text.getText(), "parent-text", "falls back to parent context");
