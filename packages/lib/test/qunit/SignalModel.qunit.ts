@@ -1,6 +1,13 @@
 import SignalModel from "ui5/model/signal/SignalModel";
+import Text from "sap/m/Text";
+import VBox from "sap/m/VBox";
 
-QUnit.module("SignalModel", () => {
+QUnit.module("SignalModel", {
+  afterEach() {
+    const fixture = document.getElementById("qunit-fixture");
+    if (fixture) fixture.innerHTML = "";
+  },
+}, () => {
   QUnit.test("constructor sets initial data", (assert) => {
     const data = { name: "Alice", age: 28 };
     const model = new SignalModel(data);
@@ -319,6 +326,159 @@ QUnit.module("SignalModel", () => {
     assert.ok(ctx, "context created");
     assert.strictEqual(ctx!.getPath(), "/customer", "context path is correct");
     assert.strictEqual(model.getProperty("name", ctx!), "Alice", "getProperty with context works");
+    model.destroy();
+  });
+
+  // =========================================================================
+  // setProperty with invalid binding context (JSONModel parity)
+  // =========================================================================
+
+  QUnit.test("setProperty with invalid context and relative path returns false", (assert) => {
+    const model = new SignalModel({
+      teamMembers: { Alice: { firstName: "Alice" } },
+    });
+    // Create context to a path that does not exist
+    const ctx = model.createBindingContext("/teamMembers/NonExistent");
+    const result = model.setProperty("firstName", "Peter", ctx!);
+    assert.notOk(result, "setProperty returns false for invalid context path");
+    model.destroy();
+  });
+
+  // =========================================================================
+  // Two models on the same control (JSONModel parity)
+  // =========================================================================
+
+  QUnit.test("createBindingContext with two models — child model takes precedence", (assert) => {
+    const done = assert.async();
+    const parentModel = new SignalModel({
+      teamMembers: [{ firstName: "Alice" }],
+    });
+    const childModel = new SignalModel({
+      pets: [{ type: "ape" }, { type: "bird" }],
+    });
+
+    const container = new VBox();
+    const text = new Text();
+    container.addItem(text);
+
+    container.setModel(parentModel);
+    container.setBindingContext(parentModel.createBindingContext("/teamMembers")!);
+
+    // Child model overrides on the text control
+    text.setModel(childModel);
+    text.bindProperty("text", "/pets/0/type");
+
+    assert.strictEqual(text.getText(), "ape", "text reads from child model");
+
+    childModel.setProperty("/pets/0/type", "hamster");
+
+    // Signal-based update fires via microtask, not synchronously
+    setTimeout(() => {
+      assert.strictEqual(text.getText(), "hamster", "text updates from child model");
+      container.destroy();
+      childModel.destroy();
+      parentModel.destroy();
+      done();
+    }, 50);
+  });
+
+  // =========================================================================
+  // Context inheritance (JSONModel parity)
+  // =========================================================================
+
+  QUnit.test("context inheritance — child inherits parent context via model", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      pets: [{ type: "ape" }, { type: "bird" }],
+    });
+
+    const text = new Text();
+    text.setModel(model);
+
+    const ctx = model.createBindingContext("/pets");
+    text.setBindingContext(ctx!);
+    assert.strictEqual(text.getBindingContext()!.getPath(), "/pets", "context set correctly");
+
+    text.bindProperty("text", "0/type");
+    assert.strictEqual(text.getText(), "ape", "relative path resolved through context");
+
+    model.setProperty("0/type", "rat", text.getBindingContext()!);
+
+    setTimeout(() => {
+      assert.strictEqual(text.getText(), "rat", "text updated via context-relative setProperty");
+      text.destroy();
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  // =========================================================================
+  // bindElement (JSONModel parity)
+  // =========================================================================
+
+  QUnit.test("bindElement resolves relative path against context", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      data: {
+        level1: { text: "L1", level2: { text: "L2" } },
+      },
+    });
+
+    const text = new Text();
+    text.setModel(model);
+    text.placeAt("qunit-fixture");
+
+    const ctx = model.createBindingContext("/data");
+    text.setBindingContext(ctx!);
+    text.bindElement("level1");
+    assert.strictEqual(
+      text.getBindingContext()!.getPath(),
+      "/data/level1",
+      "bindElement creates combined context path",
+    );
+
+    text.bindProperty("text", "text");
+
+    // bindElement triggers async re-subscription; wait for microtask flush
+    setTimeout(() => {
+      assert.strictEqual(text.getText(), "L1", "text reads from element binding path");
+
+      text.bindElement("level1/level2");
+
+      setTimeout(() => {
+        assert.strictEqual(text.getText(), "L2", "deeper bindElement updates text");
+        text.destroy();
+        model.destroy();
+        done();
+      }, 50);
+    }, 50);
+  });
+
+  QUnit.test("bindElement before setBindingContext — order independent", (assert) => {
+    const model = new SignalModel({
+      data: {
+        level1: { text: "L1", level2: { text: "L2" } },
+      },
+    });
+
+    const text = new Text();
+    text.setModel(model);
+    text.placeAt("qunit-fixture");
+
+    // bindElement first, then set context
+    text.bindElement("level1");
+    const ctx = model.createBindingContext("/data");
+    text.setBindingContext(ctx!);
+    assert.strictEqual(
+      text.getBindingContext()!.getPath(),
+      "/data/level1",
+      "context resolves even when bindElement is called first",
+    );
+
+    text.bindProperty("text", "text");
+    assert.strictEqual(text.getText(), "L1", "text reads correctly");
+
+    text.destroy();
     model.destroy();
   });
 });
