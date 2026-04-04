@@ -477,14 +477,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (existing) return existing;
 
     // If a parent path is a computed signal, subscribe to it instead.
-    // The binding's checkUpdate reads the sub-path via _getObject, which
-    // traverses into computed values. This ensures the binding is notified
-    // when the computed re-evaluates (e.g. /firstItem changes → /firstItem/name fires).
-    const aParts = sPath.substring(1).split("/");
-    for (let i = aParts.length - 1; i >= 1; i--) {
-      const sParentPath = "/" + aParts.slice(0, i).join("/");
-      if (this.registry.isComputed(sParentPath)) {
-        return this.registry.get(sParentPath)!;
+    // Search bottom-up (closest ancestor first) so bindings track the
+    // most specific computed. Uses lastIndexOf to avoid array allocation.
+    if (this.registry.hasComputeds) {
+      let idx = sPath.lastIndexOf("/");
+      while (idx > 0) {
+        const sParentPath = sPath.substring(0, idx);
+        if (this.registry.isComputed(sParentPath)) {
+          return this.registry.get(sParentPath)!;
+        }
+        idx = sPath.lastIndexOf("/", idx - 1);
       }
     }
 
