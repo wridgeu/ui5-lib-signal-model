@@ -424,12 +424,14 @@ QUnit.module("SignalModel", {
       },
     });
 
+    const container = new VBox();
     const text = new Text();
-    text.setModel(model);
-    text.placeAt("qunit-fixture");
+    container.addItem(text);
+    container.setModel(model);
+    container.placeAt("qunit-fixture");
 
     const ctx = model.createBindingContext("/data");
-    text.setBindingContext(ctx!);
+    container.setBindingContext(ctx!);
     text.bindElement("level1");
     assert.strictEqual(
       text.getBindingContext()!.getPath(),
@@ -447,7 +449,8 @@ QUnit.module("SignalModel", {
 
       setTimeout(() => {
         assert.strictEqual(text.getText(), "L2", "deeper bindElement updates text");
-        text.destroy();
+        // NOTE: unbindElement context cleanup is a known gap (see issue #8)
+        container.destroy();
         model.destroy();
         done();
       }, 50);
