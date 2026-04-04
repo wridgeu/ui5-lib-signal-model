@@ -23,10 +23,7 @@ interface FlushableBinding {
  * before the checkUpdate pass runs. See README "Microtask vs Macrotask
  * Scheduling" for the full rationale.
  */
-const pendingUpdates = new Map<
-  FlushableBinding,
-  Signal.State<unknown> | Signal.Computed<unknown>
->();
+let pendingUpdates = new Map<FlushableBinding, Signal.State<unknown> | Signal.Computed<unknown>>();
 let flushScheduled = false;
 
 export function scheduleFlush(
@@ -38,9 +35,11 @@ export function scheduleFlush(
     flushScheduled = true;
     queueMicrotask(() => {
       flushScheduled = false;
-      const entries = [...pendingUpdates.entries()];
-      pendingUpdates.clear();
-      for (const [b, s] of entries) {
+      // Swap the map so new notifications during checkUpdate() are
+      // queued for the next flush cycle, not processed in this one.
+      const batch = pendingUpdates;
+      pendingUpdates = new Map();
+      for (const [b, s] of batch) {
         s.get();
         b.watcher?.watch();
         try {
