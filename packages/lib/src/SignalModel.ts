@@ -581,12 +581,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * of it, is a computed signal. Returns `null` if no computed is in the path.
    */
   private _findComputedAncestor(sResolvedPath: string): string | null {
+    if (!this.registry.hasComputeds) {
+      return null;
+    }
     if (this.registry.isComputed(sResolvedPath)) {
       return sResolvedPath;
     }
     const aParts = sResolvedPath.substring(1).split("/");
-    for (let i = 1; i < aParts.length; i++) {
-      const sAncestor = "/" + aParts.slice(0, i).join("/");
+    let sAncestor = "";
+    for (let i = 0; i < aParts.length - 1; i++) {
+      sAncestor += "/" + aParts[i];
       if (this.registry.isComputed(sAncestor)) {
         return sAncestor;
       }
