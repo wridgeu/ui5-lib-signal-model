@@ -11,6 +11,7 @@ import type { Signal } from "signal-polyfill";
 // `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
 type ClientModelInternal = ClientModel & {
   resolve(sPath: string, oContext?: Context): string | undefined;
+  checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): number;
   bDestroyed: boolean;
 };
 
@@ -433,8 +434,18 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return Array.isArray(this._getObject(sAbsolutePath));
   }
 
-  checkUpdate(_bForceUpdate?: boolean, _bAsync?: boolean): void {
-    // Signal-based: bindings self-update via watchers, no polling needed.
+  checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): void {
+    // Signal-based bindings self-update via watchers, so routine polling
+    // (bForceUpdate=false) is unnecessary. However, the framework calls
+    // checkUpdate(true) during context propagation (e.g. setBindingContext)
+    // — delegate to Model.prototype.checkUpdate so bindings re-evaluate.
+    if (bForceUpdate) {
+      (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
+        this,
+        bForceUpdate,
+        bAsync,
+      );
+    }
   }
 
   getSignal<P extends string & ModelPath<T>>(
