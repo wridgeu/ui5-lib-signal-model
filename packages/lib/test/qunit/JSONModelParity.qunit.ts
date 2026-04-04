@@ -509,8 +509,8 @@ QUnit.module("JSONModel Parity", () => {
       assert.strictEqual(jsonText.getText(), "L1", "JSONModel: initial text");
       assert.strictEqual(signalText.getText(), "L1", "SignalModel: initial text");
 
-      jsonText.unbindElement();
-      signalText.unbindElement();
+      (jsonText as any).unbindElement();
+      (signalText as any).unbindElement();
 
       setTimeout(() => {
         assert.strictEqual(
