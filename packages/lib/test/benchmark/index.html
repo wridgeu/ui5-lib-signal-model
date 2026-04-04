@@ -1003,6 +1003,77 @@
       }
 
       /**
+       * Computed redefine with sub-path bindings.
+       *
+       * Creates N computed signals that return objects, binds to sub-paths
+       * of each, then redefines all computeds (removeComputed + createComputed)
+       * and measures update propagation through the new dependencies.
+       * Exercises _firePathResubscribe's prefix scan + Map snapshot.
+       * For JSONModel: plain nested path update (no computed concept).
+       */
+      async function benchComputedRedefineSubPath(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
+        var data = { values: [], alt: [] };
+        for (var i = 0; i < n; i++) {
+          data.values.push({ label: "v" + i });
+          data.alt.push({ label: "a" + i });
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        if (isSignal && model.createComputed) {
+          for (var i = 0; i < n; i++) {
+            model.createComputed("/computed" + i, ["/values/" + i + "/label"], function (v) {
+              return { text: "orig:" + v };
+            });
+          }
+        }
+
+        // Bind to sub-paths: /computed0/text (Signal) or /values/0/label (JSON)
+        var controls = [];
+        for (var j = 0; j < n; j++) {
+          var path = isSignal && model.createComputed ? "/computed" + j + "/text" : "/values/" + j + "/label";
+          var text = new sap.m.Text({ text: "{" + path + "}" });
+          text.setModel(model);
+          text.placeAt(container);
+          controls.push(text);
+        }
+        await flush();
+        await new Promise(function (r) { setTimeout(r, 50); });
+
+        if (isSignal && model.removeComputed) {
+          // Redefine all computeds: switch dependency from /values to /alt
+          // This triggers _firePathResubscribe with sub-path prefix scan
+          for (var i = 0; i < n; i++) {
+            model.removeComputed("/computed" + i);
+            model.createComputed("/computed" + i, ["/alt/" + i + "/label"], function (v) {
+              return { text: "redef:" + v };
+            });
+          }
+        }
+        await flush();
+        await new Promise(function (r) { setTimeout(r, 50); });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setProperty(isSignal ? "/alt/0/label" : "/values/0/label", "warm" + w);
+          await flush();
+        }
+
+        // Measure: update source, redefined computed re-evaluates, sub-path binding updates
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          model.setProperty(isSignal ? "/alt/0/label" : "/values/0/label", "m" + round);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
        * setData replace with N bindings
        *
        * Replaces the entire model data and measures propagation to all bindings.
@@ -1728,7 +1799,32 @@
           signal: stats(compSubSignalTimes),
         });
 
-        // --- Scenario 13: setData replace ---
+        // --- Scenario 13: Computed redefine with sub-path bindings ---
+        setStatus("Running: computed redefine + sub-path with " + compN + " computeds (alternating)...");
+        var compRedefSubJsonTimes = [];
+        var compRedefSubSignalTimes = [];
+        for (var crs = 0; crs < compHalf; crs++) {
+          if (crs % 2 === 0) {
+            var crsjt = await benchComputedRedefineSubPath(base.JSONModel, false, compN, warmup, 1);
+            compRedefSubJsonTimes.push(crsjt[0]);
+            var crsst = await benchComputedRedefineSubPath(base.SignalModel, true, compN, warmup, 1);
+            compRedefSubSignalTimes.push(crsst[0]);
+          } else {
+            var crsst2 = await benchComputedRedefineSubPath(base.SignalModel, true, compN, warmup, 1);
+            compRedefSubSignalTimes.push(crsst2[0]);
+            var crsjt2 = await benchComputedRedefineSubPath(base.JSONModel, false, compN, warmup, 1);
+            compRedefSubJsonTimes.push(crsjt2[0]);
+          }
+        }
+        pushResult({
+          name: "Computed redefine + sub-path, " + compN + " computeds",
+          detail: "Redefine all, sub-path bindings re-subscribe",
+          category: "Computed (sap.m.Text)",
+          json: stats(compRedefSubJsonTimes),
+          signal: stats(compRedefSubSignalTimes),
+        });
+
+        // --- Scenario 15: setData replace ---
         setStatus("Running: setData replace with " + n + " bindings (alternating)...");
         var r11 = await runAlternating(
           benchSetDataReplace,
@@ -1743,7 +1839,7 @@
           signal: stats(r11.signalTimes),
         });
 
-        // --- Scenario 13: setData merge (shallow) ---
+        // --- Scenario 16: setData merge (shallow) ---
         setStatus("Running: setData merge (shallow) with " + n + " bindings (alternating)...");
         var r12 = await runAlternating(
           benchSetDataMergeShallow,
@@ -1758,7 +1854,7 @@
           signal: stats(r12.signalTimes),
         });
 
-        // --- Scenario 14: setData merge (deep) ---
+        // --- Scenario 17: setData merge (deep) ---
         setStatus("Running: setData merge (deep) with " + n + " bindings (alternating)...");
         var r13 = await runAlternating(
           benchSetDataMergeDeep,
@@ -1773,7 +1869,7 @@
           signal: stats(r13.signalTimes),
         });
 
-        // --- Scenario 15: setData merge (deeply nested config) ---
+        // --- Scenario 18: setData merge (deeply nested config) ---
         setStatus(
           "Running: setData merge (deeply nested config) with " + n + " bindings (alternating)...",
         );
@@ -1790,7 +1886,7 @@
           signal: stats(r14.signalTimes),
         });
 
-        // --- Scenario 16: setData merge (large dataset, pinpoint) ---
+        // --- Scenario 19: setData merge (large dataset, pinpoint) ---
         var largeN = n * 10;
         setStatus(
           "Running: setData merge (large dataset " +
@@ -1812,7 +1908,7 @@
           signal: stats(r15.signalTimes),
         });
 
-        // --- Scenario 17: Real-world checkPerformanceOfUpdate threshold ---
+        // --- Scenario 20: Real-world checkPerformanceOfUpdate threshold ---
         setStatus(
           "Running: real-world checkPerformanceOfUpdate threshold (3,449 bindings, 29 calls, alternating)...",
         );
@@ -1829,7 +1925,7 @@
           signal: stats(r16.signalTimes),
         });
 
-        // --- Scenario 20: Deep-path setProperty overhead ---
+        // --- Scenario 21: Deep-path setProperty overhead ---
         setStatus("Running: deep-path setProperty with " + n + " bindings (alternating)...");
         var r20 = await runAlternating(
           benchDeepPathSetProperty,
