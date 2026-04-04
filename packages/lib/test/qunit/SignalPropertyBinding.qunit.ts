@@ -115,6 +115,7 @@ QUnit.module("SignalPropertyBinding", () => {
     model.setProperty("/name", "Bob");
 
     setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no change while suspended");
       binding.resume();
       setTimeout(() => {
         assert.ok(changeCount > 0, "change fired on resume");

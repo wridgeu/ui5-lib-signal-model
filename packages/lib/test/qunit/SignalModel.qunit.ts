@@ -237,19 +237,28 @@ QUnit.module("SignalModel", () => {
     const binding = model.bindProperty("/name");
     let changeCount = 0;
 
+    // Verify binding is wired up before we test destroy
+    assert.strictEqual(binding.getValue(), "Alice", "binding has initial value");
+
     binding.attachChange(() => changeCount++);
     model.destroy();
 
     // After destroy, setting property should not notify binding
-    // (registry is cleared, signals no longer exist)
+    // (registry is cleared, signals no longer exist).
+    // setProperty may throw or silently succeed — either is acceptable.
+    // The key assertion is that changeCount stays 0 regardless.
+    let threw = false;
     try {
       model.setProperty("/name", "Bob");
     } catch {
-      // setProperty may throw after destroy — that's acceptable
+      threw = true;
     }
 
     setTimeout(() => {
       assert.strictEqual(changeCount, 0, "no change events after destroy");
+      if (!threw) {
+        assert.ok(true, "setProperty did not throw — cleanup prevented notification");
+      }
       done();
     }, 50);
   });

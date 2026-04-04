@@ -114,7 +114,7 @@ Create `package.json`:
   "author": "Marco Beier",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nicolo-ribaudo/signal-polyfill"
+    "url": "https://github.com/wridgeu/ui5-lib-signal-model.git"
   },
   "engines": {
     "node": ">=22"
