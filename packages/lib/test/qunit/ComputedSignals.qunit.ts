@@ -725,4 +725,125 @@ QUnit.module("ComputedSignals", () => {
       model.setProperty("/y", [10, 20, 30, 40]);
     },
   );
+
+  // =========================================================================
+  // Resubscription safety — recursion / reentrant edge cases
+  // =========================================================================
+
+  QUnit.test(
+    "many sub-path bindings resubscribe without infinite loop on computed redefine",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({ x: 1, y: 100 });
+      model.createComputed("/obj", ["/x"], (x) => ({
+        a: "x-a-" + (x as number),
+        b: "x-b-" + (x as number),
+        c: "x-c-" + (x as number),
+      }));
+
+      const bindingA = model.bindProperty("/obj/a");
+      const bindingB = model.bindProperty("/obj/b");
+      const bindingC = model.bindProperty("/obj/c");
+
+      assert.strictEqual(bindingA.getValue(), "x-a-1", "initial a");
+      assert.strictEqual(bindingB.getValue(), "x-b-1", "initial b");
+      assert.strictEqual(bindingC.getValue(), "x-c-1", "initial c");
+
+      // Redefine with different deps — triggers _firePathResubscribe
+      // which must snapshot sub-path entries to avoid infinite loop
+      model.removeComputed("/obj");
+      model.createComputed("/obj", ["/y"], (y) => ({
+        a: "y-a-" + (y as number),
+        b: "y-b-" + (y as number),
+        c: "y-c-" + (y as number),
+      }));
+
+      model.setProperty("/y", 200);
+
+      setTimeout(() => {
+        assert.strictEqual(bindingA.getValue(), "y-a-200", "a tracks new dep");
+        assert.strictEqual(bindingB.getValue(), "y-b-200", "b tracks new dep");
+        assert.strictEqual(bindingC.getValue(), "y-c-200", "c tracks new dep");
+        model.destroy();
+        done();
+      }, 50);
+    },
+  );
+
+  QUnit.test(
+    "chained computed redefine — both levels redefined, downstream binding updates",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({ x: 5, y: 100 });
+
+      model.createComputed("/base", ["/x"], (x) => (x as number) * 2);
+      model.createComputed("/derived", ["/base"], (b) => (b as number) + 1);
+
+      const binding = model.bindProperty("/derived");
+      assert.strictEqual(binding.getValue(), 11, "initial: (5*2)+1 = 11");
+
+      // Redefine both levels — each removeComputed+createComputed triggers
+      // _firePathResubscribe so bindings re-wire to the new signal objects
+      model.removeComputed("/derived");
+      model.removeComputed("/base");
+      model.createComputed("/base", ["/y"], (y) => (y as number) * 3);
+      model.createComputed("/derived", ["/base"], (b) => (b as number) + 1);
+
+      model.setProperty("/y", 10);
+
+      setTimeout(() => {
+        assert.strictEqual(binding.getValue(), 31, "derived sees new base: (10*3)+1 = 31");
+        model.destroy();
+        done();
+      }, 50);
+    },
+  );
+
+  QUnit.test("rapid successive redefine does not corrupt binding state", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ a: 1, b: 2, c: 3 });
+    model.createComputed("/val", ["/a"], (a) => "a=" + (a as number));
+
+    const binding = model.bindProperty("/val");
+    assert.strictEqual(binding.getValue(), "a=1", "initial");
+
+    // Rapid redefine — 3 times without waiting
+    model.removeComputed("/val");
+    model.createComputed("/val", ["/b"], (b) => "b=" + (b as number));
+
+    model.removeComputed("/val");
+    model.createComputed("/val", ["/c"], (c) => "c=" + (c as number));
+
+    model.setProperty("/c", 99);
+
+    setTimeout(() => {
+      assert.strictEqual(binding.getValue(), "c=99", "binding tracks final definition");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("sub-path binding survives rapid redefine without stale values", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ a: 1, b: 2, c: 3 });
+    model.createComputed("/obj", ["/a"], (a) => ({ val: "a=" + (a as number) }));
+
+    const binding = model.bindProperty("/obj/val");
+    assert.strictEqual(binding.getValue(), "a=1", "initial");
+
+    // Rapid redefine with sub-path binding
+    model.removeComputed("/obj");
+    model.createComputed("/obj", ["/b"], (b) => ({ val: "b=" + (b as number) }));
+
+    model.removeComputed("/obj");
+    model.createComputed("/obj", ["/c"], (c) => ({ val: "c=" + (c as number) }));
+
+    model.setProperty("/c", 42);
+
+    setTimeout(() => {
+      assert.strictEqual(binding.getValue(), "c=42", "sub-path tracks final definition");
+      model.destroy();
+      done();
+    }, 50);
+  });
 });
