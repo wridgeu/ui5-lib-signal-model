@@ -157,13 +157,13 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it ba
 >
 > SignalModel originally showed **2.5x slower** performance in this scenario (~52ms vs ~21ms at 2000 bindings). We investigated the root cause through several steps:
 >
-> 1. **Watcher re-arm cycle.** The TC39 `Signal.subtle.Watcher` requires an explicit re-arm (`signal.get()` + `watcher.watch()`) after each notification. We initially attributed the gap to this per-binding overhead. Other frameworks (Preact, Solid, Vue) avoid it via persistent subscriptions.
+> 1. **Watcher re-arm hypothesis.** The TC39 `Signal.subtle.Watcher` requires an explicit re-arm (`signal.get()` + `watcher.watch()`) after each notification. We initially suspected this per-binding overhead caused the gap. Other frameworks (Preact, Solid, Vue) avoid it via persistent subscriptions.
 >
-> 2. **Polyfill swap.** Tested [alien-signals](https://github.com/stackblitz/alien-signals) (a high-performance reactive engine, being considered as the new `signal-polyfill` base in [PR #44](https://github.com/proposal-signals/signal-polyfill/pull/44)). Result: identical performance across all 17 scenarios. The polyfill engine was not the bottleneck.
+> 2. **Polyfill swap.** Tested [alien-signals](https://github.com/stackblitz/alien-signals) (a high-performance reactive engine, being considered as the new `signal-polyfill` base in [PR #44](https://github.com/proposal-signals/signal-polyfill/pull/44)) as a drop-in replacement. Result: identical performance across all 17 scenarios. The polyfill engine was not the bottleneck.
 >
-> 3. **Flush loop instrumentation.** Measured per-step cost at 2000 bindings: `signal.get()` = 9%, `watcher.watch()` = 12%, `checkUpdate()` = 79%. The re-arm cycle was only ~21% of the flush — UI5's binding refresh dominated.
+> 3. **Flush loop instrumentation.** Instrumented the flush loop to measure per-step cost. `checkUpdate()` (UI5's binding refresh) accounted for the majority of the flush time. The re-arm calls (`signal.get()` + `watcher.watch()`) appeared small in instrumentation and were confirmed negligible by removing `signal.get()` entirely — 143 tests passed but performance was unchanged. The re-arm cycle was not the bottleneck.
 >
-> 4. **Root cause found.** The real cost was not in the flush but in the `setProperty` loop itself. Each of the 2000 `setProperty` calls fired a synchronous Watcher `notify` callback — even though `bAsyncUpdate=true` was meant to defer work. JSONModel's async path skips all notification during the loop and syncs once afterward.
+> 4. **Root cause.** The cost was not in the flush loop at all. It was in the `setProperty` loop: each of the 2000 calls fired a synchronous Watcher `notify` callback (reactive graph traversal + `Map.set()` in FlushQueue), even when `bAsyncUpdate=true` was meant to defer work. JSONModel's async path skips all notification during the loop and syncs once afterward.
 >
 > 5. **Fix.** When `bAsyncUpdate=true`, SignalModel now writes data immediately but skips signal notification entirely. A single `setTimeout` calls `registry.invalidateAll()` to sync all signals at once. This matches JSONModel's batching strategy: zero notification cost during the write loop, one batched pass afterward. Result: **~equal** performance.
 
