@@ -262,4 +262,63 @@ QUnit.module("SignalModel", () => {
       done();
     }, 50);
   });
+
+  // =========================================================================
+  // setJSON / getJSON (JSONModel parity)
+  // =========================================================================
+
+  QUnit.test("getJSON returns model data as JSON string", (assert) => {
+    const model = new SignalModel({ name: "Alice", age: 28 });
+    const json = model.getJSON();
+    assert.deepEqual(JSON.parse(json), { name: "Alice", age: 28 }, "getJSON round-trips");
+    model.destroy();
+  });
+
+  QUnit.test("setJSON parses string and replaces model data", (assert) => {
+    const model = new SignalModel({ name: "Alice" });
+    model.setJSON('{"name":"Bob","age":30}');
+    assert.strictEqual(model.getProperty("/name"), "Bob", "name replaced");
+    assert.strictEqual(model.getProperty("/age"), 30, "age set");
+    model.destroy();
+  });
+
+  QUnit.test("setJSON with merge preserves existing data", (assert) => {
+    const model = new SignalModel({ name: "Alice", age: 28 });
+    model.setJSON('{"age":30}', true);
+    assert.strictEqual(model.getProperty("/name"), "Alice", "name preserved");
+    assert.strictEqual(model.getProperty("/age"), 30, "age merged");
+    model.destroy();
+  });
+
+  QUnit.test("setJSON with invalid JSON does not throw", (assert) => {
+    const model = new SignalModel({ name: "Alice" });
+    model.setJSON("{ this is not valid }");
+    assert.strictEqual(model.getProperty("/name"), "Alice", "data unchanged after invalid JSON");
+    model.destroy();
+  });
+
+  // =========================================================================
+  // getProperty edge cases
+  // =========================================================================
+
+  QUnit.test("getProperty with null path returns undefined", (assert) => {
+    const model = new SignalModel({ name: "Alice" });
+    // @ts-expect-error — testing runtime behavior with null path
+    const result = model.getProperty(null);
+    assert.strictEqual(result, undefined, "null path returns undefined");
+    model.destroy();
+  });
+
+  // =========================================================================
+  // createBindingContext (inherited from ClientModel)
+  // =========================================================================
+
+  QUnit.test("createBindingContext returns context for valid path", (assert) => {
+    const model = new SignalModel({ customer: { name: "Alice" } });
+    const ctx = model.createBindingContext("/customer");
+    assert.ok(ctx, "context created");
+    assert.strictEqual(ctx!.getPath(), "/customer", "context path is correct");
+    assert.strictEqual(model.getProperty("name", ctx!), "Alice", "getProperty with context works");
+    model.destroy();
+  });
 });

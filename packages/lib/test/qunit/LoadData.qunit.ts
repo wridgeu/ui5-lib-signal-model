@@ -3,6 +3,7 @@ import JSONModel from "sap/ui/model/json/JSONModel";
 
 const BASE = "/test-resources/ui5/model/signal/qunit/testdata";
 const SAMPLE_URL = `${BASE}/sample.json`;
+const MALFORMED_URL = `${BASE}/malformed.json`;
 const MERGE_URL = `${BASE}/merge.json`;
 const BAD_URL = `${BASE}/does-not-exist.json`;
 
@@ -381,5 +382,45 @@ QUnit.module("loadData", () => {
 
     model.loadData(SAMPLE_URL, undefined, undefined, undefined, undefined, undefined, undefined, controller.signal);
     controller.abort();
+  });
+
+  // =========================================================================
+  // Malformed JSON response
+  // =========================================================================
+
+  QUnit.test("loadData fires requestFailed for malformed JSON response", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+
+    model.attachRequestFailed(() => {
+      assert.ok(true, "requestFailed fired for malformed JSON");
+      model.destroy();
+      done();
+    });
+
+    model.loadData(MALFORMED_URL);
+  });
+
+  // =========================================================================
+  // loadData after destroy
+  // =========================================================================
+
+  QUnit.test("loadData after destroy does not set data", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>({ name: "before" });
+    model.destroy();
+
+    // loadData on a destroyed model — should not update data or throw
+    try {
+      model.loadData(SAMPLE_URL);
+    } catch {
+      // may throw — that's acceptable
+    }
+
+    setTimeout(() => {
+      // Data should still be the pre-destroy value (or empty if destroy cleared it)
+      assert.notStrictEqual(model.getProperty("/name"), "Alice", "loaded data was not applied");
+      done();
+    }, 200);
   });
 });
