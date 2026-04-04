@@ -875,6 +875,66 @@
       }
 
       /**
+       * Computed sub-path traversal.
+       *
+       * Creates N computed signals that return objects, then binds N Text
+       * controls to sub-paths (e.g., /computed0/name). Measures update
+       * propagation through _getObject's computed traversal and getSignal's
+       * parent-computed resolution.
+       * For JSONModel: binds directly to nested paths (no computed concept).
+       */
+      async function benchComputedSubPath(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
+        var data = { items: [] };
+        for (var i = 0; i < n; i++) {
+          data.items.push({ name: "item" + i, value: i });
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        if (isSignal && model.createComputed) {
+          // Create N computed signals, each returning an object from the items array
+          for (var i = 0; i < n; i++) {
+            (function (idx) {
+              model.createComputed("/computed" + idx, ["/items/" + idx + "/name", "/items/" + idx + "/value"], function (name, value) {
+                return { label: name + "=" + value };
+              });
+            })(i);
+          }
+        }
+
+        // Bind to sub-paths: /computed0/label (Signal) or /items/0/name (JSON)
+        var controls = [];
+        for (var j = 0; j < n; j++) {
+          var path = isSignal && model.createComputed ? "/computed" + j + "/label" : "/items/" + j + "/name";
+          var text = new sap.m.Text({ text: "{" + path + "}" });
+          text.setModel(model);
+          text.placeAt(container);
+          controls.push(text);
+        }
+        await flush();
+        await new Promise(function (r) { setTimeout(r, 50); });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setProperty("/items/0/name", "warmup" + w);
+          await flush();
+        }
+
+        // Measure: update source, computed re-evaluates, sub-path binding updates
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          model.setProperty("/items/0/name", "round" + round);
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
        * Computed signals with redefinition (removeComputed + createComputed).
        *
        * Creates N computeds bound to controls, then redefines each computed
@@ -1549,7 +1609,7 @@
         });
 
         // --- Scenario 10: Computed signals ---
-        var compN = Math.min(n, 500);
+        var compN = n;
         setStatus("Running: computed signals with " + compN + " computeds (alternating)...");
         // Computed needs special handling: isSignal flag differs per model
         var compJsonTimes = [];
@@ -1601,7 +1661,32 @@
           signal: stats(compRedefSignalTimes),
         });
 
-        // --- Scenario 12: setData replace ---
+        // --- Scenario 12: Computed sub-path traversal ---
+        setStatus("Running: computed sub-path with " + compN + " computeds (alternating)...");
+        var compSubJsonTimes = [];
+        var compSubSignalTimes = [];
+        for (var cs = 0; cs < compHalf; cs++) {
+          if (cs % 2 === 0) {
+            var csjt = await benchComputedSubPath(base.JSONModel, false, compN, warmup, 1);
+            compSubJsonTimes.push(csjt[0]);
+            var csst = await benchComputedSubPath(base.SignalModel, true, compN, warmup, 1);
+            compSubSignalTimes.push(csst[0]);
+          } else {
+            var csst2 = await benchComputedSubPath(base.SignalModel, true, compN, warmup, 1);
+            compSubSignalTimes.push(csst2[0]);
+            var csjt2 = await benchComputedSubPath(base.JSONModel, false, compN, warmup, 1);
+            compSubJsonTimes.push(csjt2[0]);
+          }
+        }
+        pushResult({
+          name: "Computed sub-path, " + compN + " computeds",
+          detail: "Update 1 source, sub-path binding re-reads",
+          category: "Computed (sap.m.Text)",
+          json: stats(compSubJsonTimes),
+          signal: stats(compSubSignalTimes),
+        });
+
+        // --- Scenario 13: setData replace ---
         setStatus("Running: setData replace with " + n + " bindings (alternating)...");
         var r11 = await runAlternating(
           benchSetDataReplace,

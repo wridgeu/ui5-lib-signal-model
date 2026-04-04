@@ -2,7 +2,7 @@
 	controllerName="demo.app.controller.StrictMode"
 	xmlns:mvc="sap.ui.core"
 	xmlns="sap.m">
-	<Panel headerText="Strict Mode Demo">
+	<Panel headerText="Strict Mode Demo" class="sapUiContentPadding">
 		<VBox class="sapUiSmallMargin">
 			<HBox>
 				<Input id="pathInput" placeholder="Path (e.g. /nonexistent)" width="300px" class="sapUiSmallMarginEnd" />

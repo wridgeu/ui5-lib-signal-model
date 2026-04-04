@@ -2,7 +2,7 @@
 	controllerName="demo.app.controller.ProgrammaticAccess"
 	xmlns:mvc="sap.ui.core"
 	xmlns="sap.m">
-	<Panel headerText="Programmatic Signal Access">
+	<Panel headerText="Programmatic Signal Access" class="sapUiContentPadding">
 		<VBox class="sapUiSmallMargin">
 			<Label text="Current firstName signal value:" />
 			<Text id="signalValue" text="(click Read Signal)" />

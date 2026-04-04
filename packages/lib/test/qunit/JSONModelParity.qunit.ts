@@ -1,5 +1,7 @@
 import SignalModel from "ui5/model/signal/SignalModel";
 import JSONModel from "sap/ui/model/json/JSONModel";
+import Text from "sap/m/Text";
+import VBox from "sap/m/VBox";
 
 // JSONModel.isList exists at runtime but not in @openui5/types stubs
 type JSONModelRuntime = JSONModel & { isList(sPath: string): boolean };
@@ -469,5 +471,59 @@ QUnit.module("JSONModel Parity", () => {
 
     json.destroy();
     signal.destroy();
+  });
+
+  // --- unbindElement context cleanup (issue #8 parity) ---
+
+  QUnit.test("unbindElement clears stale value — parity with JSONModel", (assert) => {
+    const done = assert.async();
+    const jsonModel = new JSONModel({
+      data: { level1: { text: "L1" } },
+    });
+    const signalModel = new SignalModel({
+      data: { level1: { text: "L1" } },
+    });
+
+    const jsonContainer = new VBox();
+    const jsonText = new Text();
+    jsonContainer.addItem(jsonText);
+    jsonContainer.setModel(jsonModel);
+    jsonContainer.placeAt("qunit-fixture");
+
+    const signalContainer = new VBox();
+    const signalText = new Text();
+    signalContainer.addItem(signalText);
+    signalContainer.setModel(signalModel);
+    signalContainer.placeAt("qunit-fixture");
+
+    // Set up identical binding contexts + element bindings
+    jsonContainer.setBindingContext(jsonModel.createBindingContext("/data")!);
+    jsonText.bindElement("level1");
+    jsonText.bindProperty("text", "text");
+
+    signalContainer.setBindingContext(signalModel.createBindingContext("/data")!);
+    signalText.bindElement("level1");
+    signalText.bindProperty("text", "text");
+
+    setTimeout(() => {
+      assert.strictEqual(jsonText.getText(), "L1", "JSONModel: initial text");
+      assert.strictEqual(signalText.getText(), "L1", "SignalModel: initial text");
+
+      jsonText.unbindElement();
+      signalText.unbindElement();
+
+      setTimeout(() => {
+        assert.strictEqual(
+          signalText.getText(),
+          jsonText.getText(),
+          "unbindElement result matches JSONModel: " + JSON.stringify(jsonText.getText()),
+        );
+        jsonContainer.destroy();
+        signalContainer.destroy();
+        jsonModel.destroy();
+        signalModel.destroy();
+        done();
+      }, 50);
+    }, 50);
   });
 });
