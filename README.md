@@ -359,7 +359,9 @@ Each binding type (property, list, tree) subscribes to its path's signal via `Si
 
 - **One microtask per synchronous block**, regardless of how many bindings or binding types are notified.
 - **Map-based deduplication**: `Map<binding, signal>` ensures each binding appears at most once. Rapid-fire `setProperty` calls (e.g., updating 10 fields in a loop) produce exactly one `checkUpdate` per affected binding.
-- **Watcher re-arm protocol**: The TC39 Watcher fires at most once between `watch()` calls. The flush reads the current value (`signal.get()`, consuming the notification), re-arms the watcher (`watcher.watch()`, listening for the next change), then fires the UI change (`checkUpdate()`). This is the per-binding overhead discussed in the [benchmark section](#performance-benchmark).
+- **Watcher re-arm protocol**: The TC39 Watcher fires at most once between `watch()` calls. The flush reads the current value (`signal.get()`, consuming the notification), re-arms the watcher (`watcher.watch()`, listening for the next change), then fires the UI change (`checkUpdate()`).
+
+When `bAsyncUpdate=true` is passed to `setProperty`, this entire path is bypassed. Data is written immediately without signal notification, and a single `setTimeout` syncs all signals afterward via `registry.invalidateAll()`. See [Batching and `bAsyncUpdate`](#batching-and-basyncupdate).
 
 ### In-Place Merge (Eliminating `deepExtend`)
 
@@ -387,16 +389,14 @@ SignalModel supports this flag. When `bAsyncUpdate=true`, signal notifications a
 
 ### Microtask vs Macrotask Scheduling
 
-JSONModel's `bAsyncUpdate` uses `setTimeout` (macrotask). SignalModel's flush queue uses `queueMicrotask` (microtask). The difference affects visual consistency.
+SignalModel has two scheduling paths depending on how `setProperty` is called:
+
+- **Default (no `bAsyncUpdate`):** signal changes fire synchronously, and the FlushQueue batches binding updates via `queueMicrotask`. Microtasks run before the browser paints, so the first frame always shows correct data. One paint, always consistent.
+- **`bAsyncUpdate=true`:** signal notifications are skipped entirely during the `setProperty` loop. A single `setTimeout` syncs all signals afterward. This uses the same macrotask scheduling as JSONModel's `bAsyncUpdate` — the browser may render one stale frame before bindings update.
 
 The browser event loop processes work in this order: **current JS > all microtasks > render (paint) > next macrotask**.
 
-- **`queueMicrotask` (SignalModel):** binding updates run _before_ the browser paints. The first frame the user sees already has the correct data. One paint, always consistent.
-- **`setTimeout` (JSONModel async):** binding updates run _after_ the browser paints. The browser renders one frame with stale DOM (bindings haven't been checked yet), then a second frame with the correct data. This can cause a visible flash of outdated content.
-
-The total work is identical, the same `checkUpdate` runs on the same bindings. The difference is whether the user sees one correct frame (microtask) or one stale frame followed by one correct frame (macrotask). For UI5 form applications, microtask scheduling eliminates visual glitches where the UI briefly shows inconsistent state between model data and rendered controls.
-
-Benchmarking confirmed this: swapping SignalModel's `queueMicrotask` for `setTimeout` at 2000 bindings showed ~equal wall-clock time (55.6ms vs 51.9ms, within standard deviation). The scheduling choice has no performance cost; it is purely a visual consistency improvement.
+The default path gives SignalModel a visual consistency advantage over JSONModel's `bAsyncUpdate`: no stale frames. When `bAsyncUpdate=true` is explicitly requested, SignalModel matches JSONModel's `setTimeout`-based batching — same scheduling, same visual behavior, same performance.
 
 ## Development
 
