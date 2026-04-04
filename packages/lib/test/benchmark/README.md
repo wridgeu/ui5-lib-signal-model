@@ -77,10 +77,10 @@ JSON output format:
 
 The merge scenarios (17-20) test different payload shapes that exercise the `setData(data, true)` code path with varying data-to-payload ratios:
 
-- **Shallow (16)**: Small flat payload into a large flat array. Both models pay the `deepExtend`/in-place merge cost, but binding notification cost dominates because all N bindings exist. Tests the common "update a few fields in a form" pattern.
-- **Deep (17)**: Payload covers every item. Worst case for merge: no savings from targeted invalidation. Both models must process all N items.
-- **Nested config (18)**: Realistic deeply nested configuration object (5 levels: `app.features.notifications.push`). The merge payload touches only 3 leaf paths. Tests recursive merge depth traversal.
-- **Large dataset, pinpoint (19)**: The key merge benchmark. Creates 10x N items (e.g., 10,000 for N=1000) with complex objects (7 properties, nested `metadata`), then merges only 3 items. JSONModel's `deepExtend` must deep-clone all 10,000 objects. SignalModel's in-place merge walks only the 3 payload items. Isolates the O(n) vs O(k) architectural difference.
+- **Shallow (17)**: Small flat payload into a large flat array. Both models pay the `deepExtend`/in-place merge cost, but binding notification cost dominates because all N bindings exist. Tests the common "update a few fields in a form" pattern.
+- **Deep (18)**: Payload covers every item. Worst case for merge: no savings from targeted invalidation. Both models must process all N items.
+- **Nested config (19)**: Realistic deeply nested configuration object (5 levels: `app.features.notifications.push`). The merge payload touches only 3 leaf paths. Tests recursive merge depth traversal.
+- **Large dataset, pinpoint (20)**: The key merge benchmark. Creates 10x N items (e.g., 10,000 for N=1000) with complex objects (7 properties, nested `metadata`), then merges only 3 items. JSONModel's `deepExtend` must deep-clone all 10,000 objects. SignalModel's in-place merge walks only the 3 payload items. Isolates the O(n) vs O(k) architectural difference.
 
 ## How It Works
 
@@ -171,7 +171,7 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it ba
 >
 > 1. **Watcher re-arm hypothesis.** The TC39 `Signal.subtle.Watcher` requires an explicit re-arm (`signal.get()` + `watcher.watch()`) after each notification. Initial suspicion was that this per-binding overhead caused the gap. Other frameworks (Preact, Solid, Vue) avoid it via persistent subscriptions.
 >
-> 2. **Polyfill swap.** Tested [alien-signals](https://github.com/stackblitz/alien-signals) (a high-performance reactive engine, being considered as the new `signal-polyfill` base in [PR #44](https://github.com/proposal-signals/signal-polyfill/pull/44)) as a drop-in replacement. Result: identical performance across all 17 scenarios. The polyfill engine was not the bottleneck.
+> 2. **Polyfill swap.** Tested [alien-signals](https://github.com/stackblitz/alien-signals) (a high-performance reactive engine, being considered as the new `signal-polyfill` base in [PR #44](https://github.com/proposal-signals/signal-polyfill/pull/44)) as a drop-in replacement. Result: identical performance across all scenarios. The polyfill engine was not the bottleneck.
 >
 > 3. **Flush loop instrumentation.** Instrumented the flush loop to measure per-step cost. `checkUpdate()` (UI5's binding refresh) accounted for the majority of the flush time. The re-arm calls (`signal.get()` + `watcher.watch()`) appeared small in instrumentation and were confirmed negligible by removing `signal.get()` entirely — 143 tests passed but performance was unchanged. The re-arm cycle was not the bottleneck.
 >
@@ -189,7 +189,7 @@ Nested config merge is ~equal, with both models at the same timing at this scale
 
 **checkPerformanceOfUpdate threshold:**
 
-Scenario 20 reproduces the conditions from SAP's `checkPerformanceOfUpdate` warning: 3,449 bindings with 29 consecutive synchronous `setProperty` calls (100,021 cumulative binding checks, exceeding SAP's 100k threshold). JSONModel takes ~48ms vs SignalModel's ~16ms (**~3x faster**, consistent across 4 runs: 3.0x, 2.9x, 3.1x, 3.1x). This is the scale where SAP added a runtime performance warning.
+Scenario 21 reproduces the conditions from SAP's `checkPerformanceOfUpdate` warning: 3,449 bindings with 29 consecutive synchronous `setProperty` calls (100,021 cumulative binding checks, exceeding SAP's 100k threshold). JSONModel takes ~48ms vs SignalModel's ~16ms (**~3x faster**, consistent across 4 runs: 3.0x, 2.9x, 3.1x, 3.1x). This is the scale where SAP added a runtime performance warning.
 
 **Computed redefinition and sub-path traversal have zero overhead:**
 
