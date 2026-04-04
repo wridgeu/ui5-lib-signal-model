@@ -548,23 +548,30 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
 
     const aParts = sResolvedPath.substring(1).split("/");
-    let sCurrentPath = "";
-    for (const sPart of aParts) {
-      if (!sPart) break; // empty segment (e.g. double slash) stops traversal (JSONModel parity)
-      sCurrentPath += "/" + sPart;
+    if (this.registry.hasComputeds) {
+      let sCurrentPath = "";
+      for (const sPart of aParts) {
+        if (!sPart) break;
+        sCurrentPath += "/" + sPart;
 
-      // If this accumulated path is a computed signal, use its value
-      // and continue traversal from there (computed values live in
-      // the registry, not in oData).
-      if (this.registry.isComputed(sCurrentPath)) {
-        oNode = this.registry.get(sCurrentPath)!.get();
-        continue;
-      }
+        if (this.registry.isComputed(sCurrentPath)) {
+          oNode = this.registry.get(sCurrentPath)!.get();
+          continue;
+        }
 
-      if (oNode === null || oNode === undefined) {
-        return oNode; // preserve null vs undefined (JSONModel parity)
+        if (oNode === null || oNode === undefined) {
+          return oNode;
+        }
+        oNode = (oNode as Record<string, unknown>)[sPart];
       }
-      oNode = (oNode as Record<string, unknown>)[sPart];
+    } else {
+      for (const sPart of aParts) {
+        if (!sPart) break;
+        if (oNode === null || oNode === undefined) {
+          return oNode;
+        }
+        oNode = (oNode as Record<string, unknown>)[sPart];
+      }
     }
     return oNode;
   }
