@@ -124,6 +124,9 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 
 ## Results (2000 bindings, 500 iterations, 10 rounds)
 
+> [!IMPORTANT]
+> These numbers are from a single machine and browser configuration. **Results vary** across hardware, OS, browser version, background processes, and JIT warm-up state. Treat them as rough directional guidance, not guarantees. Run the benchmark yourself (`npm run start:bench`) to see how it performs in your environment.
+
 ### Full results at 2000 bindings
 
 | Binding Type            | Scenario                                | JSONModel  | SignalModel | Comparison         |
