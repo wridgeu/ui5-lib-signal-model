@@ -46,7 +46,7 @@ JSON output format:
 
 ## What It Tests
 
-21 scenarios across all binding types, model operations, and merge strategies:
+22 scenarios across all binding types, model operations, and merge strategies:
 
 | #   | Binding Type              | Scenario                                | What It Measures                                            |
 | --- | ------------------------- | --------------------------------------- | ----------------------------------------------------------- |
@@ -57,24 +57,25 @@ JSON output format:
 | 5   | Property (`sap.m.Text`)   | Update all N bindings (async)           | JSONModel `bAsyncUpdate=true` vs signals                    |
 | 6   | Property (`sap.m.Text`)   | Sparse async, 1 of N (async)           | Single path change with N bindings, async mode              |
 | 7   | List (`sap.m.List`)       | List binding replace                    | Array replacement with `StandardListItem` template          |
-| 8   | List (`sap.m.Table`)      | Table binding replace                   | Row replacement with 3 `ColumnListItem` cells               |
-| 9   | Tree (`sap.m.Tree`)       | Tree binding replace                    | Hierarchical data replacement with `StandardTreeItem`       |
-| 10  | Expression (`sap.m.Text`) | Expression binding                      | Composite `{= ${/path1} + ${/path2}}` re-evaluation         |
-| 11  | Computed (`sap.m.Text`)   | Computed signals                        | `createComputed` dependency chain propagation               |
-| 12  | Computed (`sap.m.Text`)   | Computed (redefined)                    | `removeComputed` + `createComputed` re-subscribe cost       |
-| 13  | Computed (`sap.m.Text`)   | Computed sub-path                       | Binding to sub-path of computed object, `_getObject` traversal |
-| 14  | Computed (`sap.m.Text`)   | Computed redefine + sub-path            | `_firePathResubscribe` prefix scan with sub-path bindings   |
-| 15  | Property (`sap.m.Text`)   | setData replace                         | Full data replacement propagation                           |
-| 16  | Property (`sap.m.Text`)   | setData merge (shallow)                 | Merge 5 items into N, small payload into large data         |
-| 17  | Property (`sap.m.Text`)   | setData merge (deep)                    | Merge all N items, full payload, worst case for merge       |
-| 18  | Property (`sap.m.Text`)   | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree          |
-| 19  | Property (`sap.m.Text`)   | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N, tests O(k) vs O(n) merge          |
-| 20  | Property (`sap.m.Text`)   | Real-world: checkPerformanceOfUpdate    | 3,449 bindings, 29 sync calls, exceeds SAP's 100k threshold |
-| 21  | Property (`sap.m.Text`)   | Deep-path setProperty (no computeds)    | 4-segment path `_findComputedAncestor` overhead, zero computeds |
+| 8   | List (`sap.m.Table`)        | Table binding replace                   | Row replacement with 3 `ColumnListItem` cells               |
+| 9   | List (`sap.ui.table.Table`) | Grid table binding replace              | Virtualized row replacement, 3 columns, no row cap          |
+| 10  | Tree (`sap.m.Tree`)         | Tree binding replace                    | Hierarchical data replacement with `StandardTreeItem`       |
+| 11  | Expression (`sap.m.Text`)   | Expression binding                      | Composite `{= ${/path1} + ${/path2}}` re-evaluation         |
+| 12  | Computed (`sap.m.Text`)     | Computed signals                        | `createComputed` dependency chain propagation               |
+| 13  | Computed (`sap.m.Text`)     | Computed (redefined)                    | `removeComputed` + `createComputed` re-subscribe cost       |
+| 14  | Computed (`sap.m.Text`)     | Computed sub-path                       | Binding to sub-path of computed object, `_getObject` traversal |
+| 15  | Computed (`sap.m.Text`)     | Computed redefine + sub-path            | `_firePathResubscribe` prefix scan with sub-path bindings   |
+| 16  | Property (`sap.m.Text`)     | setData replace                         | Full data replacement propagation                           |
+| 17  | Property (`sap.m.Text`)     | setData merge (shallow)                 | Merge 5 items into N, small payload into large data         |
+| 18  | Property (`sap.m.Text`)     | setData merge (deep)                    | Merge all N items, full payload, worst case for merge       |
+| 19  | Property (`sap.m.Text`)     | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree          |
+| 20  | Property (`sap.m.Text`)     | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N, tests O(k) vs O(n) merge          |
+| 21  | Property (`sap.m.Text`)     | Real-world: checkPerformanceOfUpdate    | 3,449 bindings, 29 sync calls, exceeds SAP's 100k threshold |
+| 22  | Property (`sap.m.Text`)     | Deep-path setProperty (no computeds)    | 4-segment path `_findComputedAncestor` overhead, zero computeds |
 
 ### Merge Scenario Design
 
-The merge scenarios (16-19) test different payload shapes that exercise the `setData(data, true)` code path with varying data-to-payload ratios:
+The merge scenarios (17-20) test different payload shapes that exercise the `setData(data, true)` code path with varying data-to-payload ratios:
 
 - **Shallow (16)**: Small flat payload into a large flat array. Both models pay the `deepExtend`/in-place merge cost, but binding notification cost dominates because all N bindings exist. Tests the common "update a few fields in a form" pattern.
 - **Deep (17)**: Payload covers every item. Worst case for merge: no savings from targeted invalidation. Both models must process all N items.
@@ -93,7 +94,7 @@ When "Run Benchmark" is clicked, `sap.ui.require` loads:
 
 - `sap/ui/model/json/JSONModel` (from the OpenUI5 framework)
 - `ui5/model/signal/SignalModel` (from the library, transpiled from TypeScript)
-- Control classes: `sap/m/Text`, `sap/m/List`, `sap/m/Table`, `sap/m/Tree`, and their list items
+- Control classes: `sap/m/Text`, `sap/m/List`, `sap/m/Table`, `sap/m/Tree`, `sap/ui/table/Table`, and their list items/columns
 
 ### Execution
 
@@ -204,7 +205,7 @@ Scenario 20 reproduces the conditions from SAP's `checkPerformanceOfUpdate` warn
 
 **Where both models are equivalent:**
 
-For list, table, and tree binding scenarios where the entire aggregation is replaced, both models perform equivalently. DOM rendering cost (destroying and recreating list items, table rows, tree nodes) dominates the model notification cost. The model layer is not the bottleneck.
+For list, table, grid table, and tree binding scenarios where the entire aggregation is replaced, both models perform equivalently. DOM rendering cost (destroying and recreating list items, table rows, tree nodes) dominates the model notification cost. The model layer is not the bottleneck.
 
 Expression binding, computed signals, getProperty, setProperty (no bindings), setData replace, and equal-sized merges are all equivalent.
 

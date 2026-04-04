@@ -111,7 +111,7 @@ describe("Benchmark", function () {
     // Poll `window.__bench` for results and stream each one to the
     // terminal as it arrives. The benchmark page pushes results to
     // `window.__bench.results` after each scenario completes and sets
-    // `window.__bench.done = true` when all 17 scenarios are finished.
+    // `window.__bench.done = true` when all scenarios are finished.
     await browser.waitUntil(
       async () => {
         const state = await browser.execute(() => ({
