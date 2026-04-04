@@ -981,6 +981,8 @@
             });
           }
         }
+        await flush();
+        await new Promise(function (r) { setTimeout(r, 50); });
 
         // Warmup — update the NEW dependency
         for (var w = 0; w < warmupRounds; w++) {
@@ -1673,7 +1675,7 @@
           signal: stats(r6.signalTimes),
         });
 
-        // --- Scenario 7: Table binding ---
+        // --- Scenario 8: Table binding ---
         var tableN = Math.min(n, 500);
         setStatus("Running: table binding replace with " + tableN + " rows (alternating)...");
         var r7 = await runAlternating(
@@ -1689,7 +1691,7 @@
           signal: stats(r7.signalTimes),
         });
 
-        // --- Scenario 8: Tree binding ---
+        // --- Scenario 9: Tree binding ---
         var treeN = Math.min(n, 200); // Cap tree nodes to avoid DOM explosion
         setStatus("Running: tree binding replace with " + treeN + " root nodes (alternating)...");
         var r8 = await runAlternating(
@@ -1705,7 +1707,7 @@
           signal: stats(r8.signalTimes),
         });
 
-        // --- Scenario 9: Expression binding ---
+        // --- Scenario 10: Expression binding ---
         var exprN = Math.min(n, 500);
         setStatus("Running: expression binding with " + exprN + " controls (alternating)...");
         var r9 = await runAlternating(
@@ -1721,7 +1723,7 @@
           signal: stats(r9.signalTimes),
         });
 
-        // --- Scenario 10: Computed signals ---
+        // --- Scenario 11: Computed signals ---
         var compN = n;
         setStatus("Running: computed signals with " + compN + " computeds (alternating)...");
         // Computed needs special handling: isSignal flag differs per model
@@ -1749,7 +1751,7 @@
           signal: stats(compSignalTimes),
         });
 
-        // --- Scenario 11: Computed signals with redefinition ---
+        // --- Scenario 12: Computed signals with redefinition ---
         setStatus("Running: computed (redefined) with " + compN + " computeds (alternating)...");
         var compRedefJsonTimes = [];
         var compRedefSignalTimes = [];
@@ -1774,7 +1776,7 @@
           signal: stats(compRedefSignalTimes),
         });
 
-        // --- Scenario 12: Computed sub-path traversal ---
+        // --- Scenario 13: Computed sub-path traversal ---
         setStatus("Running: computed sub-path with " + compN + " computeds (alternating)...");
         var compSubJsonTimes = [];
         var compSubSignalTimes = [];
@@ -1799,7 +1801,7 @@
           signal: stats(compSubSignalTimes),
         });
 
-        // --- Scenario 13: Computed redefine with sub-path bindings ---
+        // --- Scenario 14: Computed redefine with sub-path bindings ---
         setStatus("Running: computed redefine + sub-path with " + compN + " computeds (alternating)...");
         var compRedefSubJsonTimes = [];
         var compRedefSubSignalTimes = [];
