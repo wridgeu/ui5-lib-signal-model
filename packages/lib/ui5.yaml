@@ -9,6 +9,8 @@ framework:
     - name: sap.ui.core
     - name: sap.m
       development: true
+    - name: sap.ui.table
+      development: true
 builder:
   resources:
     excludes:
