@@ -708,6 +708,23 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (cbs) {
       for (const cb of Array.from(cbs)) cb();
     }
+    // Also re-subscribe bindings at sub-paths of this computed.
+    // When a computed at "/c" is redefined, bindings at "/c/name"
+    // must switch their watcher from the old signal to the new one.
+    //
+    // Snapshot matching entries before iteration: each callback calls
+    // subscribe() which removes and re-inserts the entry in _pathSubscribers,
+    // causing the live Map iterator to revisit it and loop indefinitely.
+    const prefix = path + "/";
+    const subEntries: Array<() => void>[] = [];
+    for (const [subscribedPath, set] of this._pathSubscribers) {
+      if (subscribedPath.startsWith(prefix)) {
+        subEntries.push(Array.from(set));
+      }
+    }
+    for (const callbacks of subEntries) {
+      for (const cb of callbacks) cb();
+    }
   }
 
   override destroy(): void {
