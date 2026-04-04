@@ -125,7 +125,21 @@ With `bAsyncUpdate=true`, **JSONModel is faster than SignalModel** for bulk batc
 | During N `setProperty` calls | Sets data, schedules 1 timer    | Sets data, fires N watcher callbacks, each does `Map.set()`              |
 | Batched flush                | 1 loop: `deepEqual` per binding | 1 loop: `signal.get()` + `watcher.watch()` + `checkUpdate()` per binding |
 
-The overhead comes from the TC39 `Signal.subtle.Watcher` API contract: after a signal notifies its watcher, the watcher must be explicitly re-armed by calling `signal.get()` (to acknowledge the change) then `watcher.watch()` (to re-register). This is inherent to the Watcher API design (not a polyfill limitation) and cannot be optimized away at the application level. JSONModel's `deepEqual` comparison is a single function call per binding with no re-registration overhead. The gap grows with binding count (~1.5x at 1000, ~2.5x at 2000) because the re-arm cost is per-binding.
+> [!NOTE]
+> **Why SignalModel is slower in the async scenario — the Watcher re-arm cycle**
+>
+> The TC39 [Signals proposal](https://github.com/tc39/proposal-signals) defines a one-shot notification model for `Signal.subtle.Watcher`. After a signal change fires the watcher's `notify` callback, the watcher enters a `~waiting~` state and will not fire again until explicitly re-armed via `watcher.watch()`. This prevents notification storms (N `set()` calls would otherwise fire `notify` N times instead of once), but means every binding must execute a re-arm cycle during each flush: `signal.get()` to acknowledge the change, then `watcher.watch()` to re-subscribe.
+>
+> This is inherent to the [Watcher API design](https://github.com/tc39/proposal-signals) — not a polyfill limitation and not something that can be optimized away at the application level. No other signal framework (Preact, Solid, Vue, Angular) has an equivalent explicit step; they use persistent subscriptions where reading a signal during effect re-execution implicitly re-subscribes. The TC39 Watcher is a lower-level primitive that separates notification from evaluation, and the re-arm is the cost of that separation.
+>
+> The gap grows with binding count (~1.5x at 1000, ~2.5x at 2000) because the re-arm cost is per-binding per flush.
+>
+> **This is expected to improve.** The proposal is tracking two changes that will reduce this overhead:
+>
+> 1. A planned [`notifiedBy()` method](https://github.com/tc39/proposal-signals/issues/77) (agreed upon by the proposal champions) would combine "tell me what changed" and "re-arm" into a single call, eliminating the separate `watch()` step from the flush path.
+> 2. [Native browser implementations](https://github.com/tc39/proposal-signals) would reduce the re-arm to a single C++ bit flip — effectively zero cost. The proposal authors state: "native C++ implementations can be slightly more efficient by a constant factor."
+>
+> Additionally, the current `signal-polyfill` is being [rebuilt on alien-signals](https://github.com/nicolo-ribaudo/signal-polyfill/pull/44), a high-performance reactive engine, which will improve the overall graph traversal and notification performance even before native implementations ship.
 
 **In-place merge:**
 

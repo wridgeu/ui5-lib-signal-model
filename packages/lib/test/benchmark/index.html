@@ -1757,12 +1757,17 @@
           "JSONModel batches all <code>checkUpdate</code> calls into one <code>setTimeout</code> pass: O(N) total instead of O(N<sup>2</sup>). ";
         html +=
           "<strong>SignalModel is slower here</strong> because of the TC39 Signals <em>Watcher re-arm cycle</em>. " +
-          "After a signal notifies its watcher, the watcher must be explicitly re-armed: " +
+          "After a signal notifies its watcher, the watcher enters a <em>waiting</em> state and will not fire again until explicitly re-armed: " +
           "<code>signal.get()</code> to acknowledge the change, then <code>watcher.watch()</code> to re-subscribe. " +
-          "This 2-step overhead runs once per binding per flush and is inherent to the " +
-          "<a href='https://github.com/tc39/proposal-signals'>Watcher API design</a> (not a polyfill limitation). " +
+          "This one-shot design prevents notification storms (N <code>set()</code> calls fire <code>notify</code> once, not N times), " +
+          "but means every binding must execute a re-arm cycle during each flush. " +
+          "No other signal framework (Preact, Solid, Vue, Angular) has an equivalent explicit step &mdash; " +
+          "they use persistent subscriptions where reading a signal during effect re-execution implicitly re-subscribes. " +
+          "The TC39 Watcher is a lower-level primitive that separates notification from evaluation, and the re-arm is the cost of that separation. " +
           "JSONModel's batched <code>deepEqual</code> comparison is a single function call per binding with no re-registration overhead. " +
-          "The gap grows with binding count (~1.5x at 1000, ~2.5x at 2000) because the re-arm cost is per-binding.</li>";
+          "The gap grows with binding count (~1.5x at 1000, ~2.5x at 2000) because the re-arm cost is per-binding. " +
+          "<em>This overhead is expected to decrease</em>: a planned <a href='https://github.com/tc39/proposal-signals/issues/77'><code>notifiedBy()</code> method</a> " +
+          "will combine acknowledgement and re-arm into one call, and native browser implementations will reduce the re-arm to a single bit flip.</li>";
         html += "<li><strong>List binding replace</strong>: ";
         html +=
           "Tests <code>SignalListBinding</code> vs <code>JSONListBinding</code> with a real <code>sap.m.List</code> control. " +
