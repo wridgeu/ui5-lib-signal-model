@@ -350,4 +350,117 @@ QUnit.module("SignalPropertyBinding", () => {
       done();
     }, 50);
   });
+
+  // =========================================================================
+  // setContext edge cases
+  // =========================================================================
+
+  QUnit.test("setContext from valid context to null unsubscribes", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      items: [{ name: "Alice" }],
+    });
+    const listBinding = model.bindList("/items");
+    const contexts = listBinding.getContexts(0, 10);
+
+    const binding = model.bindProperty("name", contexts[0]);
+    assert.strictEqual(binding.getValue(), "Alice", "initial value");
+
+    // Remove context by setting to undefined
+    binding.setContext(undefined);
+
+    let changeCount = 0;
+    binding.attachChange(() => changeCount++);
+
+    model.setProperty("/items/0/name", "Bob");
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no change after context removed");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("setContext with non-relative binding does not resubscribe", (assert) => {
+    const model = new SignalModel({
+      name: "Alice",
+      items: [{ name: "Bob" }],
+    });
+
+    // Absolute path binding — not relative
+    const binding = model.bindProperty("/name");
+    assert.strictEqual(binding.getValue(), "Alice", "absolute binding works");
+
+    let subscribeCount = 0;
+    const origSubscribe = binding.subscribe.bind(binding);
+    (binding as unknown as Record<string, unknown>).subscribe = () => {
+      subscribeCount++;
+      origSubscribe();
+    };
+
+    // Setting context on absolute binding — should not resubscribe
+    // (isRelative() returns false, so checkUpdate runs but subscribe doesn't)
+    const ctx = model.createBindingContext("/items/0");
+    binding.setContext(ctx!);
+
+    assert.strictEqual(subscribeCount, 0, "subscribe not called for absolute binding setContext");
+    model.destroy();
+  });
+
+  // =========================================================================
+  // Binding on path where data is later deleted
+  // =========================================================================
+
+  QUnit.test("binding handles parent path being deleted", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>({ customer: { name: "Alice" } });
+    const binding = model.bindProperty("/customer/name");
+    assert.strictEqual(binding.getValue(), "Alice", "initial value");
+
+    let changed = false;
+    binding.attachChange(() => {
+      changed = true;
+    });
+
+    // Delete the parent by replacing with primitive
+    model.setProperty("/customer", null);
+
+    setTimeout(() => {
+      assert.ok(changed, "binding fired when parent deleted");
+      assert.strictEqual(binding.getValue(), null, "value is null after parent deleted");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  // =========================================================================
+  // setData fires change on property bindings
+  // =========================================================================
+
+  QUnit.test("setData replace fires on all active property bindings", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ a: 1, b: 2 });
+    const bindingA = model.bindProperty("/a");
+    const bindingB = model.bindProperty("/b");
+    let aChanged = false;
+    let bChanged = false;
+
+    bindingA.attachChange(() => {
+      aChanged = true;
+    });
+    bindingB.attachChange(() => {
+      bChanged = true;
+    });
+
+    model.setData({ a: 10, b: 20 });
+
+    setTimeout(() => {
+      assert.ok(aChanged, "binding /a fired on setData");
+      assert.ok(bChanged, "binding /b fired on setData");
+      assert.strictEqual(bindingA.getValue(), 10, "a = 10");
+      assert.strictEqual(bindingB.getValue(), 20, "b = 20");
+      model.destroy();
+      done();
+    }, 50);
+  });
 });

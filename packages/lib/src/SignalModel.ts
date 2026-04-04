@@ -6,7 +6,7 @@ import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
 import SignalTreeBinding from "./SignalTreeBinding";
 import type { SignalModelOptions, ModelPath, PathValue } from "./types";
-import { Signal } from "signal-polyfill";
+import type { Signal } from "signal-polyfill";
 
 // `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
 type ClientModelInternal = ClientModel & {
@@ -453,16 +453,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   ): Signal.State<PathValue<T, P>> | Signal.Computed<PathValue<T, P>>;
   getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown>;
   getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown> {
-    const existing = this.registry.get(sPath);
-    if (existing) {
-      // Computed signals are lazily evaluated — their dependency graph is only
-      // established on first .get(). Pre-evaluate so Watchers can track changes.
-      if (Signal.isComputed(existing)) {
-        existing.get();
-      }
-      return existing;
-    }
-    return this.registry.getOrCreate(sPath, this._getObject(sPath));
+    return this.registry.get(sPath) ?? this.registry.getOrCreate(sPath, this._getObject(sPath));
   }
 
   createComputed(
@@ -506,7 +497,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     const sResolvedPath = asInternal(this).resolve(sPath, oContext as Context | undefined);
     if (!sResolvedPath) {
-      return undefined;
+      return null;
+    }
+
+    // Computed signals live in the registry, not in oData.
+    // Return the computed value so list/tree bindings can see it.
+    if (this.registry.isComputed(sResolvedPath)) {
+      return this.registry.get(sResolvedPath)!.get();
     }
 
     if (sResolvedPath === "/") {
@@ -515,8 +512,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     const aParts = sResolvedPath.substring(1).split("/");
     for (const sPart of aParts) {
+      if (!sPart) break; // empty segment (e.g. double slash) stops traversal (JSONModel parity)
       if (oNode === null || oNode === undefined) {
-        return undefined;
+        return oNode; // preserve null vs undefined (JSONModel parity)
       }
       oNode = (oNode as Record<string, unknown>)[sPart];
     }

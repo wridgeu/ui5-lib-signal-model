@@ -311,11 +311,11 @@ QUnit.module(
     // getProperty edge cases
     // =========================================================================
 
-    QUnit.test("getProperty with null path returns undefined", (assert) => {
+    QUnit.test("getProperty with null path returns null (JSONModel parity)", (assert) => {
       const model = new SignalModel({ name: "Alice" });
       // @ts-expect-error — testing runtime behavior with null path
       const result = model.getProperty(null);
-      assert.strictEqual(result, undefined, "null path returns undefined");
+      assert.strictEqual(result, null, "null path returns null");
       model.destroy();
     });
 
