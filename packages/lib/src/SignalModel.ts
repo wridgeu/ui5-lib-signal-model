@@ -189,12 +189,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     bAsyncUpdate?: boolean,
   ): boolean;
   setProperty(sPath: string, oValue: unknown, oContext?: Context, bAsyncUpdate?: boolean): boolean;
-  setProperty(
-    sPath: string,
-    oValue: unknown,
-    oContext?: Context,
-    _bAsyncUpdate?: boolean,
-  ): boolean {
+  setProperty(sPath: string, oValue: unknown, oContext?: Context, bAsyncUpdate?: boolean): boolean {
     const sResolvedPath = asInternal(this).resolve(sPath, oContext);
     if (!sResolvedPath) {
       return false;
@@ -231,14 +226,42 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       oObject[sPropertyName] = oValue;
 
       if (this.registry.size > 0) {
-        this.registry.set(sResolvedPath, oValue);
-        this._invalidateParentSignals(sResolvedPath);
-        this.registry.invalidateChildren(sResolvedPath, (path: string) => this._getObject(path));
+        if (bAsyncUpdate) {
+          // Deferred mode: skip signal notification, schedule a bulk sync.
+          // This avoids 2000 synchronous notify callbacks during a batch
+          // of setProperty calls — the signals are synced once afterward.
+          this._scheduleBulkSync();
+        } else {
+          this.registry.set(sResolvedPath, oValue);
+          this._invalidateParentSignals(sResolvedPath);
+          this.registry.invalidateChildren(sResolvedPath, (path: string) => this._getObject(path));
+        }
       }
 
       return true;
     }
     return false;
+  }
+
+  private _bulkSyncScheduled = false;
+
+  /**
+   * Schedule a single deferred sync of all signals from the data tree.
+   *
+   * Used by the {@link setProperty} `bAsyncUpdate` path to avoid synchronous
+   * signal notifications during a batch of writes. Instead of firing N watcher
+   * notify callbacks (one per `setProperty` call), the data is written
+   * immediately and a single `setTimeout` syncs all signals afterward.
+   * This matches JSONModel's `bAsyncUpdate` batching strategy.
+   */
+  private _scheduleBulkSync(): void {
+    if (!this._bulkSyncScheduled) {
+      this._bulkSyncScheduled = true;
+      setTimeout(() => {
+        this._bulkSyncScheduled = false;
+        this.registry.invalidateAll((path: string) => this._getObject(path));
+      }, 0);
+    }
   }
 
   mergeProperty<P extends string & ModelPath<T>>(

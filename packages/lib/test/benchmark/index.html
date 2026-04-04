@@ -1857,8 +1857,7 @@
         if (params.has("n")) document.getElementById("bindingCount").value = params.get("n");
         if (params.has("iterations"))
           document.getElementById("iterations").value = params.get("iterations");
-        if (params.has("rounds"))
-          document.getElementById("rounds").value = params.get("rounds");
+        if (params.has("rounds")) document.getElementById("rounds").value = params.get("rounds");
         if (params.has("autorun")) {
           var poll = setInterval(function () {
             if (typeof sap !== "undefined" && sap.ui && sap.ui.require) {
