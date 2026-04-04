@@ -894,11 +894,9 @@
         if (isSignal && model.createComputed) {
           // Create N computed signals, each returning an object from the items array
           for (var i = 0; i < n; i++) {
-            (function (idx) {
-              model.createComputed("/computed" + idx, ["/items/" + idx + "/name", "/items/" + idx + "/value"], function (name, value) {
-                return { label: name + "=" + value };
-              });
-            })(i);
+            model.createComputed("/computed" + i, ["/items/" + i + "/name", "/items/" + i + "/value"], function (name, value) {
+              return { label: name + "=" + value };
+            });
           }
         }
 
