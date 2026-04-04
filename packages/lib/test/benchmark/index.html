@@ -771,6 +771,7 @@
           model.setProperty("/rows", newRows);
           await flush();
           times.push(performance.now() - start);
+          // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
           });
@@ -1785,7 +1786,24 @@
           signal: stats(r7.signalTimes),
         });
 
-        // --- Scenario 9: Tree binding ---
+        // --- Scenario 9: Grid table binding (virtualized) ---
+        setStatus(
+          "Running: grid table binding replace with " + n + " rows (virtualized, alternating)...",
+        );
+        var rGrid = await runAlternating(
+          benchGridTableBindingReplace,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        pushResult({
+          name: "Grid table binding replace, " + n + " rows",
+          detail: "Replace rows, 3 columns, virtualized (20 visible)",
+          category: "List (sap.ui.table.Table)",
+          json: stats(rGrid.jsonTimes),
+          signal: stats(rGrid.signalTimes),
+        });
+
+        // --- Scenario 10: Tree binding ---
         var treeN = Math.min(n, 200); // Cap tree nodes to avoid DOM explosion
         setStatus("Running: tree binding replace with " + treeN + " root nodes (alternating)...");
         var r8 = await runAlternating(
@@ -1801,7 +1819,7 @@
           signal: stats(r8.signalTimes),
         });
 
-        // --- Scenario 10: Expression binding ---
+        // --- Scenario 11: Expression binding ---
         var exprN = Math.min(n, 500);
         setStatus("Running: expression binding with " + exprN + " controls (alternating)...");
         var r9 = await runAlternating(
@@ -1817,7 +1835,7 @@
           signal: stats(r9.signalTimes),
         });
 
-        // --- Scenario 11: Computed signals ---
+        // --- Scenario 12: Computed signals ---
         var compN = n;
         setStatus("Running: computed signals with " + compN + " computeds (alternating)...");
         // Computed needs special handling: isSignal flag differs per model
@@ -1845,7 +1863,7 @@
           signal: stats(compSignalTimes),
         });
 
-        // --- Scenario 12: Computed signals with redefinition ---
+        // --- Scenario 13: Computed signals with redefinition ---
         setStatus("Running: computed (redefined) with " + compN + " computeds (alternating)...");
         var compRedefJsonTimes = [];
         var compRedefSignalTimes = [];
@@ -1870,7 +1888,7 @@
           signal: stats(compRedefSignalTimes),
         });
 
-        // --- Scenario 13: Computed sub-path traversal ---
+        // --- Scenario 14: Computed sub-path traversal ---
         setStatus("Running: computed sub-path with " + compN + " computeds (alternating)...");
         var compSubJsonTimes = [];
         var compSubSignalTimes = [];
@@ -1895,7 +1913,7 @@
           signal: stats(compSubSignalTimes),
         });
 
-        // --- Scenario 14: Computed redefine with sub-path bindings ---
+        // --- Scenario 15: Computed redefine with sub-path bindings ---
         setStatus("Running: computed redefine + sub-path with " + compN + " computeds (alternating)...");
         var compRedefSubJsonTimes = [];
         var compRedefSubSignalTimes = [];
@@ -1920,7 +1938,7 @@
           signal: stats(compRedefSubSignalTimes),
         });
 
-        // --- Scenario 15: setData replace ---
+        // --- Scenario 16: setData replace ---
         setStatus("Running: setData replace with " + n + " bindings (alternating)...");
         var r11 = await runAlternating(
           benchSetDataReplace,
@@ -1935,7 +1953,7 @@
           signal: stats(r11.signalTimes),
         });
 
-        // --- Scenario 16: setData merge (shallow) ---
+        // --- Scenario 17: setData merge (shallow) ---
         setStatus("Running: setData merge (shallow) with " + n + " bindings (alternating)...");
         var r12 = await runAlternating(
           benchSetDataMergeShallow,
@@ -1950,7 +1968,7 @@
           signal: stats(r12.signalTimes),
         });
 
-        // --- Scenario 17: setData merge (deep) ---
+        // --- Scenario 18: setData merge (deep) ---
         setStatus("Running: setData merge (deep) with " + n + " bindings (alternating)...");
         var r13 = await runAlternating(
           benchSetDataMergeDeep,
@@ -1965,7 +1983,7 @@
           signal: stats(r13.signalTimes),
         });
 
-        // --- Scenario 18: setData merge (deeply nested config) ---
+        // --- Scenario 19: setData merge (deeply nested config) ---
         setStatus(
           "Running: setData merge (deeply nested config) with " + n + " bindings (alternating)...",
         );
@@ -1982,7 +2000,7 @@
           signal: stats(r14.signalTimes),
         });
 
-        // --- Scenario 19: setData merge (large dataset, pinpoint) ---
+        // --- Scenario 20: setData merge (large dataset, pinpoint) ---
         var largeN = n * 10;
         setStatus(
           "Running: setData merge (large dataset " +
@@ -2004,7 +2022,7 @@
           signal: stats(r15.signalTimes),
         });
 
-        // --- Scenario 20: Real-world checkPerformanceOfUpdate threshold ---
+        // --- Scenario 21: Real-world checkPerformanceOfUpdate threshold ---
         setStatus(
           "Running: real-world checkPerformanceOfUpdate threshold (3,449 bindings, 29 calls, alternating)...",
         );
@@ -2021,7 +2039,7 @@
           signal: stats(r16.signalTimes),
         });
 
-        // --- Scenario 21: Deep-path setProperty overhead ---
+        // --- Scenario 22: Deep-path setProperty overhead ---
         setStatus("Running: deep-path setProperty with " + n + " bindings (alternating)...");
         var r20 = await runAlternating(
           benchDeepPathSetProperty,
