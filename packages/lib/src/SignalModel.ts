@@ -1,4 +1,5 @@
 import ClientModel from "sap/ui/model/ClientModel";
+import Log from "sap/base/Log";
 import type Context from "sap/ui/model/Context";
 import SignalRegistry from "./SignalRegistry";
 import SignalPropertyBinding from "./SignalPropertyBinding";
@@ -10,6 +11,7 @@ import type { Signal } from "signal-polyfill";
 // `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
 type ClientModelInternal = ClientModel & {
   resolve(sPath: string, oContext?: Context): string | undefined;
+  bDestroyed: boolean;
 };
 
 function asInternal(self: ClientModel): ClientModelInternal {
@@ -28,6 +30,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private strictLeafCheck: boolean;
   private _pathSubscribers = new Map<string, Set<() => void>>();
   private _pImportChain: Promise<void> = Promise.resolve();
+  private _abortController: AbortController | null = new AbortController();
   declare oData: T;
 
   constructor(sURL: string, mOptions?: SignalModelOptions);
@@ -74,6 +77,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     mHeaders?: Record<string, string>,
     oSignal?: AbortSignal,
   ): Promise<void> {
+    if (asInternal(this).bDestroyed) {
+      return Promise.resolve();
+    }
     const sMethod = sType || "GET";
     let sFullURL = sURL;
     const sInfo = "cache=" + bCache + ";bMerge=" + bMerge;
@@ -106,10 +112,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       infoObject: oInfoObject,
     });
 
+    // Combine the model's internal abort signal with any user-provided signal.
+    // AbortSignal.any() fires when either signal aborts — on destroy() or caller abort.
+    const signals = [this._abortController!.signal, oSignal].filter(Boolean) as AbortSignal[];
+    const combinedSignal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+
     const pImport = fetch(sFullURL, {
       method: sMethod,
       headers,
-      signal: oSignal,
+      signal: combinedSignal,
       body:
         sMethod !== "GET" && oParameters
           ? typeof oParameters === "string"
@@ -181,6 +192,36 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    */
   dataLoaded(): Promise<void> {
     return this._pImportChain;
+  }
+
+  /**
+   * Serialize model data as a JSON string. JSONModel-compatible API.
+   */
+  getJSON(): string {
+    return JSON.stringify(this.oData);
+  }
+
+  /**
+   * Parse a JSON string and set it as model data. JSONModel-compatible API.
+   *
+   * @param sJSON JSON string to parse
+   * @param bMerge Whether to merge into existing data instead of replacing
+   */
+  setJSON(sJSON: string, bMerge?: boolean): void {
+    try {
+      const oData = JSON.parse(sJSON) as T;
+      if (bMerge) {
+        this.setData(oData as Partial<T>, true);
+      } else {
+        this.setData(oData);
+      }
+    } catch (e) {
+      Log.fatal(
+        "The following problem occurred: JSON parse Error: " + e,
+        undefined,
+        "ui5.model.signal.SignalModel",
+      );
+    }
   }
 
   setData(oData: T): void;
@@ -586,6 +627,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   override destroy(): void {
+    // Abort all in-flight loadData requests (matching JSONModel's XHR abort behavior)
+    this._abortController?.abort();
+    this._abortController = null;
     this._pathSubscribers.clear();
     this.registry.destroy();
     super.destroy();
