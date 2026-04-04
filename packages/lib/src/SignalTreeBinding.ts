@@ -12,7 +12,6 @@ type TreeBindingInternal = ClientTreeBinding & {
   oContext: Context | undefined;
   oModel: SignalModel;
   bSuspended: boolean;
-  applyFilter(): void;
   _fireChange(params: { reason: string }): void;
 };
 

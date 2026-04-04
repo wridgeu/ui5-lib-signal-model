@@ -10,7 +10,6 @@ import type { Signal } from "signal-polyfill";
 // `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
 type ClientModelInternal = ClientModel & {
   resolve(sPath: string, oContext?: Context): string | undefined;
-  checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): void;
 };
 
 function asInternal(self: ClientModel): ClientModelInternal {
@@ -28,6 +27,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private autoCreatePaths: boolean;
   private strictLeafCheck: boolean;
   private _pathSubscribers = new Map<string, Set<() => void>>();
+  private _pImportChain: Promise<void> = Promise.resolve();
   declare oData: T;
 
   constructor(sURL: string, mOptions?: SignalModelOptions);
@@ -51,6 +51,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    *
    * Uses `fetch()` internally. Fires `requestSent`, `requestCompleted`,
    * and `requestFailed` events matching the JSONModel contract.
+   * Calls are chained sequentially — multiple `loadData` calls execute
+   * in order, matching JSONModel's `pSequentialImportCompleted` behavior.
    *
    * @param sURL URL to load JSON from
    * @param oParameters Query parameters (appended to URL for GET, sent as body for POST)
@@ -59,6 +61,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @param bMerge Whether to merge loaded data instead of replacing
    * @param bCache Set to false to append a cache-busting timestamp
    * @param mHeaders Additional HTTP headers
+   * @param oSignal AbortSignal to cancel the request (SignalModel extension)
    * @returns Promise that resolves when data is loaded
    */
   loadData(
@@ -69,9 +72,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     bMerge?: boolean,
     bCache?: boolean,
     mHeaders?: Record<string, string>,
+    oSignal?: AbortSignal,
   ): Promise<void> {
     const sMethod = sType || "GET";
     let sFullURL = sURL;
+    const sInfo = "cache=" + bCache + ";bMerge=" + bMerge;
+    const oInfoObject = { cache: bCache, merge: bMerge };
 
     // Append parameters to URL for GET, matching JSONModel behavior
     if (oParameters && sMethod === "GET") {
@@ -92,61 +98,90 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       ...mHeaders,
     };
 
-    this.fireRequestSent({ url: sURL, type: sMethod, async: true });
+    this.fireRequestSent({
+      url: sURL,
+      type: sMethod,
+      async: true,
+      info: sInfo,
+      infoObject: oInfoObject,
+    });
 
-    const promise = fetch(sFullURL, {
+    const pImport = fetch(sFullURL, {
       method: sMethod,
       headers,
+      signal: oSignal,
       body:
         sMethod !== "GET" && oParameters
           ? typeof oParameters === "string"
             ? oParameters
             : JSON.stringify(oParameters)
           : undefined,
-    })
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
-        return res.json();
-      })
-      .then((data: T) => {
-        if (bMerge) {
-          this.setData(data as Partial<T>, true);
-        } else {
-          this.setData(data);
-        }
-        this.fireRequestCompleted({ url: sURL, type: sMethod, async: true });
-      })
-      .catch((error: Error) => {
-        this.fireRequestFailed({
-          message: error.message,
-          statusCode: "0",
-          statusText: error.message,
+    }).then(async (res) => {
+      if (!res.ok) {
+        throw Object.assign(new Error(`HTTP ${res.status}: ${res.statusText}`), {
+          statusCode: res.status,
+          statusText: res.statusText,
+          responseText: await res.text().catch(() => ""),
         });
-        // JSONModel fires requestCompleted on both success and failure
-        this.fireRequestCompleted({
-          url: sURL,
-          type: sMethod,
-          async: true,
-          success: false,
-          errorobject: { message: error.message },
-        });
-      });
+      }
+      return res.json() as Promise<T>;
+    });
 
-    this._pLoadData = promise;
-    return promise;
+    // Chain sequentially: wait for previous imports, then process this one.
+    // Matches JSONModel's pSequentialImportCompleted pattern.
+    const pReturn = this._pImportChain.then(() =>
+      pImport.then(
+        (data: T) => {
+          if (bMerge) {
+            this.setData(data as Partial<T>, true);
+          } else {
+            this.setData(data);
+          }
+          this.fireRequestCompleted({
+            url: sURL,
+            type: sMethod,
+            async: true,
+            info: sInfo,
+            infoObject: oInfoObject,
+            success: true,
+          });
+        },
+        (error: Error & { statusCode?: number; statusText?: string; responseText?: string }) => {
+          const oError = {
+            message: error.message,
+            statusCode: String(error.statusCode ?? 0),
+            statusText: error.statusText ?? error.message,
+            responseText: error.responseText ?? "",
+          };
+          this.fireRequestCompleted({
+            url: sURL,
+            type: sMethod,
+            async: true,
+            info: sInfo,
+            infoObject: oInfoObject,
+            success: false,
+            errorobject: oError,
+          });
+          this.fireRequestFailed(oError);
+        },
+      ),
+    );
+
+    this._pImportChain = pReturn.catch(() => {
+      // Swallow errors so the chain stays alive for subsequent calls
+    });
+
+    return pReturn;
   }
 
   /**
    * Returns a Promise that resolves when all pending loadData calls complete.
+   * Calls queued after this point are not included.
    * JSONModel-compatible API.
    */
   dataLoaded(): Promise<void> {
-    return this._pLoadData ?? Promise.resolve();
+    return this._pImportChain;
   }
-
-  private _pLoadData: Promise<void> | null = null;
 
   setData(oData: T): void;
   setData(oData: Partial<T>, bMerge: true): void;
@@ -219,28 +254,25 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       oObject = this._createPath(sObjectPath);
     }
 
-    if (oObject) {
-      if (this.strictLeafCheck && !(sPropertyName in oObject)) {
-        return false;
-      }
-      oObject[sPropertyName] = oValue;
-
-      if (this.registry.size > 0) {
-        if (bAsyncUpdate) {
-          // Deferred mode: skip signal notification, schedule a bulk sync.
-          // This avoids 2000 synchronous notify callbacks during a batch
-          // of setProperty calls — the signals are synced once afterward.
-          this._scheduleBulkSync();
-        } else {
-          this.registry.set(sResolvedPath, oValue);
-          this._invalidateParentSignals(sResolvedPath);
-          this.registry.invalidateChildren(sResolvedPath, (path: string) => this._getObject(path));
-        }
-      }
-
-      return true;
+    if (this.strictLeafCheck && !(sPropertyName in oObject)) {
+      return false;
     }
-    return false;
+    oObject[sPropertyName] = oValue;
+
+    if (this.registry.size > 0) {
+      if (bAsyncUpdate) {
+        // Deferred mode: skip signal notification, schedule a bulk sync.
+        // This avoids 2000 synchronous notify callbacks during a batch
+        // of setProperty calls — the signals are synced once afterward.
+        this._scheduleBulkSync();
+      } else {
+        this.registry.set(sResolvedPath, oValue);
+        this._invalidateParentSignals(sResolvedPath);
+        this.registry.invalidateChildren(sResolvedPath, (path: string) => this._getObject(path));
+      }
+    }
+
+    return true;
   }
 
   private _bulkSyncScheduled = false;
@@ -374,6 +406,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return this.registry.getOrCreate(sPath, this._getObject(sPath));
   }
 
+  _getOrCreateSignal(
+    sPath: string,
+    initialValue: unknown,
+  ): Signal.State<unknown> | Signal.Computed<unknown> {
+    const existing = this.registry.get(sPath);
+    if (existing) return existing;
+    return this.registry.getOrCreate(sPath, initialValue);
+  }
+
   createComputed(
     sPath: string,
     aDeps: string[],
@@ -396,15 +437,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   removeComputed(sPath: string): void {
     this.registry.removeComputed(sPath);
-  }
-
-  _getOrCreateSignal(
-    sPath: string,
-    initialValue: unknown,
-  ): Signal.State<unknown> | Signal.Computed<unknown> {
-    const existing = this.registry.get(sPath);
-    if (existing) return existing;
-    return this.registry.getOrCreate(sPath, initialValue);
   }
 
   _getObject(sPath: string, oContext?: object): unknown {

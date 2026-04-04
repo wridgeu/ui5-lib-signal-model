@@ -1,5 +1,14 @@
 # SignalModel Design Spec
 
+> **Note:** This is the original design document from before implementation. The actual implementation diverges in several areas:
+>
+> - **Constructor options** changed from `{ strict?: boolean }` to `{ autoCreatePaths?: boolean, strictLeafCheck?: boolean }`
+> - **SignalRegistry** uses two separate Maps (state + computed), not a single combined Map
+> - **Computed conflict rules**: computed-on-computed always throws (no permissive replace-with-warning mode)
+> - **`bindTree` / `SignalTreeBinding`** and **`FlushQueue`** were added (not covered here)
+>
+> See the [README](../../README.md) for the current API and architecture.
+
 A reactive, signal-based UI5 model that is a drop-in replacement for JSONModel. It uses the TC39 Signals proposal polyfill (`signal-polyfill`) internally, replacing the poll-based `checkUpdate()` loop with direct, path-specific signal notifications.
 
 ## Goals

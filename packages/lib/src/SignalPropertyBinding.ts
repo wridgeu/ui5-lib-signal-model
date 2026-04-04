@@ -113,7 +113,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
   }
 
-  initialize(): this {
+  override initialize(): this {
     if (!this.watcher) {
       this.subscribe();
     }

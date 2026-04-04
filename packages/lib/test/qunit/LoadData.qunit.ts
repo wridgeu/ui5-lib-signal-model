@@ -254,4 +254,132 @@ QUnit.module("loadData", () => {
 
     model.loadData(SAMPLE_URL);
   });
+
+  // =========================================================================
+  // Sequential loading (JSONModel parity: pSequentialImportCompleted)
+  // =========================================================================
+
+  QUnit.test("multiple loadData calls execute sequentially — last data wins (no merge)", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+
+    // Two loads: second overwrites first
+    model.loadData(SAMPLE_URL);
+    model.loadData(MERGE_URL);
+
+    model.dataLoaded().then(() => {
+      // merge.json contains { age: 30, customer: { ... } } — sample.json's /name should be gone
+      assert.strictEqual(model.getProperty("/age"), 30, "second load data present");
+      assert.strictEqual(model.getProperty("/name"), undefined, "first load data overwritten");
+      model.destroy();
+      done();
+    });
+  });
+
+  QUnit.test("multiple loadData calls with merge — data accumulates", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+
+    model.loadData(SAMPLE_URL);
+    model.loadData(MERGE_URL, undefined, undefined, undefined, true);
+
+    model.dataLoaded().then(() => {
+      // sample.json loads first (/name: "Alice"), then merge.json merges (/age: 30)
+      assert.strictEqual(model.getProperty("/name"), "Alice", "first load data preserved");
+      assert.strictEqual(model.getProperty("/age"), 30, "second load data merged");
+      model.destroy();
+      done();
+    });
+  });
+
+  QUnit.test("dataLoaded resolves after all pending calls — not just the last", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+    let completedCount = 0;
+
+    model.attachRequestCompleted(() => completedCount++);
+
+    model.loadData(SAMPLE_URL);
+    model.loadData(MERGE_URL);
+
+    model.dataLoaded().then(() => {
+      assert.strictEqual(completedCount, 2, "both requests completed before dataLoaded resolved");
+      model.destroy();
+      done();
+    });
+  });
+
+  // =========================================================================
+  // Error handling — event parameters
+  // =========================================================================
+
+  QUnit.test("requestFailed includes statusCode and statusText", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+
+    model.attachRequestFailed((oEvent) => {
+      const params = oEvent.getParameters();
+      assert.ok(params.message, "error has message");
+      assert.ok(params.statusCode !== undefined, "error has statusCode");
+      assert.ok(params.statusText, "error has statusText");
+      model.destroy();
+      done();
+    });
+
+    model.loadData(BAD_URL);
+  });
+
+  QUnit.test("requestCompleted fires with success=false on error", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+
+    model.attachRequestCompleted((oEvent) => {
+      const params = oEvent.getParameters();
+      assert.strictEqual(params.success, false, "success is false on error");
+      assert.ok(params.errorobject, "error object present");
+      model.destroy();
+      done();
+    });
+
+    model.loadData(BAD_URL);
+  });
+
+  // =========================================================================
+  // Error does not break the chain
+  // =========================================================================
+
+  QUnit.test("loadData after failed request still works", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+
+    // First call fails
+    model.loadData(BAD_URL);
+    // Second call should succeed despite first failure
+    model.loadData(SAMPLE_URL);
+
+    model.dataLoaded().then(() => {
+      assert.strictEqual(model.getProperty("/name"), "Alice", "data loaded after failed request");
+      model.destroy();
+      done();
+    });
+  });
+
+  // =========================================================================
+  // AbortSignal support (SignalModel extension)
+  // =========================================================================
+
+  QUnit.test("loadData supports AbortSignal to cancel request", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+    const controller = new AbortController();
+
+    model.attachRequestFailed(() => {
+      assert.ok(true, "requestFailed fired for aborted request");
+      model.destroy();
+      done();
+    });
+
+    model.loadData(SAMPLE_URL, undefined, undefined, undefined, undefined, undefined, undefined, controller.signal);
+    controller.abort();
+  });
 });
