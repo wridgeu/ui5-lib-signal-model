@@ -644,4 +644,58 @@ QUnit.module("ComputedSignals", () => {
     assert.strictEqual(model.getProperty("name", children[0]), "Child A", "child is Child A");
     model.destroy();
   });
+
+  QUnit.test(
+    "sub-path binding re-subscribes when parent computed is redefined with different deps",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({ x: 1, y: 100 });
+      model.createComputed("/c", ["/x"], (x) => ({ name: "x=" + (x as number) }));
+
+      const binding = model.bindProperty("/c/name");
+      assert.strictEqual(binding.getValue(), "x=1", "initial value from /x");
+
+      // Redefine with DIFFERENT dependency
+      model.removeComputed("/c");
+      model.createComputed("/c", ["/y"], (y) => ({ name: "y=" + (y as number) }));
+
+      // Change the NEW dependency — sub-path binding must see it
+      model.setProperty("/y", 200);
+
+      setTimeout(() => {
+        assert.strictEqual(
+          binding.getValue(),
+          "y=200",
+          "sub-path binding tracks new dependency after redefine",
+        );
+        model.destroy();
+        done();
+      }, 50);
+    },
+  );
+
+  QUnit.test(
+    "list binding on computed re-subscribes when parent computed is redefined",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({ x: [1, 2], y: [10, 20, 30] });
+      model.createComputed("/list", ["/x"], (x) => x);
+
+      const listBinding = model.bindList("/list");
+      assert.strictEqual(listBinding.getContexts(0, 10).length, 2, "initial: 2 items from /x");
+
+      model.removeComputed("/list");
+      model.createComputed("/list", ["/y"], (y) => y);
+
+      listBinding.attachChange(() => {
+        const contexts = listBinding.getContexts(0, 10);
+        assert.strictEqual(contexts.length, 4, "list binding sees 4 items from new /y dependency");
+        model.destroy();
+        done();
+      });
+
+      // Change the NEW dependency — list binding must see it
+      model.setProperty("/y", [10, 20, 30, 40]);
+    },
+  );
 });
