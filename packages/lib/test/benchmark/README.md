@@ -46,7 +46,7 @@ JSON output format:
 
 ## What It Tests
 
-19 scenarios across all binding types, model operations, and merge strategies:
+20 scenarios across all binding types, model operations, and merge strategies:
 
 | #   | Binding Type              | Scenario                                | What It Measures                                            |
 | --- | ------------------------- | --------------------------------------- | ----------------------------------------------------------- |
@@ -69,6 +69,7 @@ JSON output format:
 | 17  | Property (`sap.m.Text`)   | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree          |
 | 18  | Property (`sap.m.Text`)   | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N, tests O(k) vs O(n) merge          |
 | 19  | Property (`sap.m.Text`)   | Real-world: checkPerformanceOfUpdate    | 3,449 bindings, 29 sync calls, exceeds SAP's 100k threshold |
+| 20  | Property (`sap.m.Text`)   | Deep-path setProperty (no computeds)    | 4-segment path `_findComputedAncestor` overhead, zero computeds |
 
 ### Merge Scenario Design
 
