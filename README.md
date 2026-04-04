@@ -323,7 +323,7 @@ The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected
 
 With default synchronous `setProperty`, **"Update all N bindings"** shows ~15x improvement at 2000 bindings (807ms vs 52ms). The advantage scales super-linearly: JSONModel's cost is O(*n*²) (2000 calls × 2000 bindings checked each), while SignalModel's is O(_n_) (2000 notifications, one per changed path).
 
-With JSONModel's `bAsyncUpdate=true`, JSONModel is faster (~21ms vs ~52ms). `bAsyncUpdate` collapses all pending changes into one bulk `deepEqual` loop over all bindings. SignalModel cannot match this because of the **Watcher re-arm cycle**, a per-binding cost required by the TC39 Signals Watcher API. After each signal change, the Watcher must be re-armed: `signal.get()` to consume the notification, then `watcher.watch()` to listen again. This 2-step overhead runs once per binding per flush and is inherent to the Watcher API design (not a polyfill limitation).
+With JSONModel's `bAsyncUpdate=true`, both models perform equivalently (~18ms each at 2000 bindings). SignalModel defers signal notifications when `bAsyncUpdate` is set, writing data immediately and syncing all signals in a single `setTimeout` pass — matching JSONModel's batching strategy.
 
 For full data replacement (`setData`), both models perform equivalently. For list/table/tree replace operations, both are equivalent because DOM rendering cost dominates. In-place merge shines at scale: merging 3 items into 20,000 is **4.20x faster** because JSONModel deep-clones all 20,000 items while SignalModel touches only the 3 payload keys.
 
@@ -383,7 +383,7 @@ Where a pure deep clone is needed (not a merge), `structuredClone()` replaces `d
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` flag that defers `checkUpdate` into a `setTimeout`, collapsing N synchronous `setProperty` calls into a single binding check pass. This is SAP's recommended workaround for the O(N²) problem documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-SignalModel ignores this flag. Signals are inherently push-based and already batched via the microtask flush queue. Each `setProperty` does O(1) signal work regardless of sync/async mode. When JSONModel uses `bAsyncUpdate=true`, it achieves O(_n_) total (one bulk `deepEqual` pass over all bindings), while SignalModel's Watcher re-arm cycle adds constant overhead per binding. At 2000 bindings, this gap is ~2.5x (~21ms vs ~52ms). See the [benchmark section](#performance-benchmark) for the full analysis.
+SignalModel supports this flag. When `bAsyncUpdate=true`, signal notifications are deferred — the data is written immediately but signal updates are batched into a single `setTimeout` pass that syncs all signals afterward. Both models perform equivalently in this scenario (~18ms each at 2000 bindings). Without the flag (default), SignalModel uses its push-based microtask flush which provides O(1) per-path notification.
 
 ### Microtask vs Macrotask Scheduling
 
