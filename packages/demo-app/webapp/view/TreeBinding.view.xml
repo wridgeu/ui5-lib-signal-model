@@ -2,7 +2,7 @@
 	controllerName="demo.app.controller.TreeBinding"
 	xmlns:mvc="sap.ui.core"
 	xmlns="sap.m">
-	<Panel headerText="Tree Binding Demo">
+	<Panel headerText="Tree Binding Demo" class="sapUiContentPadding">
 		<Tree id="orgTree" items="{path: 'tree>/org', parameters: {arrayNames: ['reports']}}">
 			<StandardTreeItem title="{tree>name}" description="{tree>role}" />
 		</Tree>

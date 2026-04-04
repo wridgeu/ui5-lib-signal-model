@@ -3,22 +3,52 @@
 	xmlns:mvc="sap.ui.core"
 	xmlns="sap.m"
 	xmlns:f="sap.ui.layout.form">
-	<Panel headerText="Computed Signals Demo">
-		<f:SimpleForm editable="true" layout="ResponsiveGridLayout">
-			<Label text="First Name" />
-			<Input value="{/firstName}" />
-			<Label text="Last Name" />
-			<Input value="{/lastName}" />
-			<Label text="Full Name (computed)" />
-			<Text text="{/fullName}" />
-			<Label text="Age" />
-			<Input value="{/age}" type="Number" />
-			<Label text="Birth Year (computed)" />
-			<Text text="{/birthYear}" />
-		</f:SimpleForm>
-		<MessageStrip
-			text="fullName and birthYear are computed signals. They update automatically when their dependencies change."
-			type="Information"
-			class="sapUiSmallMargin" />
-	</Panel>
+	<Page title="Computed Signals" class="sapUiContentPadding">
+
+		<!-- Scalar computeds -->
+		<Panel headerText="Scalar Computeds">
+			<f:SimpleForm editable="true" layout="ResponsiveGridLayout">
+				<Label text="First Name" />
+				<Input value="{/firstName}" />
+				<Label text="Last Name" />
+				<Input value="{/lastName}" />
+				<Label text="Full Name (computed)" />
+				<Text text="{/fullName}" />
+				<Label text="Age" />
+				<Input value="{/age}" type="Number" />
+				<Label text="Birth Year (computed)" />
+				<Text text="{/birthYear}" />
+			</f:SimpleForm>
+			<MessageStrip
+				text="fullName and birthYear are computed signals. They update automatically when their dependencies change."
+				type="Information"
+				class="sapUiSmallMargin" />
+		</Panel>
+
+		<!-- Computed object with sub-path traversal -->
+		<Panel headerText="Computed Object (Sub-Path Traversal)" class="sapUiSmallMarginTop">
+			<f:SimpleForm editable="false" layout="ResponsiveGridLayout">
+				<Label text="Most Expensive Item" />
+				<Text text="{/mostExpensive/name}" />
+				<Label text="Price" />
+				<Text text="{/mostExpensive/price}" />
+			</f:SimpleForm>
+			<MessageStrip
+				text="Binding to /mostExpensive/name traverses into the computed's return value. Change item prices on the List Binding page to see this update."
+				type="Information"
+				class="sapUiSmallMargin" />
+		</Panel>
+
+		<!-- Computed array with list binding -->
+		<Panel headerText="Computed Array (List Binding)" class="sapUiSmallMarginTop">
+			<List headerText="Active Items ({/activeTotal} total)" items="{/activeItems}">
+				<StandardListItem title="{name}" description="Price: {price}" />
+			</List>
+			<MessageStrip
+				text="The list binds to /activeItems, a computed array that filters items where active=true. activeTotal is a chained computed that sums the filtered results."
+				type="Information"
+				class="sapUiSmallMargin" />
+		</Panel>
+
+	</Page>
 </mvc:View>

@@ -277,10 +277,17 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       return true;
     }
 
-    if (this.registry.isComputed(sResolvedPath)) {
-      throw new TypeError(
-        `Cannot set value at "${sResolvedPath}": path is a computed signal (read-only)`,
+    const sComputedAncestor = this._findComputedAncestor(sResolvedPath);
+    if (sComputedAncestor) {
+      Log.warning(
+        `Cannot set value at "${sResolvedPath}": ` +
+          (sComputedAncestor === sResolvedPath
+            ? "path is a computed signal (read-only)"
+            : `ancestor "${sComputedAncestor}" is a computed signal (read-only)`),
+        undefined,
+        "ui5.model.signal.SignalModel",
       );
+      return false;
     }
 
     const iLastSlash = sResolvedPath.lastIndexOf("/");
@@ -355,6 +362,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         this.setData(oValue as T, true);
         return true;
       }
+      return false;
+    }
+
+    const sComputedAncestor = this._findComputedAncestor(sResolvedPath);
+    if (sComputedAncestor) {
+      Log.warning(
+        `Cannot merge value at "${sResolvedPath}": ` +
+          (sComputedAncestor === sResolvedPath
+            ? "path is a computed signal (read-only)"
+            : `ancestor "${sComputedAncestor}" is a computed signal (read-only)`),
+        undefined,
+        "ui5.model.signal.SignalModel",
+      );
       return false;
     }
 
@@ -453,7 +473,22 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   ): Signal.State<PathValue<T, P>> | Signal.Computed<PathValue<T, P>>;
   getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown>;
   getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown> {
-    return this.registry.get(sPath) ?? this.registry.getOrCreate(sPath, this._getObject(sPath));
+    const existing = this.registry.get(sPath);
+    if (existing) return existing;
+
+    // If a parent path is a computed signal, subscribe to it instead.
+    // The binding's checkUpdate reads the sub-path via _getObject, which
+    // traverses into computed values. This ensures the binding is notified
+    // when the computed re-evaluates (e.g. /firstItem changes → /firstItem/name fires).
+    const aParts = sPath.substring(1).split("/");
+    for (let i = aParts.length - 1; i >= 1; i--) {
+      const sParentPath = "/" + aParts.slice(0, i).join("/");
+      if (this.registry.isComputed(sParentPath)) {
+        return this.registry.get(sParentPath)!;
+      }
+    }
+
+    return this.registry.getOrCreate(sPath, this._getObject(sPath));
   }
 
   createComputed(
@@ -511,14 +546,43 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
 
     const aParts = sResolvedPath.substring(1).split("/");
+    let sCurrentPath = "";
     for (const sPart of aParts) {
       if (!sPart) break; // empty segment (e.g. double slash) stops traversal (JSONModel parity)
+      sCurrentPath += "/" + sPart;
+
+      // If this accumulated path is a computed signal, use its value
+      // and continue traversal from there (computed values live in
+      // the registry, not in oData).
+      if (this.registry.isComputed(sCurrentPath)) {
+        oNode = this.registry.get(sCurrentPath)!.get();
+        continue;
+      }
+
       if (oNode === null || oNode === undefined) {
         return oNode; // preserve null vs undefined (JSONModel parity)
       }
       oNode = (oNode as Record<string, unknown>)[sPart];
     }
     return oNode;
+  }
+
+  /**
+   * Returns the computed ancestor path if the resolved path, or any ancestor
+   * of it, is a computed signal. Returns `null` if no computed is in the path.
+   */
+  private _findComputedAncestor(sResolvedPath: string): string | null {
+    if (this.registry.isComputed(sResolvedPath)) {
+      return sResolvedPath;
+    }
+    const aParts = sResolvedPath.substring(1).split("/");
+    for (let i = 1; i < aParts.length; i++) {
+      const sAncestor = "/" + aParts.slice(0, i).join("/");
+      if (this.registry.isComputed(sAncestor)) {
+        return sAncestor;
+      }
+    }
+    return null;
   }
 
   private _createPath(sPath: string): Record<string, unknown> {

@@ -134,6 +134,36 @@ model.createComputed("/total", ["/price"], (p) => p);
 >
 > **Declarative binding bridge.** Computed signals follow immutability semantics from TC39 Signals and MobX, but the UI5 world is not purely programmatic. Bindings are often declared in XML views (`{/total}`) and managed by the framework; the developer cannot manually destroy and recreate them. When `removeComputed` + `createComputed` redefines a computed at a path, all existing bindings to that path automatically re-subscribe to the new signal. This way, XML view bindings see the new derivation even if it has entirely different dependencies. The cost is one `Map<string, Set<callback>>` lookup per `createComputed` call (a no-op when no bindings exist) and one callback registration per binding in `subscribe`/`unsubscribe`.
 
+### Computed Sub-Path Traversal
+
+When a computed signal returns an object or array, you can bind to paths **inside** that return value. The model traverses into the computed value automatically:
+
+```typescript
+model.createComputed("/currentUser", ["/users", "/selectedId"], (users, id) => users[id]);
+
+// Bind to sub-paths — these read through the computed's return value
+// <Text text="{/currentUser/name}" />
+// <Text text="{/currentUser/email}" />
+
+// List binding on a computed array works too
+model.createComputed("/activeItems", ["/items"], (items) => items.filter((i) => i.active));
+// <List items="{/activeItems}"> <StandardListItem title="{name}" /> </List>
+```
+
+In a path like `/currentUser/name`, the model resolves `/currentUser` as a computed signal, calls its derivation function, then navigates `.name` within the returned object. Only **one** computed "pivot" can exist per path — everything below it is plain object traversal.
+
+**Computed paths are read-only.** `setProperty`, `mergeProperty`, and two-way bindings on computed paths (or their sub-paths) return `false` and log a warning. This matches the industry consensus: [Vue](https://vuejs.org/guide/essentials/computed.html), [MobX](https://mobx.js.org/computeds.html), [SolidJS](https://docs.solidjs.com/reference/basic-reactivity/create-memo), and [Angular Signals](https://angular.dev/guide/signals) all treat computeds as read-only.
+
+```typescript
+model.setProperty("/currentUser/name", "Bob"); // returns false — computed path is read-only
+```
+
+To update the data, write to the **source** path. The computed re-derives automatically and all sub-path bindings update:
+
+```typescript
+model.setProperty("/users/0/name", "Bob"); // writes to source data — /currentUser/name updates
+```
+
 ### Merge Writes
 
 `mergeProperty` performs a **recursive merge** at a specific path. It updates only the properties you provide and leaves the rest untouched. Compare with `setProperty`, which **replaces** the entire value:
@@ -308,7 +338,7 @@ npm run test:qunit
 
 ## Performance Benchmark
 
-A self-contained benchmark page compares SignalModel vs JSONModel across 17 scenarios: property bindings (`sap.m.Text`), list bindings (`sap.m.List`, `sap.m.Table`), tree bindings (`sap.m.Tree`), expression bindings, computed signals (including redefinition), merge strategies, and SAP's `checkPerformanceOfUpdate` threshold (3,449 bindings, 29 consecutive calls exceeding the 100k binding check warning).
+A self-contained benchmark page compares SignalModel vs JSONModel across 19 scenarios: property bindings (`sap.m.Text`), list bindings (`sap.m.List`, `sap.m.Table`), tree bindings (`sap.m.Tree`), expression bindings, computed signals (including redefinition and sub-path traversal), merge strategies, and SAP's `checkPerformanceOfUpdate` threshold (3,449 bindings, 29 consecutive calls exceeding the 100k binding check warning).
 
 ```bash
 npm run start:bench                                    # browser — interactive

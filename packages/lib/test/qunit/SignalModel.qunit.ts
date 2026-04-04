@@ -472,7 +472,6 @@ QUnit.module(
 
         setTimeout(() => {
           assert.strictEqual(text.getText(), "L2", "deeper bindElement updates text");
-          // NOTE: unbindElement context cleanup is a known gap (see issue #8)
           container.destroy();
           model.destroy();
           done();
@@ -506,6 +505,169 @@ QUnit.module(
 
       text.destroy();
       model.destroy();
+    });
+
+    // =========================================================================
+    // unbindElement context cleanup (issue #8)
+    // =========================================================================
+
+    QUnit.test("unbindElement clears stale value from property binding", (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({
+        data: {
+          level1: { text: "L1" },
+        },
+      });
+
+      const container = new VBox();
+      const text = new Text();
+      container.addItem(text);
+      container.setModel(model);
+      container.placeAt("qunit-fixture");
+
+      const ctx = model.createBindingContext("/data");
+      container.setBindingContext(ctx!);
+      text.bindElement("level1");
+      text.bindProperty("text", "text");
+
+      setTimeout(() => {
+        assert.strictEqual(text.getText(), "L1", "text reads from element binding path");
+
+        text.unbindElement();
+
+        setTimeout(() => {
+          // After unbindElement, "text" relative to "/data" → undefined → empty string
+          assert.strictEqual(
+            text.getText(),
+            "",
+            "text clears after unbindElement (value at /data/text is undefined)",
+          );
+          container.destroy();
+          model.destroy();
+          done();
+        }, 50);
+      }, 50);
+    });
+
+    QUnit.test("unbindElement falls back to parent context", (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({
+        data: {
+          text: "from-parent",
+          level1: { text: "L1" },
+        },
+      });
+
+      const container = new VBox();
+      const text = new Text();
+      container.addItem(text);
+      container.setModel(model);
+      container.placeAt("qunit-fixture");
+
+      const ctx = model.createBindingContext("/data");
+      container.setBindingContext(ctx!);
+      text.bindElement("level1");
+      text.bindProperty("text", "text");
+
+      setTimeout(() => {
+        assert.strictEqual(text.getText(), "L1", "text reads from element binding");
+
+        text.unbindElement();
+
+        setTimeout(() => {
+          // After unbindElement, "text" relative to "/data" → "from-parent"
+          assert.strictEqual(
+            text.getText(),
+            "from-parent",
+            "text falls back to parent context value",
+          );
+          container.destroy();
+          model.destroy();
+          done();
+        }, 50);
+      }, 50);
+    });
+
+    QUnit.test("unbindElement then re-bindElement picks up new path", (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({
+        data: {
+          level1: { text: "L1" },
+          level2: { text: "L2" },
+        },
+      });
+
+      const container = new VBox();
+      const text = new Text();
+      container.addItem(text);
+      container.setModel(model);
+      container.placeAt("qunit-fixture");
+
+      container.setBindingContext(model.createBindingContext("/data")!);
+      text.bindElement("level1");
+      text.bindProperty("text", "text");
+
+      setTimeout(() => {
+        assert.strictEqual(text.getText(), "L1", "initial");
+
+        text.unbindElement();
+
+        setTimeout(() => {
+          assert.strictEqual(text.getText(), "", "cleared after unbind");
+
+          text.bindElement("level2");
+
+          setTimeout(() => {
+            assert.strictEqual(text.getText(), "L2", "re-bound to level2");
+            container.destroy();
+            model.destroy();
+            done();
+          }, 50);
+        }, 50);
+      }, 50);
+    });
+
+    QUnit.test("setProperty updates binding after unbindElement", (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({
+        data: {
+          text: "parent-text",
+          level1: { text: "L1" },
+        },
+      });
+
+      const container = new VBox();
+      const text = new Text();
+      container.addItem(text);
+      container.setModel(model);
+      container.placeAt("qunit-fixture");
+
+      container.setBindingContext(model.createBindingContext("/data")!);
+      text.bindElement("level1");
+      text.bindProperty("text", "text");
+
+      setTimeout(() => {
+        assert.strictEqual(text.getText(), "L1", "initial from element binding");
+
+        text.unbindElement();
+
+        setTimeout(() => {
+          assert.strictEqual(text.getText(), "parent-text", "falls back to parent context");
+
+          model.setProperty("/data/text", "updated-parent");
+
+          setTimeout(() => {
+            assert.strictEqual(
+              text.getText(),
+              "updated-parent",
+              "reacts to setProperty on new path",
+            );
+            container.destroy();
+            model.destroy();
+            done();
+          }, 50);
+        }, 50);
+      }, 50);
     });
   },
 );

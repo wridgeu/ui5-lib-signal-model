@@ -2,7 +2,7 @@
 	controllerName="demo.app.controller.ListBinding"
 	xmlns:mvc="sap.ui.core"
 	xmlns="sap.m">
-	<Panel headerText="List Binding Demo">
+	<Panel headerText="List Binding Demo" class="sapUiContentPadding">
 		<Toolbar>
 			<SearchField placeholder="Filter by name..." liveChange=".onFilter" width="300px" />
 			<ToolbarSpacer />

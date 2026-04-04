@@ -4,7 +4,7 @@
 	xmlns="sap.m"
 	xmlns:f="sap.ui.layout.form"
 	xmlns:l="sap.ui.layout">
-	<Panel headerText="JSONModel vs SignalModel Comparison">
+	<Panel headerText="JSONModel vs SignalModel Comparison" class="sapUiContentPadding">
 		<l:Grid defaultSpan="L6 M6 S12">
 			<Panel headerText="SignalModel (default model)">
 				<f:SimpleForm editable="true" layout="ResponsiveGridLayout">
