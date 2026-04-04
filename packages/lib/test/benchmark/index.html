@@ -452,8 +452,9 @@
        * Same as Scenario 4 but passes bAsyncUpdate=true to setProperty.
        * JSONModel: batches all checkUpdate calls into one setTimeout pass,
        *   reducing N*O(N) to 1*O(N). This is SAP's recommended workaround.
-       * SignalModel: ignores the flag (signals are always push-based).
-       * This scenario shows the honest comparison when JSONModel is used optimally.
+       * SignalModel: defers signal notifications and syncs all signals
+       *   in a single setTimeout pass via registry.invalidateAll().
+       * Both models perform equivalently in this scenario.
        */
       async function benchUpdateAllBindingsAsync(ModelClass, n, warmupRounds, measuredRounds) {
         var data = generateData(n);
@@ -485,6 +486,47 @@
               true,
             );
           }
+          await flush();
+          times.push(performance.now() - start);
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
+       * Sparse async: change 1 path out of N bindings with bAsyncUpdate=true
+       *
+       * The realistic Fiori pattern: a user edits one field in a form backed
+       * by a model with N bindings. With bAsyncUpdate=true:
+       * JSONModel: schedules one setTimeout, then iterates ALL N bindings
+       *   with deepEqual (O(N) — most comparisons find no change).
+       * SignalModel: defers notification, then syncs ALL signals via
+       *   invalidateAll (O(N) — most signal.set() calls find equal values
+       *   and skip notification via the equality check).
+       */
+      async function benchSparseAsyncUpdate(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          model.setProperty("/items/0/value", "warmup-" + w, undefined, true);
+          await flush();
+        }
+
+        // Measure: change only 1 path, N bindings exist
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var start = performance.now();
+          model.setProperty("/items/0/value", "sparse-" + round, undefined, true);
           await flush();
           times.push(performance.now() - start);
         }
@@ -1421,7 +1463,24 @@
           signal: stats(r5.signalTimes),
         });
 
-        // --- Scenario 6: List binding ---
+        // --- Scenario 6: Sparse async (1 path changed, N bindings exist) ---
+        setStatus(
+          "Running: sparse async update (1 of " + n + " paths, bAsyncUpdate=true, alternating)...",
+        );
+        var r5b = await runAlternating(
+          benchSparseAsyncUpdate,
+          Object.assign({}, base, { params: [n] }),
+          measuredRounds,
+        );
+        pushResult({
+          name: "Sparse async, 1 of " + n + " (async)",
+          detail: "1 setProperty(bAsync=true), " + n + " bindings",
+          category: "Property (sap.m.Text)",
+          json: stats(r5b.jsonTimes),
+          signal: stats(r5b.signalTimes),
+        });
+
+        // --- Scenario 7: List binding ---
         var listN = Math.min(n, 500); // Cap list items to avoid DOM explosion
         setStatus("Running: list binding replace with " + listN + " items (alternating)...");
         var r6 = await runAlternating(
