@@ -358,7 +358,7 @@ npm run test:qunit
 
 ## Performance Benchmark
 
-A self-contained benchmark page compares SignalModel vs JSONModel across 21 scenarios: property bindings (`sap.m.Text`), list bindings (`sap.m.List`, `sap.m.Table`), tree bindings (`sap.m.Tree`), expression bindings, computed signals (including redefinition and sub-path traversal), merge strategies, and SAP's `checkPerformanceOfUpdate` threshold (3,449 bindings, 29 consecutive calls exceeding the 100k binding check warning).
+A self-contained benchmark page compares SignalModel vs JSONModel across 22 scenarios: property bindings (`sap.m.Text`), list bindings (`sap.m.List`, `sap.m.Table`, `sap.ui.table.Table`), tree bindings (`sap.m.Tree`), expression bindings, computed signals (including redefinition and sub-path traversal), merge strategies, and SAP's `checkPerformanceOfUpdate` threshold (3,449 bindings, 29 consecutive calls exceeding the 100k binding check warning).
 
 ```bash
 npm run start:bench                                    # browser — interactive
