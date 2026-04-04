@@ -1,5 +1,5 @@
 import ClientModel from "sap/ui/model/ClientModel";
-import Context from "sap/ui/model/Context";
+import type Context from "sap/ui/model/Context";
 import SignalRegistry from "./SignalRegistry";
 import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";

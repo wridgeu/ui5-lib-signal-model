@@ -183,6 +183,70 @@ QUnit.module("SignalPropertyBinding", () => {
     }, 50);
   });
 
+  QUnit.test("FlushQueue skips bindings destroyed mid-flush (no spurious checkUpdate)", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ name: "Alice" });
+    const binding1 = model.bindProperty("/name");
+    const binding2 = model.bindProperty("/name");
+    let checkUpdateCalledAfterDestroy = false;
+
+    // binding1's change handler fires during FlushQueue processing.
+    // It destroys binding2, then monkey-patches checkUpdate to detect
+    // whether FlushQueue still calls it on the destroyed binding.
+    binding1.attachChange(() => {
+      binding2.destroy();
+      (binding2 as unknown as Record<string, unknown>).checkUpdate = () => {
+        checkUpdateCalledAfterDestroy = true;
+      };
+    });
+
+    model.setProperty("/name", "Bob");
+
+    setTimeout(() => {
+      assert.strictEqual(
+        checkUpdateCalledAfterDestroy,
+        false,
+        "checkUpdate was not called on binding destroyed mid-flush",
+      );
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("FlushQueue continues working after mid-flush destroy", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ a: 1, b: 2 });
+    const bindingA = model.bindProperty("/a");
+    const bindingB = model.bindProperty("/b");
+    let bChangeCount = 0;
+
+    // Destroy bindingA during its own flush — bindingB should still work afterward
+    bindingA.attachChange(() => {
+      bindingA.destroy();
+    });
+
+    bindingB.attachChange(() => bChangeCount++);
+
+    model.setProperty("/a", 10);
+    model.setProperty("/b", 20);
+
+    setTimeout(() => {
+      assert.strictEqual(bChangeCount, 1, "surviving binding was notified");
+      assert.strictEqual(bindingB.getValue(), 20, "surviving binding has correct value");
+
+      // Verify FlushQueue is not stuck — subsequent changes still work
+      bChangeCount = 0;
+      model.setProperty("/b", 30);
+
+      setTimeout(() => {
+        assert.strictEqual(bChangeCount, 1, "FlushQueue still works after mid-flush destroy");
+        assert.strictEqual(bindingB.getValue(), 30, "subsequent value is correct");
+        model.destroy();
+        done();
+      }, 50);
+    }, 50);
+  });
+
   QUnit.test("destroy cleans up watcher", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     const binding = model.bindProperty("/name");
@@ -193,6 +257,34 @@ QUnit.module("SignalPropertyBinding", () => {
       null,
       "watcher is null after destroy",
     );
+    model.destroy();
+  });
+
+  QUnit.test("initialize skips subscribe when binding is already subscribed", (assert) => {
+    const model = new SignalModel({ name: "Alice" });
+    const binding = model.bindProperty("/name");
+
+    // After bindProperty, the binding is already subscribed (watcher exists).
+    const watcherBefore = (binding as unknown as { watcher: unknown }).watcher;
+    assert.ok(watcherBefore, "watcher exists after bindProperty");
+
+    // Spy: count subscribe calls by wrapping the method
+    let subscribeCount = 0;
+    const origSubscribe = binding.subscribe.bind(binding);
+    (binding as unknown as Record<string, unknown>).subscribe = () => {
+      subscribeCount++;
+      origSubscribe();
+    };
+
+    // Simulate what the UI5 framework does after bindProperty returns
+    (binding as unknown as { initialize(): void }).initialize();
+
+    assert.strictEqual(subscribeCount, 0, "initialize did not re-subscribe");
+    assert.ok(
+      (binding as unknown as { watcher: unknown }).watcher,
+      "watcher still exists after initialize",
+    );
+    assert.strictEqual(binding.getValue(), "Alice", "value is correct after initialize");
     model.destroy();
   });
 

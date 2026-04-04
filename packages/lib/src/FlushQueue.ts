@@ -1,5 +1,5 @@
 import Log from "sap/base/Log";
-import { Signal } from "signal-polyfill";
+import type { Signal } from "signal-polyfill";
 
 /**
  * Interface for bindings that participate in microtask-batched flush.
@@ -40,8 +40,12 @@ export function scheduleFlush(
       const batch = pendingUpdates;
       pendingUpdates = new Map();
       for (const [b, s] of batch) {
+        // Skip bindings destroyed/unsubscribed since they were queued.
+        // cancelFlush() operates on the live pendingUpdates map, but after
+        // the swap the binding is in the detached batch — unreachable by cancel.
+        if (!b.watcher) continue;
         s.get();
-        b.watcher?.watch();
+        b.watcher.watch();
         try {
           b.checkUpdate();
         } catch (e) {
