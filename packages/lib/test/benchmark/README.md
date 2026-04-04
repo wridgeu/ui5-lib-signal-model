@@ -161,14 +161,14 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 
 **The `bAsyncUpdate` path:**
 
-JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it batches all `checkUpdate` calls into a single `setTimeout` pass, collapsing O(N²) to O(N). SignalModel now matches this: when `bAsyncUpdate=true`, signal notifications are deferred and synced in a single `setTimeout` pass. Both models perform equivalently in this scenario.
+JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it batches all `checkUpdate` calls into a single `setTimeout` pass, collapsing O(N²) to O(N). SignalModel matches this: when `bAsyncUpdate=true`, signal notifications are deferred and synced in a single `setTimeout` pass. Both models perform equivalently in this scenario.
 
 > [!NOTE]
-> **How we got here — the async scenario investigation**
+> **How this was resolved -- the async scenario investigation**
 >
-> SignalModel originally showed **2.5x slower** performance in this scenario (~52ms vs ~21ms at 2000 bindings). We investigated the root cause through several steps:
+> SignalModel originally showed **2.5x slower** performance in this scenario (~52ms vs ~21ms at 2000 bindings). The root cause was investigated through several steps:
 >
-> 1. **Watcher re-arm hypothesis.** The TC39 `Signal.subtle.Watcher` requires an explicit re-arm (`signal.get()` + `watcher.watch()`) after each notification. We initially suspected this per-binding overhead caused the gap. Other frameworks (Preact, Solid, Vue) avoid it via persistent subscriptions.
+> 1. **Watcher re-arm hypothesis.** The TC39 `Signal.subtle.Watcher` requires an explicit re-arm (`signal.get()` + `watcher.watch()`) after each notification. Initial suspicion was that this per-binding overhead caused the gap. Other frameworks (Preact, Solid, Vue) avoid it via persistent subscriptions.
 >
 > 2. **Polyfill swap.** Tested [alien-signals](https://github.com/stackblitz/alien-signals) (a high-performance reactive engine, being considered as the new `signal-polyfill` base in [PR #44](https://github.com/proposal-signals/signal-polyfill/pull/44)) as a drop-in replacement. Result: identical performance across all 17 scenarios. The polyfill engine was not the bottleneck.
 >
@@ -216,9 +216,10 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), se
 
 3. **Computed signals.** Model-layer derived values (`createComputed`) that update reactively. JSONModel has no equivalent; formatters are view-layer and do not participate in the model's dependency graph.
 
-4. **In-place merge.** `setData(partial, true)` uses an O(k) in-place recursive merge instead of O(n) `deepExtend` clone. For large datasets with small merge payloads, measurably faster (4.2x at 20k items, scaling linearly with data size).
+4. **In-place merge.** `setData(partial, true)` uses an O(k) in-place recursive merge instead of O(n) `deepExtend` clone. For large datasets with small merge payloads, measurably faster (~2x at 20k items, scaling linearly with data size).
 
-5. **TC39 Signals alignment.** When the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) ships natively in browsers, `signal-polyfill` can be swapped for the native implementation with zero API changes. Native signals will be implemented in C++ by the browser engine, eliminating the JavaScript overhead of the polyfill's reactive graph traversal, watcher notification, and dependency tracking. The architectural advantages (O(1) notification, in-place merge) will remain, and the constant factors should improve across all signal-dependent scenarios.
+> [!NOTE]
+> **Native Signals outlook.** SignalModel currently uses [signal-polyfill](https://github.com/proposal-signals/signal-polyfill), a JavaScript implementation of the [TC39 Signals proposal](https://github.com/tc39/proposal-signals). When signals ship natively in browsers, the polyfill can be swapped for the native implementation with zero API changes. Native signals will be implemented in C++ by the browser engine, eliminating the JavaScript overhead of the polyfill's reactive graph traversal, watcher notification, and dependency tracking. The architectural advantages (O(1) notification, in-place merge) will remain, and the constant factors should improve across all signal-dependent scenarios.
 
 ## Reference Screenshots
 
