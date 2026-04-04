@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "license": "MIT",
   "main": "dist/resources/ui5/model/signal/library.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/resources/ui5/model/signal/library.js"
+    }
+  },
   "author": "Marco Beier",
   "description": "Signal-based reactive UI5 model using TC39 Signals polyfill",
   "repository": {
@@ -27,7 +34,9 @@
     "dist/**/*",
     "src/**/*",
     "ui5.yaml",
-    "tsconfig.json"
+    "tsconfig.json",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "clean": "rimraf dist .ui5",

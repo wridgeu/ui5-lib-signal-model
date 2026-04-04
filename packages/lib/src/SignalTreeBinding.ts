@@ -1,6 +1,6 @@
 import ClientTreeBinding from "sap/ui/model/ClientTreeBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
-import Context from "sap/ui/model/Context";
+import type Context from "sap/ui/model/Context";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
 import { scheduleFlush, cancelFlush } from "./FlushQueue";
@@ -82,7 +82,9 @@ export default class SignalTreeBinding extends ClientTreeBinding {
   }
 
   override initialize(): this {
-    this.subscribe();
+    if (!this.watcher) {
+      this.subscribe();
+    }
     // Fire initial change so controls (e.g. sap.m.Tree) populate their aggregation
     asInternal(this)._fireChange({ reason: ChangeReason.Change });
     return this;

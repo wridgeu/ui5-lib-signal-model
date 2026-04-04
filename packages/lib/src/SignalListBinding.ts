@@ -1,6 +1,6 @@
 import ClientListBinding from "sap/ui/model/ClientListBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
-import Context from "sap/ui/model/Context";
+import type Context from "sap/ui/model/Context";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
 import { scheduleFlush, cancelFlush } from "./FlushQueue";
@@ -115,7 +115,9 @@ export default class SignalListBinding extends ClientListBinding {
 
   override initialize(): this {
     this.update();
-    this.subscribe();
+    if (!this.watcher) {
+      this.subscribe();
+    }
     // Fire initial change so controls (e.g. sap.m.List) populate their aggregation
     asInternal(this)._fireChange({ reason: ChangeReason.Change });
     return this;

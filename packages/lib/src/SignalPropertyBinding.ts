@@ -1,6 +1,6 @@
 import ClientPropertyBinding from "sap/ui/model/ClientPropertyBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
-import Context from "sap/ui/model/Context";
+import type Context from "sap/ui/model/Context";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
 import { scheduleFlush, cancelFlush } from "./FlushQueue";
@@ -114,7 +114,9 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   }
 
   initialize(): this {
-    this.subscribe();
+    if (!this.watcher) {
+      this.subscribe();
+    }
     this.checkUpdate(true);
     return this;
   }
