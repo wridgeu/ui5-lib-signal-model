@@ -19,12 +19,12 @@ npm run bench -- --bindings 2000 --json results.json       # save results as JSO
 
 `npm run bench` runs all scenarios in headless Chrome via WDIO and streams results to the terminal as each scenario completes. No browser window opens.
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--bindings N` | `500` | Number of UI5 property bindings |
-| `--iterations N` | `500` | Iterations per scenario |
-| `--rounds N` | `10` | Measured rounds (alternating A-B) |
-| `--json <file>` | — | Save results as JSON |
+| Flag             | Default | Description                       |
+| ---------------- | ------- | --------------------------------- |
+| `--bindings N`   | `500`   | Number of UI5 property bindings   |
+| `--iterations N` | `500`   | Iterations per scenario           |
+| `--rounds N`     | `10`    | Measured rounds (alternating A-B) |
+| `--json <file>`  | —       | Save results as JSON              |
 
 The CLI reuses the same benchmark page and WDIO infrastructure as the QUnit tests — no additional dependencies. The benchmark HTML page accepts URL parameters (`?n=&iterations=&rounds=&autorun`) and exposes a `window.__bench` global that the WDIO spec polls for streaming results.
 
@@ -221,3 +221,4 @@ Full-page screenshots for each binding count:
 - [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600) - documents the `checkUpdate` O(N) bottleneck
 - [openui5 issue 4351](https://github.com/UI5/openui5/issues/4351) - related DOM accumulation problem in large apps
 - SAP commit `cb6c7f7a` - added `checkPerformanceOfUpdate` warning at 100,000 cumulative binding checks
+```

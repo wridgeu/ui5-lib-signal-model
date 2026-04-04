@@ -96,16 +96,13 @@ describe("Benchmark", function () {
     // Wait for UI5 bootstrap and benchmark initialization.
     // The HTML page sets `window.__bench` at the start of `runBenchmark()`,
     // which is triggered by the `autorun` URL parameter after UI5 loads.
-    await browser.waitUntil(
-      async () => browser.execute(() => window.__bench != null),
-      {
-        timeout: 60_000,
-        interval: 500,
-        timeoutMsg:
-          "Benchmark page did not initialize within 60s. " +
-          "Check that UI5 loaded and the autorun parameter was accepted.",
-      },
-    );
+    await browser.waitUntil(async () => browser.execute(() => window.__bench != null), {
+      timeout: 60_000,
+      interval: 500,
+      timeoutMsg:
+        "Benchmark page did not initialize within 60s. " +
+        "Check that UI5 loaded and the autorun parameter was accepted.",
+    });
 
     const startTime = Date.now();
     let lastCount = 0;
@@ -167,9 +164,7 @@ describe("Benchmark", function () {
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(SEP);
-    console.log(
-      `\n${GREEN}Done${RESET} in ${elapsed}s \u2014 ${lastCount} scenarios`,
-    );
+    console.log(`\n${GREEN}Done${RESET} in ${elapsed}s \u2014 ${lastCount} scenarios`);
 
     // Persist results as JSON if requested via BENCH_JSON env var.
     if (jsonFile) {
