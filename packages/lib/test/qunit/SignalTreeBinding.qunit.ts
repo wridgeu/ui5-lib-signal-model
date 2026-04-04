@@ -166,4 +166,145 @@ QUnit.module("SignalTreeBinding", () => {
     assert.strictEqual(model.getProperty("name", roots[2]), "Carol", "sorted third");
     model.destroy();
   });
+
+  // =========================================================================
+  // Suspended tree binding
+  // =========================================================================
+
+  QUnit.test("suspended tree binding does not fire", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      tree: [{ name: "Root" }],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+    binding.suspend();
+
+    model.setProperty("/tree", [{ name: "Root" }, { name: "New" }]);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no event while suspended");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("resume fires pending update for tree binding", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      tree: [{ name: "Root" }],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+    binding.suspend();
+
+    model.setProperty("/tree", [{ name: "Root" }, { name: "New" }]);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no change while suspended");
+      binding.resume();
+      setTimeout(() => {
+        assert.ok(changeCount > 0, "change fired on resume");
+        const roots = binding.getRootContexts();
+        assert.strictEqual(roots.length, 2, "tree has 2 roots after resume");
+        model.destroy();
+        done();
+      }, 50);
+    }, 50);
+  });
+
+  // =========================================================================
+  // setContext on tree binding
+  // =========================================================================
+
+  QUnit.test("setContext resubscribes tree binding to new path", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      sections: {
+        a: { tree: [{ name: "A-Root", children: [] }] },
+        b: {
+          tree: [
+            { name: "B-Root", children: [] },
+            { name: "B-Second", children: [] },
+          ],
+        },
+      },
+    });
+
+    const ctxA = model.createBindingContext("/sections/a");
+    const binding = model.bindTree("tree", ctxA!, [], { arrayNames: ["children"] }, []);
+    let roots = binding.getRootContexts();
+    assert.strictEqual(roots.length, 1, "section A has 1 root");
+
+    let changeCount = 0;
+    binding.attachChange(() => changeCount++);
+
+    const ctxB = model.createBindingContext("/sections/b");
+    binding.setContext(ctxB!);
+
+    setTimeout(() => {
+      assert.ok(changeCount > 0, "change fired after setContext");
+      roots = binding.getRootContexts();
+      assert.strictEqual(roots.length, 2, "section B has 2 roots");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  // =========================================================================
+  // checkUpdate(bForceUpdate) on tree binding
+  // =========================================================================
+
+  QUnit.test("checkUpdate with bForceUpdate fires even when data unchanged", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      tree: [{ name: "Root" }],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+    binding.checkUpdate(true);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 1, "force checkUpdate fires on tree binding");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  // =========================================================================
+  // setData notifies tree binding
+  // =========================================================================
+
+  QUnit.test("setData fires change on tree binding", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      tree: [{ name: "Root" }],
+    });
+    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
+    let changed = false;
+
+    binding.attachChange(() => {
+      changed = true;
+    });
+
+    model.setData({ tree: [{ name: "Root" }, { name: "New" }] });
+
+    setTimeout(() => {
+      assert.ok(changed, "tree binding notified by setData");
+      const roots = binding.getRootContexts();
+      assert.strictEqual(roots.length, 2, "tree updated to 2 roots");
+      model.destroy();
+      done();
+    }, 50);
+  });
 });

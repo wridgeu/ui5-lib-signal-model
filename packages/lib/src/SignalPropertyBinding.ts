@@ -82,8 +82,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;
 
-    const self = asInternal(this);
-    const signal = this.oModel._getOrCreateSignal(resolvedPath, self._getValue());
+    const signal = this.oModel.getSignal(resolvedPath);
 
     this.watcher = new Signal.subtle.Watcher(() => {
       scheduleFlush(this, signal);

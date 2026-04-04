@@ -80,6 +80,12 @@ export default class SignalRegistry {
       return fn(...values);
     });
 
+    // Eagerly evaluate so the dependency graph is established immediately.
+    // Without this, a Watcher attached to an unevaluated computed cannot
+    // detect when upstream signals change (the computed has no subscriptions
+    // to its dependencies until its first .get() call).
+    computed.get();
+
     this.computeds.set(path, computed);
     return computed;
   }

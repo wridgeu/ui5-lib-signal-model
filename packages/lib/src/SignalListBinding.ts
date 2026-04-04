@@ -9,7 +9,7 @@ import { scheduleFlush, cancelFlush } from "./FlushQueue";
 // getResolvedPath, isRelative are on the public API and don't need casting.
 type ListBindingInternal = ClientListBinding & {
   oList: unknown[] | Record<string, unknown>;
-  aIndices: number[];
+  aIndices: (number | string)[];
   iLength: number;
   bUseExtendedChangeDetection: boolean;
   sPath: string;
@@ -50,12 +50,15 @@ export default class SignalListBinding extends ClientListBinding {
         internal.oList = internal.bUseExtendedChangeDetection
           ? (structuredClone(oList) as unknown[])
           : oList.slice();
+        internal.updateIndices();
       } else {
         internal.oList = internal.bUseExtendedChangeDetection
           ? (structuredClone(oList) as Record<string, unknown>)
           : Object.assign({}, oList);
+        // ClientListBinding.updateIndices only handles arrays.
+        // For objects, generate string indices from keys (JSONModel parity).
+        internal.aIndices = Object.keys(internal.oList);
       }
-      internal.updateIndices();
       internal.applyFilter();
       internal.applySort();
       internal.iLength = internal._getLength();
@@ -82,10 +85,7 @@ export default class SignalListBinding extends ClientListBinding {
     if (!resolvedPath) return;
 
     const internal = asInternal(this);
-    const signal = internal.oModel._getOrCreateSignal(
-      resolvedPath,
-      internal.oModel._getObject(resolvedPath),
-    );
+    const signal = internal.oModel.getSignal(resolvedPath);
 
     this.watcher = new Signal.subtle.Watcher(() => {
       scheduleFlush(this, signal);

@@ -320,4 +320,154 @@ QUnit.module("JSONModel Parity", () => {
     json.destroy();
     signal.destroy();
   });
+
+  // --- getProperty("/") returns root data ---
+
+  QUnit.test("getProperty at root returns same data as getData (parity)", (assert) => {
+    const initial = { name: "Alice", age: 28 };
+
+    const json = new JSONModel(JSON.parse(JSON.stringify(initial)));
+    const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(initial)));
+
+    const jsonRoot = json.getProperty("/");
+    const signalRoot = signal.getProperty("/");
+
+    assert.deepEqual(signalRoot, jsonRoot, "getProperty('/') matches JSONModel");
+    assert.strictEqual(signalRoot, signal.getData(), "getProperty('/') === getData()");
+
+    json.destroy();
+    signal.destroy();
+  });
+
+  // --- getJSON / setJSON parity ---
+
+  QUnit.test("getJSON produces same output as JSONModel (parity)", (assert) => {
+    const initial = { name: "Alice", items: [1, 2, 3] };
+
+    const json = new JSONModel(JSON.parse(JSON.stringify(initial)));
+    const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(initial)));
+
+    assert.strictEqual(signal.getJSON(), json.getJSON(), "getJSON matches JSONModel");
+
+    json.destroy();
+    signal.destroy();
+  });
+
+  QUnit.test("setJSON then getJSON roundtrip matches JSONModel (parity)", (assert) => {
+    const jsonStr = '{"name":"Bob","age":30}';
+
+    const json = new JSONModel({});
+    const signal = new SignalModel<Record<string, unknown>>({});
+
+    json.setJSON(jsonStr);
+    signal.setJSON(jsonStr);
+
+    assertParity(assert, "setJSON roundtrip", json.getData(), signal.getData());
+    assert.strictEqual(signal.getJSON(), json.getJSON(), "getJSON matches after setJSON");
+
+    json.destroy();
+    signal.destroy();
+  });
+
+  // --- checkUpdate(true) forces binding re-evaluation (parity) ---
+
+  QUnit.test("checkUpdate(true) forces all bindings to re-evaluate (parity)", (assert) => {
+    const done = assert.async();
+    const json = new JSONModel({ name: "Alice" });
+    const signal = new SignalModel({ name: "Alice" });
+
+    const jsonBinding = json.bindProperty("/name");
+    const signalBinding = signal.bindProperty("/name");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    // Force update without any data change
+    // checkUpdate exists at runtime but not in @openui5/types stubs
+    (json as unknown as { checkUpdate(b: boolean): void }).checkUpdate(true);
+    signal.checkUpdate(true);
+
+    setTimeout(() => {
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        "checkUpdate(true) change count matches JSONModel",
+      );
+      json.destroy();
+      signal.destroy();
+      done();
+    }, 50);
+  });
+
+  // --- setData merge with null value in payload (parity) ---
+
+  QUnit.test("setData merge with null value in payload (parity)", (assert) => {
+    const initial = { name: "Alice", age: 28, address: { city: "Berlin" } };
+    const merge = { address: null };
+
+    const json = new JSONModel(JSON.parse(JSON.stringify(initial)));
+    const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(initial)));
+
+    json.setData(merge, true);
+    signal.setData(merge as Partial<Record<string, unknown>>, true);
+
+    assertParity(assert, "merge with null", json.getData(), signal.getData());
+    json.destroy();
+    signal.destroy();
+  });
+
+  // --- setData merge: array replaced by shorter array (parity) ---
+
+  QUnit.test(
+    "setData merge: longer array merged with shorter preserves tail (parity)",
+    (assert) => {
+      const initial = { items: [1, 2, 3, 4, 5] };
+      const merge = { items: [10, 20] };
+
+      const json = new JSONModel(JSON.parse(JSON.stringify(initial)));
+      const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(initial)));
+
+      json.setData(merge, true);
+      signal.setData(merge, true);
+
+      assertParity(assert, "shorter array merge", json.getData(), signal.getData());
+      json.destroy();
+      signal.destroy();
+    },
+  );
+
+  // --- setProperty returns boolean consistently (parity) ---
+
+  QUnit.test("setProperty return values match JSONModel for various paths", (assert) => {
+    const initial = { name: "Alice", nested: { value: 1 } };
+
+    const json = new JSONModel(JSON.parse(JSON.stringify(initial)));
+    const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(initial)));
+
+    // Existing path
+    assert.strictEqual(
+      signal.setProperty("/name", "Bob"),
+      json.setProperty("/name", "Bob"),
+      "existing path: same return value",
+    );
+
+    // Nonexistent parent
+    assert.strictEqual(
+      signal.setProperty("/missing/deep", "x"),
+      json.setProperty("/missing/deep", "x"),
+      "nonexistent parent: same return value",
+    );
+
+    // Root path
+    assert.strictEqual(
+      signal.setProperty("/nested/value", 2),
+      json.setProperty("/nested/value", 2),
+      "nested path: same return value",
+    );
+
+    json.destroy();
+    signal.destroy();
+  });
 });
