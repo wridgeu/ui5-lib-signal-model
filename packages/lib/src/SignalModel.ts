@@ -6,7 +6,7 @@ import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
 import SignalTreeBinding from "./SignalTreeBinding";
 import type { SignalModelOptions, ModelPath, PathValue } from "./types";
-import type { Signal } from "signal-polyfill";
+import { Signal } from "signal-polyfill";
 
 // `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
 type ClientModelInternal = ClientModel & {
@@ -454,17 +454,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown>;
   getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown> {
     const existing = this.registry.get(sPath);
-    if (existing) return existing;
+    if (existing) {
+      // Computed signals are lazily evaluated — their dependency graph is only
+      // established on first .get(). Pre-evaluate so Watchers can track changes.
+      if (Signal.isComputed(existing)) {
+        existing.get();
+      }
+      return existing;
+    }
     return this.registry.getOrCreate(sPath, this._getObject(sPath));
-  }
-
-  _getOrCreateSignal(
-    sPath: string,
-    initialValue: unknown,
-  ): Signal.State<unknown> | Signal.Computed<unknown> {
-    const existing = this.registry.get(sPath);
-    if (existing) return existing;
-    return this.registry.getOrCreate(sPath, initialValue);
   }
 
   createComputed(

@@ -184,35 +184,38 @@ QUnit.module("SignalPropertyBinding", () => {
     }, 50);
   });
 
-  QUnit.test("FlushQueue skips bindings destroyed mid-flush (no spurious checkUpdate)", (assert) => {
-    const done = assert.async();
-    const model = new SignalModel({ name: "Alice" });
-    const binding1 = model.bindProperty("/name");
-    const binding2 = model.bindProperty("/name");
-    let checkUpdateCalledAfterDestroy = false;
+  QUnit.test(
+    "FlushQueue skips bindings destroyed mid-flush (no spurious checkUpdate)",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({ name: "Alice" });
+      const binding1 = model.bindProperty("/name");
+      const binding2 = model.bindProperty("/name");
+      let checkUpdateCalledAfterDestroy = false;
 
-    // binding1's change handler fires during FlushQueue processing.
-    // It destroys binding2, then monkey-patches checkUpdate to detect
-    // whether FlushQueue still calls it on the destroyed binding.
-    binding1.attachChange(() => {
-      binding2.destroy();
-      (binding2 as unknown as Record<string, unknown>).checkUpdate = () => {
-        checkUpdateCalledAfterDestroy = true;
-      };
-    });
+      // binding1's change handler fires during FlushQueue processing.
+      // It destroys binding2, then monkey-patches checkUpdate to detect
+      // whether FlushQueue still calls it on the destroyed binding.
+      binding1.attachChange(() => {
+        binding2.destroy();
+        (binding2 as unknown as Record<string, unknown>).checkUpdate = () => {
+          checkUpdateCalledAfterDestroy = true;
+        };
+      });
 
-    model.setProperty("/name", "Bob");
+      model.setProperty("/name", "Bob");
 
-    setTimeout(() => {
-      assert.strictEqual(
-        checkUpdateCalledAfterDestroy,
-        false,
-        "checkUpdate was not called on binding destroyed mid-flush",
-      );
-      model.destroy();
-      done();
-    }, 50);
-  });
+      setTimeout(() => {
+        assert.strictEqual(
+          checkUpdateCalledAfterDestroy,
+          false,
+          "checkUpdate was not called on binding destroyed mid-flush",
+        );
+        model.destroy();
+        done();
+      }, 50);
+    },
+  );
 
   QUnit.test("FlushQueue continues working after mid-flush destroy", (assert) => {
     const done = assert.async();
@@ -302,6 +305,47 @@ QUnit.module("SignalPropertyBinding", () => {
 
     setTimeout(() => {
       assert.strictEqual(changeCount, 0, "no change event after destroy");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("checkUpdate with bForceUpdate fires even when value unchanged", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ name: "Alice" });
+    const binding = model.bindProperty("/name");
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+
+    // Value is still "Alice" — normal checkUpdate would skip, but force should fire
+    binding.checkUpdate(true);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 1, "change event fired despite same value");
+      assert.strictEqual(binding.getValue(), "Alice", "value is still Alice");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("refresh triggers binding re-read via checkUpdate", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ name: "Alice" });
+    const binding = model.bindProperty("/name");
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+
+    // Mutate data directly (bypassing setProperty — simulates external data change)
+    (model.getData() as Record<string, unknown>).name = "Bob";
+
+    // refresh(true) calls checkUpdate(true), which re-reads from model
+    binding.refresh(true);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 1, "change event fired after refresh");
+      assert.strictEqual(binding.getValue(), "Bob", "binding picked up mutated data");
       model.destroy();
       done();
     }, 50);

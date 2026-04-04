@@ -82,10 +82,7 @@ export default class SignalListBinding extends ClientListBinding {
     if (!resolvedPath) return;
 
     const internal = asInternal(this);
-    const signal = internal.oModel._getOrCreateSignal(
-      resolvedPath,
-      internal.oModel._getObject(resolvedPath),
-    );
+    const signal = internal.oModel.getSignal(resolvedPath);
 
     this.watcher = new Signal.subtle.Watcher(() => {
       scheduleFlush(this, signal);
