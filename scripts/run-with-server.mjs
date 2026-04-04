@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
+import { platform } from "node:os";
 
 const args = process.argv.slice(2);
 
@@ -47,5 +48,16 @@ try {
   const code = await new Promise((resolve) => test.on("close", resolve));
   process.exitCode = code;
 } finally {
-  server.kill();
+  // On Windows, server.kill() only kills the npm process, not the child
+  // ui5 serve process (no SIGTERM propagation). Use taskkill /T to kill
+  // the entire process tree and avoid orphaned servers on port 8080.
+  if (platform() === "win32") {
+    try {
+      execSync(`taskkill /pid ${server.pid} /T /F`, { stdio: "ignore" });
+    } catch {
+      // Process may have already exited
+    }
+  } else {
+    server.kill();
+  }
 }

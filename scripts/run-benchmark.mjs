@@ -24,6 +24,8 @@
  */
 import { spawn } from "node:child_process";
 import { parseArgs } from "node:util";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 const { values } = parseArgs({
   options: {
@@ -71,10 +73,12 @@ if (values.json) {
   env.BENCH_JSON = values.json;
 }
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const child = spawn(
   "node",
   [
-    "scripts/run-with-server.mjs",
+    join(__dirname, "run-with-server.mjs"),
     "--ready-url",
     "http://localhost:8080",
     "--server-script",
