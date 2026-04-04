@@ -107,9 +107,9 @@ The `runAlternating` function interleaves JSON and Signal runs (JSON-Signal, Sig
 
 After each timed operation, a three-stage async drain ensures all notifications complete:
 
-1. `Promise.resolve().then(...)` - drains microtask queue (SignalModel's `queueMicrotask` callbacks)
-2. `setTimeout(resolve, 0)` - yields to macrotask queue (JSONModel's async `checkUpdate`)
-3. `queueMicrotask(resolve)` - final microtask drain for any cascaded notifications
+1. `Promise.resolve().then(...)` - drains microtask queue (SignalModel's default `queueMicrotask` flush)
+2. `setTimeout(resolve, 0)` - yields to macrotask queue (JSONModel's async `checkUpdate` and SignalModel's `bAsyncUpdate` bulk sync)
+3. `queueMicrotask(resolve)` - final microtask drain for any cascaded notifications from the macrotask pass
 
 ### Statistics
 
@@ -189,9 +189,9 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), se
 
 **What SignalModel offers over JSONModel with `bAsyncUpdate`:**
 
-1. **Correct by default.** Developers do not need to remember to pass `bAsyncUpdate=true`. SAP added `checkPerformanceOfUpdate` specifically because developers keep using the synchronous default. SignalModel is always O(1) per notification regardless of how `setProperty` is called.
+1. **Correct by default.** Developers do not need to remember to pass `bAsyncUpdate=true`. SAP added `checkPerformanceOfUpdate` specifically because developers keep using the synchronous default. Without `bAsyncUpdate`, SignalModel is always O(1) per notification per `setProperty` call. With `bAsyncUpdate=true`, both models batch into a single pass.
 
-2. **Per-path notification.** Even with `bAsyncUpdate=true`, JSONModel's single `checkUpdate` pass still iterates ALL bindings and runs `deepEqual` on each. With 3,000+ bindings (the scale reported in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600)), this single pass alone takes ~200ms. SignalModel notifies only the bindings on changed paths.
+2. **Per-path notification (default path).** Without `bAsyncUpdate`, each `setProperty` notifies only the bindings on the changed path — O(1) per call. JSONModel's synchronous `setProperty` iterates ALL bindings each time — O(N) per call. With `bAsyncUpdate=true`, both models iterate all bindings/signals in a single batched pass.
 
 3. **Computed signals.** Model-layer derived values (`createComputed`) that update reactively. JSONModel has no equivalent; formatters are view-layer and do not participate in the model's dependency graph.
 
