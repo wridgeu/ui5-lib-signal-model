@@ -139,7 +139,7 @@ With `bAsyncUpdate=true`, **JSONModel is faster than SignalModel** for bulk batc
 > 1. A planned [`notifiedBy()` method](https://github.com/tc39/proposal-signals/issues/77) (agreed upon by the proposal champions) would combine "tell me what changed" and "re-arm" into a single call, eliminating the separate `watch()` step from the flush path.
 > 2. [Native browser implementations](https://github.com/tc39/proposal-signals) would reduce the re-arm to a single C++ bit flip — effectively zero cost. The proposal authors state: "native C++ implementations can be slightly more efficient by a constant factor."
 >
-> Additionally, the current `signal-polyfill` is being [rebuilt on alien-signals](https://github.com/nicolo-ribaudo/signal-polyfill/pull/44), a high-performance reactive engine, which will improve the overall graph traversal and notification performance even before native implementations ship.
+> Additionally, the current `signal-polyfill` is being [rebuilt on alien-signals](https://github.com/proposal-signals/signal-polyfill/pull/44), a high-performance reactive engine, which will improve the overall graph traversal and notification performance even before native implementations ship.
 
 **In-place merge:**
 
