@@ -691,6 +691,98 @@
       }
 
       /**
+       * Grid table binding - replace all rows (virtualized).
+       *
+       * Uses sap.ui.table.Table which renders only `visibleRowCount` rows
+       * to the DOM via row recycling. The model still notifies all N rows,
+       * but DOM cost is constant regardless of dataset size. This isolates
+       * model notification overhead from DOM rendering.
+       *
+       * No row cap needed — virtualization handles large datasets.
+       */
+      async function benchGridTableBindingReplace(ModelClass, n, warmupRounds, measuredRounds) {
+        var data = { rows: [] };
+        for (var i = 0; i < n; i++) {
+          data.rows.push({
+            id: i,
+            name: "item-" + i,
+            price: (i * 1.5).toFixed(2),
+            active: i % 2 === 0,
+          });
+        }
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+
+        var gridTable = new sap.ui.table.Table({
+          visibleRowCount: 20,
+          rows: "{/rows}",
+          columns: [
+            new sap.ui.table.Column({
+              label: new sap.m.Text({ text: "ID" }),
+              template: new sap.m.Text({ text: "{id}" }),
+            }),
+            new sap.ui.table.Column({
+              label: new sap.m.Text({ text: "Name" }),
+              template: new sap.m.Text({ text: "{name}" }),
+            }),
+            new sap.ui.table.Column({
+              label: new sap.m.Text({ text: "Price" }),
+              template: new sap.m.Text({ text: "{price}" }),
+            }),
+          ],
+        });
+        gridTable.setModel(model);
+        gridTable.placeAt(container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 100);
+        });
+
+        // Warmup
+        for (var w = 0; w < warmupRounds; w++) {
+          var warmupRows = [];
+          for (var j = 0; j < n; j++) {
+            warmupRows.push({
+              id: j,
+              name: "warm-" + w + "-" + j,
+              price: (j * 2).toFixed(2),
+              active: true,
+            });
+          }
+          model.setProperty("/rows", warmupRows);
+          await flush();
+          await new Promise(function (r) {
+            setTimeout(r, 50);
+          });
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          var newRows = [];
+          for (var k = 0; k < n; k++) {
+            newRows.push({
+              id: k,
+              name: "meas-" + round + "-" + k,
+              price: (k * 3).toFixed(2),
+              active: k % 3 === 0,
+            });
+          }
+          var start = performance.now();
+          model.setProperty("/rows", newRows);
+          await flush();
+          times.push(performance.now() - start);
+          await new Promise(function (r) {
+            setTimeout(r, 10);
+          });
+        }
+
+        gridTable.destroy();
+        model.destroy();
+        container.innerHTML = "";
+        return times;
+      }
+
+      /**
        * Tree binding - replace tree data
        *
        * Creates a sap.m.Tree with hierarchical data via tree binding, then replaces it.
@@ -1549,6 +1641,8 @@
               "sap/m/ColumnListItem",
               "sap/m/Tree",
               "sap/m/StandardTreeItem",
+              "sap/ui/table/Table",
+              "sap/ui/table/Column",
             ],
             function (JSONModel, SignalModel) {
               resolve({ JSONModel: JSONModel, SignalModel: SignalModel });
