@@ -46,7 +46,7 @@ JSON output format:
 
 ## What It Tests
 
-20 scenarios across all binding types, model operations, and merge strategies:
+22 scenarios across all binding types, model operations, and merge strategies:
 
 | #   | Binding Type              | Scenario                                | What It Measures                                            |
 | --- | ------------------------- | --------------------------------------- | ----------------------------------------------------------- |
@@ -63,22 +63,23 @@ JSON output format:
 | 11  | Computed (`sap.m.Text`)   | Computed signals                        | `createComputed` dependency chain propagation               |
 | 12  | Computed (`sap.m.Text`)   | Computed (redefined)                    | `removeComputed` + `createComputed` re-subscribe cost       |
 | 13  | Computed (`sap.m.Text`)   | Computed sub-path                       | Binding to sub-path of computed object, `_getObject` traversal |
-| 14  | Property (`sap.m.Text`)   | setData replace                         | Full data replacement propagation                           |
-| 15  | Property (`sap.m.Text`)   | setData merge (shallow)                 | Merge 5 items into N, small payload into large data         |
-| 16  | Property (`sap.m.Text`)   | setData merge (deep)                    | Merge all N items, full payload, worst case for merge       |
-| 17  | Property (`sap.m.Text`)   | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree          |
-| 18  | Property (`sap.m.Text`)   | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N, tests O(k) vs O(n) merge          |
-| 19  | Property (`sap.m.Text`)   | Real-world: checkPerformanceOfUpdate    | 3,449 bindings, 29 sync calls, exceeds SAP's 100k threshold |
-| 20  | Property (`sap.m.Text`)   | Deep-path setProperty (no computeds)    | 4-segment path `_findComputedAncestor` overhead, zero computeds |
+| 14  | Computed (`sap.m.Text`)   | Computed redefine + sub-path            | `_firePathResubscribe` prefix scan with sub-path bindings   |
+| 15  | Property (`sap.m.Text`)   | setData replace                         | Full data replacement propagation                           |
+| 16  | Property (`sap.m.Text`)   | setData merge (shallow)                 | Merge 5 items into N, small payload into large data         |
+| 17  | Property (`sap.m.Text`)   | setData merge (deep)                    | Merge all N items, full payload, worst case for merge       |
+| 18  | Property (`sap.m.Text`)   | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree          |
+| 19  | Property (`sap.m.Text`)   | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N, tests O(k) vs O(n) merge          |
+| 20  | Property (`sap.m.Text`)   | Real-world: checkPerformanceOfUpdate    | 3,449 bindings, 29 sync calls, exceeds SAP's 100k threshold |
+| 21  | Property (`sap.m.Text`)   | Deep-path setProperty (no computeds)    | 4-segment path `_findComputedAncestor` overhead, zero computeds |
 
 ### Merge Scenario Design
 
-The merge scenarios (13-16) test different payload shapes that exercise the `setData(data, true)` code path with varying data-to-payload ratios:
+The merge scenarios (16-19) test different payload shapes that exercise the `setData(data, true)` code path with varying data-to-payload ratios:
 
-- **Shallow (13)**: Small flat payload into a large flat array. Both models pay the `deepExtend`/in-place merge cost, but binding notification cost dominates because all N bindings exist. Tests the common "update a few fields in a form" pattern.
-- **Deep (14)**: Payload covers every item. Worst case for merge: no savings from targeted invalidation. Both models must process all N items.
-- **Nested config (15)**: Realistic deeply nested configuration object (5 levels: `app.features.notifications.push`). The merge payload touches only 3 leaf paths. Tests recursive merge depth traversal.
-- **Large dataset, pinpoint (16)**: The key merge benchmark. Creates 10x N items (e.g., 10,000 for N=1000) with complex objects (7 properties, nested `metadata`), then merges only 3 items. JSONModel's `deepExtend` must deep-clone all 10,000 objects. SignalModel's in-place merge walks only the 3 payload items. Isolates the O(n) vs O(k) architectural difference.
+- **Shallow (16)**: Small flat payload into a large flat array. Both models pay the `deepExtend`/in-place merge cost, but binding notification cost dominates because all N bindings exist. Tests the common "update a few fields in a form" pattern.
+- **Deep (17)**: Payload covers every item. Worst case for merge: no savings from targeted invalidation. Both models must process all N items.
+- **Nested config (18)**: Realistic deeply nested configuration object (5 levels: `app.features.notifications.push`). The merge payload touches only 3 leaf paths. Tests recursive merge depth traversal.
+- **Large dataset, pinpoint (19)**: The key merge benchmark. Creates 10x N items (e.g., 10,000 for N=1000) with complex objects (7 properties, nested `metadata`), then merges only 3 items. JSONModel's `deepExtend` must deep-clone all 10,000 objects. SignalModel's in-place merge walks only the 3 payload items. Isolates the O(n) vs O(k) architectural difference.
 
 ## How It Works
 
@@ -187,6 +188,8 @@ Scenario 17 reproduces the conditions from SAP's `checkPerformanceOfUpdate` warn
 "Computed (redefined)" redefines all 500 computeds via `removeComputed` + `createComputed` with different dependencies, then measures update propagation. Performance is equivalent to regular computed signals. The re-subscribe bridge adds no measurable cost.
 
 "Computed sub-path" binds 500 controls to sub-paths of computed objects (e.g., `/computed0/label`). The `_getObject` traversal checks `registry.isComputed()` at each path segment — a Map lookup. Performance is equivalent to JSONModel's direct path binding.
+
+"Computed redefine + sub-path" combines redefinition with sub-path bindings — the most expensive computed path. It redefines all computeds and exercises `_firePathResubscribe`'s prefix scan to re-wire sub-path bindings to new signal objects.
 
 **Where both models are equivalent:**
 
