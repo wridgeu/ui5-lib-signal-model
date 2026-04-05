@@ -13,11 +13,11 @@ type ClientPropertyBindingInternal = ClientPropertyBinding & {
   oValue: unknown;
   oContext: Context | undefined;
   sPath: string;
-  checkUpdate(bForceUpdate?: boolean): void;
+  checkUpdate(forceUpdate?: boolean): void;
   getDataState(): { setValue(v: unknown): void; getControlMessages(): unknown[] };
   checkDataState(): void;
   _getValue(): unknown;
-  _fireChange(oEvent: { reason: ChangeReason }): void;
+  _fireChange(event: { reason: ChangeReason }): void;
 };
 
 /**
@@ -39,40 +39,39 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
-  checkUpdate(bForceUpdate?: boolean): void {
+  checkUpdate(forceUpdate?: boolean): void {
     const self = asInternal(this);
-    if (self.bSuspended && !bForceUpdate) {
+    if (self.bSuspended && !forceUpdate) {
       return;
     }
 
-    const oValue = self._getValue();
+    const value = self._getValue();
     // For objects, always fire - the reference may be the same but contents may have changed
     // (mutation through setProperty on child paths). For primitives, use strict equality.
-    const hasChanged =
-      typeof oValue === "object" && oValue !== null ? true : self.oValue !== oValue;
-    if (hasChanged || bForceUpdate) {
-      self.oValue = oValue;
+    const hasChanged = typeof value === "object" && value !== null ? true : self.oValue !== value;
+    if (hasChanged || forceUpdate) {
+      self.oValue = value;
       self.getDataState().setValue(self.oValue);
       self.checkDataState();
       self._fireChange({ reason: ChangeReason.Change });
     }
   }
 
-  setValue(oValue: unknown): void {
+  setValue(value: unknown): void {
     const self = asInternal(this);
     if (self.bSuspended) {
       return;
     }
 
-    if (!deepEqual(self.oValue, oValue)) {
-      if (this.oModel.setProperty(self.sPath, oValue, self.oContext, true)) {
-        self.oValue = oValue;
+    if (!deepEqual(self.oValue, value)) {
+      if (this.oModel.setProperty(self.sPath, value, self.oContext, true)) {
+        self.oValue = value;
         self.getDataState().setValue(self.oValue);
         this.oModel.firePropertyChange({
           reason: ChangeReason.Binding,
           path: self.sPath,
           context: self.oContext,
-          value: oValue,
+          value,
         });
       }
     }
@@ -114,18 +113,18 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     return this;
   }
 
-  setContext(oContext?: Context): void {
+  setContext(context?: Context): void {
     const self = asInternal(this);
-    if (self.oContext != oContext) {
+    if (self.oContext != context) {
       // Match ClientPropertyBinding: clear stale control messages before context switch
       const Messaging = sap.ui.require("sap/ui/core/Messaging") as
-        | { removeMessages(messages: unknown[], bKeepMessages: boolean): void }
+        | { removeMessages(messages: unknown[], keepMessages: boolean): void }
         | undefined;
       if (Messaging) {
         Messaging.removeMessages(self.getDataState().getControlMessages(), true);
       }
       const oldResolved = this.getResolvedPath();
-      self.oContext = oContext;
+      self.oContext = context;
       if (this.isRelative()) {
         this.checkUpdate();
       }

@@ -45,16 +45,16 @@ export default class SignalListBinding extends ClientListBinding {
 
   update(): void {
     const internal = asInternal(this);
-    const oList = this.oModel._getObject(internal.sPath, internal.oContext);
-    if (oList) {
-      if (Array.isArray(oList)) {
+    const list = this.oModel._getObject(internal.sPath, internal.oContext);
+    if (list) {
+      if (Array.isArray(list)) {
         internal.oList = internal.bUseExtendedChangeDetection
-          ? (structuredClone(oList) as unknown[])
-          : oList.slice();
+          ? (structuredClone(list) as unknown[])
+          : list.slice();
       } else {
         internal.oList = internal.bUseExtendedChangeDetection
-          ? (structuredClone(oList) as Record<string, unknown>)
-          : Object.assign({}, oList);
+          ? (structuredClone(list) as Record<string, unknown>)
+          : Object.assign({}, list);
       }
       this.updateIndices();
       internal.applyFilter();
@@ -86,9 +86,9 @@ export default class SignalListBinding extends ClientListBinding {
     }
   }
 
-  checkUpdate(bForceUpdate?: boolean): void {
+  checkUpdate(forceUpdate?: boolean): void {
     const internal = asInternal(this);
-    if (internal.bSuspended && !internal.bIgnoreSuspend && !bForceUpdate) {
+    if (internal.bSuspended && !internal.bIgnoreSuspend && !forceUpdate) {
       return;
     }
     this.update();
@@ -133,10 +133,10 @@ export default class SignalListBinding extends ClientListBinding {
     return this;
   }
 
-  setContext(oContext?: object): void {
+  setContext(context?: object): void {
     const internal = asInternal(this);
-    if (internal.oContext !== oContext) {
-      internal.oContext = oContext as Context;
+    if (internal.oContext !== context) {
+      internal.oContext = context as Context;
       if (this.isRelative()) {
         this.update();
         this.subscribe();

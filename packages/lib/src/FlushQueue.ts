@@ -6,7 +6,7 @@ import { Signal } from "signal-polyfill";
  */
 interface FlushableBinding {
   watcher: Signal.subtle.Watcher | null;
-  checkUpdate(bForceUpdate?: boolean): void;
+  checkUpdate(forceUpdate?: boolean): void;
 }
 
 /**

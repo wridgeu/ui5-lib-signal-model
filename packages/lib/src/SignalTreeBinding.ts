@@ -38,7 +38,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
-  checkUpdate(bForceUpdate?: boolean): void {
+  checkUpdate(forceUpdate?: boolean): void {
     const internal = asInternal(this);
     // No bSuspended guard: ClientTreeBinding/JSONTreeBinding do not support
     // suspend/resume. The base Binding.suspend() sets the flag but tree
@@ -46,11 +46,11 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     //
     // Match ClientTreeBinding.checkUpdate: reapply filters, clear length cache,
     // and only fire change when data actually changed (or forced).
-    const oCurrentTreeData = this.oModel._getObject(internal.sPath, internal.oContext);
+    const currentTreeData = this.oModel._getObject(internal.sPath, internal.oContext);
     internal.applyFilter();
     internal._mLengthsCache = {};
-    if (bForceUpdate || !deepEqual(internal.oTreeData, oCurrentTreeData)) {
-      internal.oTreeData = internal.cloneData(oCurrentTreeData);
+    if (forceUpdate || !deepEqual(internal.oTreeData, currentTreeData)) {
+      internal.oTreeData = internal.cloneData(currentTreeData);
       internal._fireChange({ reason: ChangeReason.Change });
     }
   }
@@ -92,14 +92,14 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     return this;
   }
 
-  setContext(oContext?: object): void {
+  setContext(context?: object): void {
     const internal = asInternal(this);
-    if (internal.oContext !== oContext) {
-      internal.oContext = oContext as Context;
+    if (internal.oContext !== context) {
+      internal.oContext = context as Context;
       if (this.isRelative()) {
         // Match ClientTreeBinding.setContext: snapshot tree data for the new context
-        const oTreeData = this.oModel._getObject(internal.sPath, internal.oContext);
-        internal.oTreeData = internal.cloneData(oTreeData);
+        const treeData = this.oModel._getObject(internal.sPath, internal.oContext);
+        internal.oTreeData = internal.cloneData(treeData);
         this.subscribe();
         internal._fireChange({ reason: ChangeReason.Context });
       }

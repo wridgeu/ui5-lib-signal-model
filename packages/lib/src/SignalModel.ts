@@ -10,7 +10,7 @@ import type { Signal } from "signal-polyfill";
 
 // `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
 type ClientModelInternal = ClientModel & {
-  resolve(sPath: string, oContext?: Context): string | undefined;
+  resolve(path: string, oContext?: Context): string | undefined;
   checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): number;
   bDestroyed: boolean;
 };
@@ -30,23 +30,23 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private autoCreatePaths: boolean;
   private strictLeafCheck: boolean;
   private _pathSubscribers = new Map<string, Set<() => void>>();
-  private _pImportChain: Promise<void> = Promise.resolve();
+  private _importChain: Promise<void> = Promise.resolve();
   private _abortController: AbortController | null = new AbortController();
   declare oData: T;
 
-  constructor(sURL: string, mOptions?: SignalModelOptions);
-  constructor(oData?: T, mOptions?: SignalModelOptions);
-  constructor(oDataOrURL?: T | string, mOptions?: SignalModelOptions) {
+  constructor(url: string, options?: SignalModelOptions);
+  constructor(data?: T, options?: SignalModelOptions);
+  constructor(dataOrUrl?: T | string, options?: SignalModelOptions) {
     super();
     this.registry = new SignalRegistry();
-    this.autoCreatePaths = mOptions?.autoCreatePaths ?? false;
-    this.strictLeafCheck = mOptions?.strictLeafCheck ?? false;
+    this.autoCreatePaths = options?.autoCreatePaths ?? false;
+    this.strictLeafCheck = options?.strictLeafCheck ?? false;
 
-    if (typeof oDataOrURL === "string") {
+    if (typeof dataOrUrl === "string") {
       this.oData = {} as T;
-      this.loadData(oDataOrURL);
+      this.loadData(dataOrUrl);
     } else {
-      this.oData = (oDataOrURL || {}) as T;
+      this.oData = (dataOrUrl || {}) as T;
     }
   }
 
@@ -58,82 +58,85 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * Calls are chained sequentially -- multiple `loadData` calls execute
    * in order, matching JSONModel's `pSequentialImportCompleted` behavior.
    *
-   * @param sURL URL to load JSON from
-   * @param oParameters Query parameters (appended to URL for GET, sent as body for POST)
-   * @param _bAsync Deprecated -- always async. Kept for JSONModel signature compatibility.
-   * @param sType HTTP method: "GET" (default) or "POST"
-   * @param bMerge Whether to merge loaded data instead of replacing
-   * @param bCache Set to false to append a cache-busting timestamp
-   * @param mHeaders Additional HTTP headers
-   * @param oSignal AbortSignal to cancel the request (SignalModel extension)
+   * @param url URL to load JSON from
+   * @param parameters Query parameters (appended to URL for GET, sent as body for POST)
+   * @param _async Deprecated -- always async. Kept for JSONModel signature compatibility.
+   * @param type HTTP method: "GET" (default) or "POST"
+   * @param merge Whether to merge loaded data instead of replacing
+   * @param cache Set to false to append a cache-busting timestamp
+   * @param customHeaders Additional HTTP headers
+   * @param abortSignal AbortSignal to cancel the request (SignalModel extension)
    * @returns Promise that resolves when data is loaded
    */
   loadData(
-    sURL: string,
-    oParameters?: Record<string, string> | string,
-    _bAsync?: boolean,
-    sType?: string,
-    bMerge?: boolean,
-    bCache?: boolean,
-    mHeaders?: Record<string, string>,
-    oSignal?: AbortSignal,
+    url: string,
+    parameters?: Record<string, string> | string,
+    _async?: boolean,
+    type?: string,
+    merge?: boolean,
+    cache?: boolean,
+    customHeaders?: Record<string, string>,
+    abortSignal?: AbortSignal,
   ): Promise<void> {
     if (asInternal(this).bDestroyed) {
       return Promise.resolve();
     }
-    const sMethod = sType || "GET";
-    let sFullURL = sURL;
+    const method = type || "GET";
+    let fullURL = url;
     // Fall back to model-level cache setting (set via forceNoCache), matching JSONModel.
-    const bEffectiveCache =
-      bCache === undefined ? (this as unknown as { bCache: boolean }).bCache : bCache;
-    const sInfo = "cache=" + bEffectiveCache + ";bMerge=" + bMerge;
-    const oInfoObject = { cache: bEffectiveCache, merge: bMerge };
+    const effectiveCache =
+      cache === undefined ? (this as unknown as { bCache: boolean }).bCache : cache;
+    const info = "cache=" + effectiveCache + ";bMerge=" + merge;
+    const infoObject = { cache: effectiveCache, merge };
 
     // Append parameters to URL for GET, matching JSONModel behavior
-    if (oParameters && sMethod === "GET") {
+    if (parameters && method === "GET") {
       const paramString =
-        typeof oParameters === "string" ? oParameters : new URLSearchParams(oParameters).toString();
-      sFullURL += (sURL.includes("?") ? "&" : "?") + paramString;
+        typeof parameters === "string" ? parameters : new URLSearchParams(parameters).toString();
+      fullURL += (url.includes("?") ? "&" : "?") + paramString;
     }
 
-    if (bEffectiveCache === false) {
-      sFullURL += (sFullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
+    if (effectiveCache === false) {
+      fullURL += (fullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
     }
 
     const headers: Record<string, string> = {
       Accept: "application/json",
-      ...mHeaders,
+      ...customHeaders,
     };
 
     // POST body: form-encoded to match JSONModel (jQuery.ajax processData default).
     // JSONModel sends object params as "key=val&key2=val2" with
     // Content-Type: application/x-www-form-urlencoded. String params are sent as-is.
-    // Callers wanting JSON POST must stringify manually and set Content-Type via mHeaders.
+    // Callers wanting JSON POST must stringify manually and set Content-Type via customHeaders.
     let body: string | undefined;
-    if (sMethod !== "GET" && oParameters) {
+    if (method !== "GET" && parameters) {
       body =
-        typeof oParameters === "string" ? oParameters : new URLSearchParams(oParameters).toString();
-      if (!mHeaders?.["Content-Type"]) {
+        typeof parameters === "string" ? parameters : new URLSearchParams(parameters).toString();
+      if (!customHeaders?.["Content-Type"]) {
         headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
       }
     }
 
     this.fireRequestSent({
-      url: sURL,
-      type: sMethod,
+      url,
+      type: method,
       async: true,
-      info: sInfo,
-      infoObject: oInfoObject,
+      info,
+      infoObject,
     });
 
     // Combine the model's internal abort signal with any user-provided signal.
     // AbortSignal.any() fires when either signal aborts -- on destroy() or caller abort.
     // oxlint-disable-next-line typescript/no-non-null-assertion -- initialized in constructor
-    const signals = [this._abortController!.signal, oSignal].filter(Boolean) as AbortSignal[];
-    const combinedSignal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+    const abortSignals = [this._abortController!.signal, abortSignal].filter(
+      Boolean,
+    ) as AbortSignal[];
+    const combinedSignal =
+      abortSignals.length === 1 ? abortSignals[0] : AbortSignal.any(abortSignals);
 
-    const pImport = fetch(sFullURL, {
-      method: sMethod,
+    const importPromise = fetch(fullURL, {
+      method,
       headers,
       signal: combinedSignal,
       body,
@@ -150,49 +153,49 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     // Chain sequentially: wait for previous imports, then process this one.
     // Matches JSONModel's pSequentialImportCompleted pattern.
-    const pReturn = this._pImportChain.then(() =>
-      pImport.then(
+    const returnPromise = this._importChain.then(() =>
+      importPromise.then(
         (data: T) => {
-          if (bMerge) {
+          if (merge) {
             this.setData(data as Partial<T>, true);
           } else {
             this.setData(data);
           }
           this.fireRequestCompleted({
-            url: sURL,
-            type: sMethod,
+            url,
+            type: method,
             async: true,
-            info: sInfo,
-            infoObject: oInfoObject,
+            info,
+            infoObject,
             success: true,
           });
         },
         (error: Error & { statusCode?: number; statusText?: string; responseText?: string }) => {
-          const oError = {
+          const errorInfo = {
             message: error.message,
             statusCode: String(error.statusCode ?? 0),
             statusText: error.statusText ?? error.message,
             responseText: error.responseText ?? "",
           };
           this.fireRequestCompleted({
-            url: sURL,
-            type: sMethod,
+            url,
+            type: method,
             async: true,
-            info: sInfo,
-            infoObject: oInfoObject,
+            info,
+            infoObject,
             success: false,
-            errorobject: oError,
+            errorobject: errorInfo,
           });
-          this.fireRequestFailed(oError);
+          this.fireRequestFailed(errorInfo);
         },
       ),
     );
 
-    this._pImportChain = pReturn.catch(() => {
+    this._importChain = returnPromise.catch(() => {
       // Swallow errors so the chain stays alive for subsequent calls
     });
 
-    return pReturn;
+    return returnPromise;
   }
 
   /**
@@ -201,17 +204,17 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * JSONModel-compatible API.
    */
   dataLoaded(): Promise<void> {
-    return this._pImportChain;
+    return this._importChain;
   }
 
   /**
    * Set whether `loadData` calls should bypass the browser cache.
    * JSONModel-compatible API.
    *
-   * @param bForceNoCache When true, a cache-buster parameter is appended to every `loadData` URL.
+   * @param noCache When true, a cache-buster parameter is appended to every `loadData` URL.
    */
-  forceNoCache(bForceNoCache: boolean): void {
-    (this as unknown as { bCache: boolean }).bCache = !bForceNoCache;
+  forceNoCache(noCache: boolean): void {
+    (this as unknown as { bCache: boolean }).bCache = !noCache;
   }
 
   /**
@@ -224,16 +227,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /**
    * Parse a JSON string and set it as model data. JSONModel-compatible API.
    *
-   * @param sJSON JSON string to parse
-   * @param bMerge Whether to merge into existing data instead of replacing
+   * @param json JSON string to parse
+   * @param merge Whether to merge into existing data instead of replacing
    */
-  setJSON(sJSON: string, bMerge?: boolean): void {
+  setJSON(json: string, merge?: boolean): void {
     try {
-      const oData = JSON.parse(sJSON) as T;
-      if (bMerge) {
-        this.setData(oData as Partial<T>, true);
+      const data = JSON.parse(json) as T;
+      if (merge) {
+        this.setData(data as Partial<T>, true);
       } else {
-        this.setData(oData);
+        this.setData(data);
       }
     } catch (e) {
       Log.fatal(
@@ -252,19 +255,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
-  setData(oData: T): void;
-  setData(oData: Partial<T>, bMerge: true): void;
-  setData(oData: T | Partial<T>, bMerge?: boolean): void {
-    if (bMerge) {
+  setData(data: T): void;
+  setData(data: Partial<T>, merge: true): void;
+  setData(data: T | Partial<T>, merge?: boolean): void {
+    if (merge) {
       // In-place merge: walk the payload and apply changes directly to this.oData.
       // O(k) where k = payload size, instead of O(n) deep clone of all data.
       this._mergeInPlace(
         this.oData as Record<string, unknown>,
-        oData as Record<string, unknown>,
+        data as Record<string, unknown>,
         "",
       );
     } else {
-      this.oData = oData as T;
+      this.oData = data as T;
       this.registry.invalidateAll((path: string) => this._getObject(path));
     }
   }
@@ -273,79 +276,79 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return this.oData;
   }
 
-  getProperty<P extends string & ModelPath<T>>(sPath: P, oContext?: undefined): PathValue<T, P>;
-  getProperty(sPath: string, oContext?: object): unknown;
-  getProperty(sPath: string, oContext?: object): unknown {
+  getProperty<P extends string & ModelPath<T>>(path: P, context?: undefined): PathValue<T, P>;
+  getProperty(path: string, context?: object): unknown;
+  getProperty(path: string, context?: object): unknown {
     // Only resolve computed check for proper Context objects (not raw data items from FilterProcessor)
-    if (!oContext || typeof (oContext as Context).getPath === "function") {
-      const sResolvedPath = asInternal(this).resolve(sPath, oContext as Context | undefined);
-      if (sResolvedPath && this.registry.isComputed(sResolvedPath)) {
+    if (!context || typeof (context as Context).getPath === "function") {
+      const resolvedPath = asInternal(this).resolve(path, context as Context | undefined);
+      if (resolvedPath && this.registry.isComputed(resolvedPath)) {
         // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
-        return this.registry.get(sResolvedPath)!.get();
+        return this.registry.get(resolvedPath)!.get();
       }
     }
-    return this._getObject(sPath, oContext);
+    return this._getObject(path, context);
   }
 
   setProperty<P extends string & ModelPath<T>>(
-    sPath: P,
-    oValue: PathValue<T, P>,
-    oContext?: undefined,
-    bAsyncUpdate?: boolean,
+    path: P,
+    value: PathValue<T, P>,
+    context?: undefined,
+    asyncUpdate?: boolean,
   ): boolean;
-  setProperty(sPath: string, oValue: unknown, oContext?: Context, bAsyncUpdate?: boolean): boolean;
-  setProperty(sPath: string, oValue: unknown, oContext?: Context, bAsyncUpdate?: boolean): boolean {
-    const sResolvedPath = asInternal(this).resolve(sPath, oContext);
-    if (!sResolvedPath) {
+  setProperty(path: string, value: unknown, context?: Context, asyncUpdate?: boolean): boolean;
+  setProperty(path: string, value: unknown, context?: Context, asyncUpdate?: boolean): boolean {
+    const resolvedPath = asInternal(this).resolve(path, context);
+    if (!resolvedPath) {
       return false;
     }
 
-    const sComputedAncestor = this._findComputedAncestor(sResolvedPath);
-    if (sComputedAncestor) {
+    const computedAncestor = this._findComputedAncestor(resolvedPath);
+    if (computedAncestor) {
       Log.warning(
-        `Cannot set value at "${sResolvedPath}": ` +
-          (sComputedAncestor === sResolvedPath
+        `Cannot set value at "${resolvedPath}": ` +
+          (computedAncestor === resolvedPath
             ? "path is a computed signal (read-only)"
-            : `ancestor "${sComputedAncestor}" is a computed signal (read-only)`),
+            : `ancestor "${computedAncestor}" is a computed signal (read-only)`),
         undefined,
         "ui5.model.signal.SignalModel",
       );
       return false;
     }
 
-    if (sResolvedPath === "/") {
-      this.setData(oValue as T);
+    if (resolvedPath === "/") {
+      this.setData(value as T);
       return true;
     }
 
-    const iLastSlash = sResolvedPath.lastIndexOf("/");
-    const sObjectPath = sResolvedPath.substring(0, iLastSlash || 1);
-    const sPropertyName = sResolvedPath.substring(iLastSlash + 1);
+    const lastSlash = resolvedPath.lastIndexOf("/");
+    const objectPath = resolvedPath.substring(0, lastSlash || 1);
+    const propertyName = resolvedPath.substring(lastSlash + 1);
 
-    let oObject = this._getObject(sObjectPath) as Record<string, unknown> | undefined;
+    let parent = this._getObject(objectPath) as Record<string, unknown> | undefined;
 
-    if (!oObject) {
+    if (!parent) {
       if (!this.autoCreatePaths) {
         return false;
       }
-      oObject = this._createPath(sObjectPath);
+      parent = this._createPath(objectPath);
     }
 
-    if (this.strictLeafCheck && !(sPropertyName in oObject)) {
+    if (this.strictLeafCheck && !(propertyName in parent)) {
       return false;
     }
-    oObject[sPropertyName] = oValue;
+    parent[propertyName] = value;
 
     if (this.registry.size > 0) {
-      if (bAsyncUpdate) {
+      if (asyncUpdate) {
         // Deferred mode: skip signal notification, schedule a bulk sync.
         // This avoids 2000 synchronous notify callbacks during a batch
         // of setProperty calls -- the signals are synced once afterward.
         this._scheduleBulkSync();
       } else {
-        this.registry.set(sResolvedPath, oValue);
-        this._invalidateParentSignals(sResolvedPath);
-        this.registry.invalidateChildren(sResolvedPath, (path: string) => this._getObject(path));
+        this.registry.set(resolvedPath, value);
+        this._invalidateParentSignals(resolvedPath);
+        this.registry.invalidateChildren(resolvedPath, (p: string) => this._getObject(p));
       }
     }
 
@@ -373,59 +376,56 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
-  mergeProperty<P extends string & ModelPath<T>>(
-    sPath: P,
-    oValue: Partial<PathValue<T, P>>,
-  ): boolean;
-  mergeProperty(sPath: string, oValue: unknown, oContext?: Context): boolean;
-  mergeProperty(sPath: string, oValue: unknown, oContext?: Context): boolean {
-    const sResolvedPath = asInternal(this).resolve(sPath, oContext);
-    if (!sResolvedPath) {
+  mergeProperty<P extends string & ModelPath<T>>(path: P, value: Partial<PathValue<T, P>>): boolean;
+  mergeProperty(path: string, value: unknown, context?: Context): boolean;
+  mergeProperty(path: string, value: unknown, context?: Context): boolean {
+    const resolvedPath = asInternal(this).resolve(path, context);
+    if (!resolvedPath) {
       return false;
     }
 
     // Root path: delegate to setData with merge
-    if (sResolvedPath === "/") {
-      if (typeof oValue === "object" && oValue !== null) {
-        this.setData(oValue as T, true);
+    if (resolvedPath === "/") {
+      if (typeof value === "object" && value !== null) {
+        this.setData(value as T, true);
         return true;
       }
       return false;
     }
 
-    const sComputedAncestor = this._findComputedAncestor(sResolvedPath);
-    if (sComputedAncestor) {
+    const computedAncestor = this._findComputedAncestor(resolvedPath);
+    if (computedAncestor) {
       Log.warning(
-        `Cannot merge value at "${sResolvedPath}": ` +
-          (sComputedAncestor === sResolvedPath
+        `Cannot merge value at "${resolvedPath}": ` +
+          (computedAncestor === resolvedPath
             ? "path is a computed signal (read-only)"
-            : `ancestor "${sComputedAncestor}" is a computed signal (read-only)`),
+            : `ancestor "${computedAncestor}" is a computed signal (read-only)`),
         undefined,
         "ui5.model.signal.SignalModel",
       );
       return false;
     }
 
-    const existing = this._getObject(sResolvedPath);
-    if (existing && typeof existing === "object" && typeof oValue === "object" && oValue !== null) {
+    const existing = this._getObject(resolvedPath);
+    if (existing && typeof existing === "object" && typeof value === "object" && value !== null) {
       // In-place merge: walk the payload, compare, overwrite, and fire signals in one pass.
       // _mergeInPlace already calls _invalidateParentSignals internally.
       this._mergeInPlace(
         existing as Record<string, unknown>,
-        oValue as Record<string, unknown>,
-        sResolvedPath,
+        value as Record<string, unknown>,
+        resolvedPath,
       );
 
       return true;
     }
 
-    return this.setProperty(sPath, oValue, oContext);
+    return this.setProperty(path, value, context);
   }
 
   override bindProperty(
-    sPath: string,
-    oContext?: Context,
-    mParameters?: object,
+    path: string,
+    context?: Context,
+    parameters?: object,
   ): SignalPropertyBinding {
     // ClientPropertyBinding's constructor is protected in type stubs but callable from subclasses at runtime
     const binding = new (SignalPropertyBinding as unknown as new (
@@ -434,17 +434,17 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       path: string,
       context?: Context,
       params?: object,
-    ) => SignalPropertyBinding)(this, sPath, oContext, mParameters);
+    ) => SignalPropertyBinding)(this, path, context, parameters);
     binding.subscribe();
     return binding;
   }
 
   override bindList(
-    sPath: string,
-    oContext?: Context,
-    aSorters?: object | object[],
-    aFilters?: object | object[],
-    mParameters?: object,
+    path: string,
+    context?: Context,
+    sorters?: object | object[],
+    filters?: object | object[],
+    parameters?: object,
   ): SignalListBinding {
     const binding = new (SignalListBinding as unknown as new (
       // oxlint-disable-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
@@ -454,17 +454,17 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       sorters?: object | object[],
       filters?: object | object[],
       params?: object,
-    ) => SignalListBinding)(this, sPath, oContext, aSorters, aFilters, mParameters);
+    ) => SignalListBinding)(this, path, context, sorters, filters, parameters);
     binding.subscribe();
     return binding;
   }
 
   override bindTree(
-    sPath: string,
-    oContext?: Context,
-    aFilters?: object | object[],
-    mParameters?: object,
-    aSorters?: object | object[],
+    path: string,
+    context?: Context,
+    filters?: object | object[],
+    parameters?: object,
+    sorters?: object | object[],
   ): SignalTreeBinding {
     const binding = new (SignalTreeBinding as unknown as new (
       // oxlint-disable-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
@@ -474,202 +474,197 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       filters?: object | object[],
       params?: object,
       sorters?: object | object[],
-    ) => SignalTreeBinding)(this, sPath, oContext, aFilters, mParameters, aSorters);
+    ) => SignalTreeBinding)(this, path, context, filters, parameters, sorters);
     binding.subscribe();
     return binding;
   }
 
-  isList(sPath: string, oContext?: Context): boolean {
-    const sAbsolutePath = asInternal(this).resolve(sPath, oContext);
-    if (!sAbsolutePath) return false;
-    return Array.isArray(this._getObject(sAbsolutePath));
+  isList(path: string, context?: Context): boolean {
+    const absolutePath = asInternal(this).resolve(path, context);
+    if (!absolutePath) return false;
+    return Array.isArray(this._getObject(absolutePath));
   }
 
-  checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): void {
+  checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): void {
     // Signal-based bindings self-update via watchers, so routine polling
-    // (bForceUpdate=false) is unnecessary. However, the framework calls
+    // (forceUpdate=false) is unnecessary. However, the framework calls
     // checkUpdate(true) during context propagation (e.g. setBindingContext)
     // -- delegate to Model.prototype.checkUpdate so bindings re-evaluate.
-    if (bForceUpdate) {
+    if (forceUpdate) {
       (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
         this,
-        bForceUpdate,
-        bAsync,
+        forceUpdate,
+        asyncMode,
       );
     }
   }
 
   getSignal<P extends string & ModelPath<T>>(
-    sPath: P,
+    path: P,
   ): Signal.State<PathValue<T, P>> | Signal.Computed<PathValue<T, P>>;
-  getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown>;
-  getSignal(sPath: string): Signal.State<unknown> | Signal.Computed<unknown> {
-    const existing = this.registry.get(sPath);
+  getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown>;
+  getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown> {
+    const existing = this.registry.get(path);
     if (existing) return existing;
 
     // If a parent path is a computed signal, subscribe to it instead.
     // Search bottom-up (closest ancestor first) so bindings track the
     // most specific computed. Uses lastIndexOf to avoid array allocation.
     if (this.registry.hasComputeds) {
-      let idx = sPath.lastIndexOf("/");
+      let idx = path.lastIndexOf("/");
       while (idx > 0) {
-        const sParentPath = sPath.substring(0, idx);
-        if (this.registry.isComputed(sParentPath)) {
+        const parentPath = path.substring(0, idx);
+        if (this.registry.isComputed(parentPath)) {
           // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
-          return this.registry.get(sParentPath)!;
+          return this.registry.get(parentPath)!;
         }
-        idx = sPath.lastIndexOf("/", idx - 1);
+        idx = path.lastIndexOf("/", idx - 1);
       }
     }
 
-    return this.registry.getOrCreate(sPath, this._getObject(sPath));
+    return this.registry.getOrCreate(path, this._getObject(path));
   }
 
   createComputed(
-    sPath: string,
-    aDeps: string[],
+    path: string,
+    deps: string[],
     fn: (...args: unknown[]) => unknown,
   ): Signal.Computed<unknown> {
     // Ensure dependency signals exist before creating the computed.
     // Skip deps that already exist -- they may be computed signals from
     // a chained computed, and getOrCreate would shadow them with orphaned state signals.
-    for (const dep of aDeps) {
+    for (const dep of deps) {
       if (!this.registry.has(dep)) {
         this.registry.getOrCreate(dep, this._getObject(dep));
       }
     }
-    const result = this.registry.addComputed(sPath, aDeps, fn);
+    const result = this.registry.addComputed(path, deps, fn);
     // Re-subscribe any bindings that were watching a previous computed at this path.
     // No-op if no bindings exist (Map lookup returns undefined).
-    this._firePathResubscribe(sPath);
+    this._firePathResubscribe(path);
     return result;
   }
 
-  removeComputed(sPath: string): void {
-    this.registry.removeComputed(sPath);
+  removeComputed(path: string): void {
+    this.registry.removeComputed(path);
   }
 
-  _getObject(sPath: string, oContext?: object): unknown {
+  _getObject(path: string, context?: object): unknown {
     // If context is a raw data object (not a Context instance), navigate into it directly.
     // This is needed for FilterProcessor/SorterProcessor which pass raw list items as context.
-    if (oContext && typeof (oContext as Context).getPath !== "function") {
-      let oNode: unknown = oContext;
+    if (context && typeof (context as Context).getPath !== "function") {
+      let node: unknown = context;
       // Walk the path without allocating arrays. This branch is called
       // per-row during FilterProcessor/SorterProcessor operations.
       let start = 0;
-      while (start < sPath.length) {
-        if (sPath[start] === "/") {
+      while (start < path.length) {
+        if (path[start] === "/") {
           start++;
           continue;
         }
-        const end = sPath.indexOf("/", start);
-        const sPart = end === -1 ? sPath.substring(start) : sPath.substring(start, end);
-        if (oNode === null || oNode === undefined) return undefined;
-        oNode = (oNode as Record<string, unknown>)[sPart];
-        start = end === -1 ? sPath.length : end + 1;
+        const end = path.indexOf("/", start);
+        const part = end === -1 ? path.substring(start) : path.substring(start, end);
+        if (node === null || node === undefined) return undefined;
+        node = (node as Record<string, unknown>)[part];
+        start = end === -1 ? path.length : end + 1;
       }
-      return oNode;
+      return node;
     }
 
-    let oNode: unknown = this.oData;
+    let node: unknown = this.oData;
 
-    const sResolvedPath = asInternal(this).resolve(sPath, oContext as Context | undefined);
-    if (!sResolvedPath) {
+    const resolvedPath = asInternal(this).resolve(path, context as Context | undefined);
+    if (!resolvedPath) {
       return null;
     }
 
     // Computed signals live in the registry, not in oData.
     // Return the computed value so list/tree bindings can see it.
-    if (this.registry.isComputed(sResolvedPath)) {
+    if (this.registry.isComputed(resolvedPath)) {
       // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
-      return this.registry.get(sResolvedPath)!.get();
+      return this.registry.get(resolvedPath)!.get();
     }
 
-    if (sResolvedPath === "/") {
+    if (resolvedPath === "/") {
       return this.oData;
     }
 
-    const aParts = sResolvedPath.substring(1).split("/");
+    const parts = resolvedPath.substring(1).split("/");
     if (this.registry.hasComputeds) {
-      let sCurrentPath = "";
-      for (const sPart of aParts) {
-        if (!sPart) break;
-        sCurrentPath += "/" + sPart;
+      let currentPath = "";
+      for (const part of parts) {
+        if (!part) break;
+        currentPath += "/" + part;
 
-        if (this.registry.isComputed(sCurrentPath)) {
+        if (this.registry.isComputed(currentPath)) {
           // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
-          oNode = this.registry.get(sCurrentPath)!.get();
+          node = this.registry.get(currentPath)!.get();
           continue;
         }
 
-        if (oNode === null || oNode === undefined) {
-          return oNode;
+        if (node === null || node === undefined) {
+          return node;
         }
-        oNode = (oNode as Record<string, unknown>)[sPart];
+        node = (node as Record<string, unknown>)[part];
       }
     } else {
-      for (const sPart of aParts) {
-        if (!sPart) break;
-        if (oNode === null || oNode === undefined) {
-          return oNode;
+      for (const part of parts) {
+        if (!part) break;
+        if (node === null || node === undefined) {
+          return node;
         }
-        oNode = (oNode as Record<string, unknown>)[sPart];
+        node = (node as Record<string, unknown>)[part];
       }
     }
-    return oNode;
+    return node;
   }
 
   /**
    * Returns the computed ancestor path if the resolved path, or any ancestor
    * of it, is a computed signal. Returns `null` if no computed is in the path.
    */
-  private _findComputedAncestor(sResolvedPath: string): string | null {
+  private _findComputedAncestor(resolvedPath: string): string | null {
     if (!this.registry.hasComputeds) {
       return null;
     }
-    if (this.registry.isComputed(sResolvedPath)) {
-      return sResolvedPath;
+    if (this.registry.isComputed(resolvedPath)) {
+      return resolvedPath;
     }
-    const aParts = sResolvedPath.substring(1).split("/");
-    let sAncestor = "";
-    for (let i = 0; i < aParts.length - 1; i++) {
-      sAncestor += "/" + aParts[i];
-      if (this.registry.isComputed(sAncestor)) {
-        return sAncestor;
+    const parts = resolvedPath.substring(1).split("/");
+    let ancestor = "";
+    for (let i = 0; i < parts.length - 1; i++) {
+      ancestor += "/" + parts[i];
+      if (this.registry.isComputed(ancestor)) {
+        return ancestor;
       }
     }
     return null;
   }
 
-  private _createPath(sPath: string): Record<string, unknown> {
-    let oNode: Record<string, unknown> = this.oData as Record<string, unknown>;
-    const aParts = sPath.substring(1).split("/");
+  private _createPath(path: string): Record<string, unknown> {
+    let node: Record<string, unknown> = this.oData as Record<string, unknown>;
+    const parts = path.substring(1).split("/");
 
-    for (const sPart of aParts) {
-      if (
-        sPart === "" ||
-        sPart === "__proto__" ||
-        sPart === "constructor" ||
-        sPart === "prototype"
-      ) {
+    for (const part of parts) {
+      if (part === "" || part === "__proto__" || part === "constructor" || part === "prototype") {
         continue;
       }
-      if (!(sPart in oNode) || oNode[sPart] === null || oNode[sPart] === undefined) {
-        oNode[sPart] = {};
+      if (!(part in node) || node[part] === null || node[part] === undefined) {
+        node[part] = {};
       }
-      oNode = oNode[sPart] as Record<string, unknown>;
+      node = node[part] as Record<string, unknown>;
     }
-    return oNode;
+    return node;
   }
 
-  private _invalidateParentSignals(sPath: string): void {
-    let idx = sPath.lastIndexOf("/");
+  private _invalidateParentSignals(path: string): void {
+    let idx = path.lastIndexOf("/");
     while (idx > 0) {
-      const parentPath = sPath.substring(0, idx);
+      const parentPath = path.substring(0, idx);
       if (this.registry.has(parentPath)) {
         this.registry.set(parentPath, this._getObject(parentPath));
       }
-      idx = sPath.lastIndexOf("/", idx - 1);
+      idx = path.lastIndexOf("/", idx - 1);
     }
     // Check root
     if (this.registry.has("/")) {
