@@ -9,7 +9,33 @@ npm run start:bench                                        # browser — opens b
 npm run bench                                              # CLI — headless, streams to terminal
 npm run bench -- --bindings 1000 --iterations 500 --rounds 10
 npm run bench -- --bindings 2000 --json results.json       # save results as JSON
+npm run bench:stable                                       # CLI — multi-run stability analysis
 ```
+
+### Multi-run stability analysis
+
+`npm run bench:stable` runs the CLI benchmark multiple times and produces a merged table showing all runs side-by-side with per-scenario stability verdicts. This distinguishes stable performance wins from measurement noise.
+
+```bash
+npm run bench:stable                                       # 4 runs at 2000 bindings (defaults)
+npm run bench:stable -- --runs 6 --bindings 1000
+npm run bench:stable -- --runs 4 --json stability.json     # save merged results as JSON
+```
+
+| Flag             | Default | Description                     |
+| ---------------- | ------- | ------------------------------- |
+| `--runs N`       | `4`     | Number of benchmark runs        |
+| `--bindings N`   | `2000`  | Number of UI5 property bindings |
+| `--iterations N` | `500`   | Iterations per scenario         |
+| `--rounds N`     | `20`    | Measured rounds per run         |
+| `--json <file>`  | —       | Save merged results as JSON     |
+
+**Verdict logic:**
+
+- Each run is classified as `faster`, `slower`, or `~equal` using the same significance checks as the single-run CLI
+- `~equal` is neutral — ignored when determining consistency
+- If all non-equal runs agree (or all are `~equal`): **stable**
+- If both `faster` and `slower` appear: **noise**
 
 ### Browser mode
 
