@@ -11,6 +11,8 @@ type TreeBindingInternal = ClientTreeBinding & {
   sPath: string;
   oContext: Context | undefined;
   bSuspended: boolean;
+  _mLengthsCache: Record<string, number>;
+  applyFilter(): void;
   _fireChange(params: { reason: string }): void;
 };
 
@@ -39,6 +41,10 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     if (internal.bSuspended && !bForceUpdate) {
       return;
     }
+    // Match ClientTreeBinding.checkUpdate: reapply filters and clear length cache
+    // so tree controls get correct data after signal-driven updates.
+    internal.applyFilter();
+    internal._mLengthsCache = {};
     internal._fireChange({ reason: ChangeReason.Change });
   }
 

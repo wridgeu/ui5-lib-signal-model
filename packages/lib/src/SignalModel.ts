@@ -83,8 +83,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
     const sMethod = sType || "GET";
     let sFullURL = sURL;
-    const sInfo = "cache=" + bCache + ";bMerge=" + bMerge;
-    const oInfoObject = { cache: bCache, merge: bMerge };
+    // Fall back to model-level cache setting (set via forceNoCache), matching JSONModel.
+    const bEffectiveCache =
+      bCache === undefined ? (this as unknown as { bCache: boolean }).bCache : bCache;
+    const sInfo = "cache=" + bEffectiveCache + ";bMerge=" + bMerge;
+    const oInfoObject = { cache: bEffectiveCache, merge: bMerge };
 
     // Append parameters to URL for GET, matching JSONModel behavior
     if (oParameters && sMethod === "GET") {
@@ -93,17 +96,27 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       sFullURL += (sURL.includes("?") ? "&" : "?") + paramString;
     }
 
-    if (bCache === false) {
+    if (bEffectiveCache === false) {
       sFullURL += (sFullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
     }
 
     const headers: Record<string, string> = {
       Accept: "application/json",
-      ...(sMethod !== "GET" && oParameters && typeof oParameters !== "string"
-        ? { "Content-Type": "application/json" }
-        : {}),
       ...mHeaders,
     };
+
+    // POST body: form-encoded to match JSONModel (jQuery.ajax processData default).
+    // JSONModel sends object params as "key=val&key2=val2" with
+    // Content-Type: application/x-www-form-urlencoded. String params are sent as-is.
+    // Callers wanting JSON POST must stringify manually and set Content-Type via mHeaders.
+    let body: string | undefined;
+    if (sMethod !== "GET" && oParameters) {
+      body =
+        typeof oParameters === "string" ? oParameters : new URLSearchParams(oParameters).toString();
+      if (!mHeaders?.["Content-Type"]) {
+        headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
+      }
+    }
 
     this.fireRequestSent({
       url: sURL,
@@ -123,12 +136,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       method: sMethod,
       headers,
       signal: combinedSignal,
-      body:
-        sMethod !== "GET" && oParameters
-          ? typeof oParameters === "string"
-            ? oParameters
-            : JSON.stringify(oParameters)
-          : undefined,
+      body,
     }).then(async (res) => {
       if (!res.ok) {
         throw Object.assign(new Error(`HTTP ${res.status}: ${res.statusText}`), {
@@ -223,6 +231,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         undefined,
         "ui5.model.signal.SignalModel",
       );
+      this.fireParseError({
+        url: "",
+        errorCode: -1,
+        reason: "",
+        srcText: sJSON,
+        line: 0,
+        linepos: 0,
+      });
     }
   }
 
@@ -274,11 +290,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       return false;
     }
 
-    if (sResolvedPath === "/") {
-      this.setData(oValue as T);
-      return true;
-    }
-
     const sComputedAncestor = this._findComputedAncestor(sResolvedPath);
     if (sComputedAncestor) {
       Log.warning(
@@ -290,6 +301,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         "ui5.model.signal.SignalModel",
       );
       return false;
+    }
+
+    if (sResolvedPath === "/") {
+      this.setData(oValue as T);
+      return true;
     }
 
     const iLastSlash = sResolvedPath.lastIndexOf("/");
@@ -620,7 +636,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const aParts = sPath.substring(1).split("/");
 
     for (const sPart of aParts) {
-      if (sPart === "") continue;
+      if (
+        sPart === "" ||
+        sPart === "__proto__" ||
+        sPart === "constructor" ||
+        sPart === "prototype"
+      ) {
+        continue;
+      }
       if (!(sPart in oNode) || oNode[sPart] === null || oNode[sPart] === undefined) {
         oNode[sPart] = {};
       }
@@ -660,6 +683,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     basePath: string,
   ): void {
     for (const key of Object.keys(source)) {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+        continue;
+      }
       const childPath = basePath ? `${basePath}/${key}` : `/${key}`;
       const oldValue = target[key];
       const newValue = source[key];

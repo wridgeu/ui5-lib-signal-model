@@ -1,6 +1,7 @@
 import ClientPropertyBinding from "sap/ui/model/ClientPropertyBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
 import type Context from "sap/ui/model/Context";
+import deepEqual from "sap/base/util/deepEqual";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
 import { scheduleFlush, cancelFlush, teardownWatcher } from "./FlushQueue";
@@ -63,16 +64,17 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       return;
     }
 
-    if (self.oValue !== oValue) {
-      this.oModel.setProperty(self.sPath, oValue, self.oContext, true);
-      self.oValue = oValue;
-      self.getDataState().setValue(self.oValue);
-      this.oModel.firePropertyChange({
-        reason: ChangeReason.Binding,
-        path: self.sPath,
-        context: self.oContext,
-        value: oValue,
-      });
+    if (!deepEqual(self.oValue, oValue)) {
+      if (this.oModel.setProperty(self.sPath, oValue, self.oContext, true)) {
+        self.oValue = oValue;
+        self.getDataState().setValue(self.oValue);
+        this.oModel.firePropertyChange({
+          reason: ChangeReason.Binding,
+          path: self.sPath,
+          context: self.oContext,
+          value: oValue,
+        });
+      }
     }
   }
 

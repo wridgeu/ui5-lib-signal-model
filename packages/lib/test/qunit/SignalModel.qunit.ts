@@ -678,5 +678,47 @@ QUnit.module(
         }, 50);
       }, 50);
     });
+
+    // =========================================================================
+    // Prototype pollution guards
+    // =========================================================================
+
+    QUnit.test("setData merge skips __proto__ keys in payload", (assert) => {
+      const model = new SignalModel({ safe: 1 });
+      model.setData(JSON.parse('{"__proto__": {"polluted": true}, "safe": 2}'), true);
+      assert.strictEqual(model.getProperty("/safe"), 2, "safe key merged");
+      assert.strictEqual(
+        (Object.prototype as Record<string, unknown>)["polluted"],
+        undefined,
+        "Object.prototype not polluted via setData merge",
+      );
+      model.destroy();
+    });
+
+    QUnit.test("mergeProperty skips __proto__, constructor, prototype keys", (assert) => {
+      const model = new SignalModel({ target: { a: 1 } });
+      model.mergeProperty(
+        "/target",
+        JSON.parse(
+          '{"__proto__": {"x": 1}, "constructor": {"y": 2}, "prototype": {"z": 3}, "a": 99}',
+        ),
+      );
+      assert.strictEqual(model.getProperty("/target/a"), 99, "normal key merged");
+      assert.strictEqual(
+        (Object.prototype as Record<string, unknown>)["x"],
+        undefined,
+        "__proto__ key skipped",
+      );
+      model.destroy();
+    });
+
+    QUnit.test("setProperty('/') checks computed ancestor before root write", (assert) => {
+      const model = new SignalModel({ val: 1 });
+      model.createComputed("/", ["/val"], (v) => v);
+      const result = model.setProperty("/", { val: 2 });
+      assert.strictEqual(result, false, "setProperty('/') blocked by root computed");
+      model.removeComputed("/");
+      model.destroy();
+    });
   },
 );

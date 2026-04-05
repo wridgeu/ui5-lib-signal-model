@@ -15,6 +15,7 @@ type ListBindingInternal = ClientListBinding & {
   sPath: string;
   oContext: Context | undefined;
   bSuspended: boolean;
+  bIgnoreSuspend: boolean;
   updateIndices(): void;
   applyFilter(): void;
   applySort(): void;
@@ -71,7 +72,7 @@ export default class SignalListBinding extends ClientListBinding {
 
   checkUpdate(bForceUpdate?: boolean): void {
     const internal = asInternal(this);
-    if (internal.bSuspended && !bForceUpdate) {
+    if (internal.bSuspended && !internal.bIgnoreSuspend && !bForceUpdate) {
       return;
     }
     this.update();

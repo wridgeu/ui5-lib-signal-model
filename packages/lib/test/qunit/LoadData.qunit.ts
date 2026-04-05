@@ -435,4 +435,88 @@ QUnit.module("loadData", () => {
       done();
     }, 200);
   });
+
+  // =========================================================================
+  // POST encoding parity with JSONModel
+  // =========================================================================
+
+  QUnit.test("POST with object params sends form-encoded body, not JSON", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+    const params = { key: "value", num: "42" };
+
+    // Intercept fetch to verify request format
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (_input: RequestInfo | URL, init?: RequestInit) => {
+      const req = init!;
+      const body = req.body as string;
+      const contentType = (req.headers as Record<string, string>)["Content-Type"] || "";
+
+      assert.ok(
+        contentType.startsWith("application/x-www-form-urlencoded"),
+        `Content-Type is form-encoded (got: ${contentType})`,
+      );
+      assert.strictEqual(body, "key=value&num=42", "body is URL-encoded, not JSON");
+      assert.notOk(body.startsWith("{"), "body is not JSON");
+
+      globalThis.fetch = origFetch;
+      model.destroy();
+      done();
+      // Return a resolved response so the model doesn't error
+      return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+    };
+
+    model.loadData(SAMPLE_URL, params, undefined, "POST");
+  });
+
+  QUnit.test(
+    "POST with string params sends body as-is with form-encoded Content-Type",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel<Record<string, unknown>>();
+      const rawBody = "custom=body&foo=bar";
+
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = (_input: RequestInfo | URL, init?: RequestInit) => {
+        const req = init!;
+        const body = req.body as string;
+        const contentType = (req.headers as Record<string, string>)["Content-Type"] || "";
+
+        assert.strictEqual(body, rawBody, "string body sent as-is");
+        assert.ok(
+          contentType.startsWith("application/x-www-form-urlencoded"),
+          `Content-Type is form-encoded for string body (got: ${contentType})`,
+        );
+
+        globalThis.fetch = origFetch;
+        model.destroy();
+        done();
+        return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+      };
+
+      model.loadData(SAMPLE_URL, rawBody, undefined, "POST");
+    },
+  );
+
+  QUnit.test("GET with object params appends to URL, not body", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel<Record<string, unknown>>();
+    const params = { q: "test", page: "1" };
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      assert.ok(url.includes("q=test"), "query param q in URL");
+      assert.ok(url.includes("page=1"), "query param page in URL");
+      assert.strictEqual(init!.body, undefined, "GET has no body");
+
+      globalThis.fetch = origFetch;
+      model.destroy();
+      done();
+      return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+    };
+
+    model.loadData(SAMPLE_URL, params);
+  });
 });
