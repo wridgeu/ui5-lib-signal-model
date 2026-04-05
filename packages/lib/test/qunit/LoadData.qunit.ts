@@ -3,7 +3,7 @@ import JSONModel from "sap/ui/model/json/JSONModel";
 
 const BASE = "/test-resources/ui5/model/signal/qunit/testdata";
 const SAMPLE_URL = `${BASE}/sample.json`;
-const MALFORMED_URL = `${BASE}/malformed.json`;
+const MALFORMED_URL = `${BASE}/malformed.txt`;
 const MERGE_URL = `${BASE}/merge.json`;
 const BAD_URL = `${BASE}/does-not-exist.json`;
 
@@ -260,22 +260,25 @@ QUnit.module("loadData", () => {
   // Sequential loading (JSONModel parity: pSequentialImportCompleted)
   // =========================================================================
 
-  QUnit.test("multiple loadData calls execute sequentially — last data wins (no merge)", (assert) => {
-    const done = assert.async();
-    const model = new SignalModel<Record<string, unknown>>();
+  QUnit.test(
+    "multiple loadData calls execute sequentially — last data wins (no merge)",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel<Record<string, unknown>>();
 
-    // Two loads: second overwrites first
-    model.loadData(SAMPLE_URL);
-    model.loadData(MERGE_URL);
+      // Two loads: second overwrites first
+      model.loadData(SAMPLE_URL);
+      model.loadData(MERGE_URL);
 
-    model.dataLoaded().then(() => {
-      // merge.json contains { age: 30, customer: { ... } } — sample.json's /name should be gone
-      assert.strictEqual(model.getProperty("/age"), 30, "second load data present");
-      assert.strictEqual(model.getProperty("/name"), undefined, "first load data overwritten");
-      model.destroy();
-      done();
-    });
-  });
+      model.dataLoaded().then(() => {
+        // merge.json contains { age: 30, customer: { ... } } — sample.json's /name should be gone
+        assert.strictEqual(model.getProperty("/age"), 30, "second load data present");
+        assert.strictEqual(model.getProperty("/name"), undefined, "first load data overwritten");
+        model.destroy();
+        done();
+      });
+    },
+  );
 
   QUnit.test("multiple loadData calls with merge — data accumulates", (assert) => {
     const done = assert.async();
@@ -380,7 +383,16 @@ QUnit.module("loadData", () => {
       done();
     });
 
-    model.loadData(SAMPLE_URL, undefined, undefined, undefined, undefined, undefined, undefined, controller.signal);
+    model.loadData(
+      SAMPLE_URL,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
     controller.abort();
   });
 
