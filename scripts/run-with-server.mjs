@@ -24,9 +24,14 @@ async function waitForServer(url, maxAttempts = 60) {
   throw new Error(`Server not ready at ${url} after ${maxAttempts}s`);
 }
 
+const isWin = platform() === "win32";
 const server = spawn("npm", ["run", serverScript], {
   stdio: "pipe",
   shell: true,
+  // On Unix, create a process group so we can kill the entire tree
+  // (npm + ui5 serve) with process.kill(-pid). Not needed on Windows
+  // where taskkill /T handles tree killing.
+  detached: !isWin,
 });
 
 server.stdout.pipe(process.stdout);
@@ -51,13 +56,19 @@ try {
   // On Windows, server.kill() only kills the npm process, not the child
   // ui5 serve process (no SIGTERM propagation). Use taskkill /T to kill
   // the entire process tree and avoid orphaned servers on port 8080.
-  if (platform() === "win32") {
+  if (isWin) {
     try {
       execSync(`taskkill /pid ${server.pid} /T /F`, { stdio: "ignore" });
     } catch {
       // Process may have already exited
     }
   } else {
-    server.kill();
+    // Kill the entire process group so child processes (ui5 serve) don't
+    // survive as orphans and block the CI step from completing.
+    try {
+      process.kill(-server.pid, "SIGTERM");
+    } catch {
+      server.kill();
+    }
   }
 }
