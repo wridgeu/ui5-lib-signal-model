@@ -405,7 +405,7 @@ npm run bench -- --bindings 1000 --json results.json   # custom config + JSON ex
 
 The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected sample statistics, and a three-stage async flush protocol. It directly measures the `checkUpdate` bottleneck documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-With default synchronous `setProperty`, **"Update all N bindings"** shows ~17x improvement at 2000 bindings (854ms vs 49ms). The advantage scales super-linearly: JSONModel's cost is O(*n*²) (2000 calls × 2000 bindings checked each), while SignalModel's is O(_n_) (2000 notifications, one per changed path).
+With default synchronous `setProperty`, **"Update all N bindings"** shows ~17x improvement at 2000 bindings (824ms vs 49ms). The advantage scales super-linearly: JSONModel's cost is O(*n*²) (2000 calls × 2000 bindings checked each), while SignalModel's is O(_n_) (2000 notifications, one per changed path).
 
 With JSONModel's `bAsyncUpdate=true`, both models perform equivalently (~19ms each at 2000 bindings). SignalModel defers signal notifications when `bAsyncUpdate` is set, writing data immediately and syncing all signals in a single `setTimeout` pass — matching JSONModel's batching strategy.
 
