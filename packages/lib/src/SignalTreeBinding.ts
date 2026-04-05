@@ -11,7 +11,6 @@ import { scheduleFlush, cancelFlush, teardownWatcher } from "./FlushQueue";
 type TreeBindingInternal = ClientTreeBinding & {
   sPath: string;
   oContext: Context | undefined;
-  bSuspended: boolean;
   oTreeData: unknown;
   _mLengthsCache: Record<string, number>;
   applyFilter(): void;
@@ -21,7 +20,7 @@ type TreeBindingInternal = ClientTreeBinding & {
 
 /**
  * Casts to an internal type that includes UI5 runtime properties not exposed
- * by `@openui5/types` (e.g. `sPath`, `bSuspended`, `_fireChange`).
+ * by `@openui5/types` (e.g. `sPath`, `oTreeData`, `_fireChange`).
  */
 function asInternal(self: SignalTreeBinding): TreeBindingInternal {
   return self as unknown as TreeBindingInternal;
@@ -41,9 +40,10 @@ export default class SignalTreeBinding extends ClientTreeBinding {
 
   checkUpdate(bForceUpdate?: boolean): void {
     const internal = asInternal(this);
-    if (internal.bSuspended && !bForceUpdate) {
-      return;
-    }
+    // No bSuspended guard: ClientTreeBinding/JSONTreeBinding do not support
+    // suspend/resume. The base Binding.suspend() sets the flag but tree
+    // bindings ignore it. We match that behavior for parity.
+    //
     // Match ClientTreeBinding.checkUpdate: reapply filters, clear length cache,
     // and only fire change when data actually changed (or forced).
     const oCurrentTreeData = this.oModel._getObject(internal.sPath, internal.oContext);

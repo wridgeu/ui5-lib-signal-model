@@ -205,6 +205,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   /**
+   * Set whether `loadData` calls should bypass the browser cache.
+   * JSONModel-compatible API.
+   *
+   * @param bForceNoCache When true, a cache-buster parameter is appended to every `loadData` URL.
+   */
+  forceNoCache(bForceNoCache: boolean): void {
+    (this as unknown as { bCache: boolean }).bCache = !bForceNoCache;
+  }
+
+  /**
    * Serialize model data as a JSON string. JSONModel-compatible API.
    */
   getJSON(): string {

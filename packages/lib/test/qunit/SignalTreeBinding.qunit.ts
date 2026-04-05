@@ -168,10 +168,10 @@ QUnit.module("SignalTreeBinding", () => {
   });
 
   // =========================================================================
-  // Suspended tree binding
+  // Tree bindings do NOT support suspend/resume (parity with JSONTreeBinding)
   // =========================================================================
 
-  QUnit.test("suspended tree binding does not fire", (assert) => {
+  QUnit.test("suspend has no effect on tree binding (parity with JSONTreeBinding)", (assert) => {
     const done = assert.async();
     const model = new SignalModel({
       tree: [{ name: "Root" }],
@@ -186,36 +186,15 @@ QUnit.module("SignalTreeBinding", () => {
     model.setProperty("/tree", [{ name: "Root" }, { name: "New" }]);
 
     setTimeout(() => {
-      assert.strictEqual(changeCount, 0, "no event while suspended");
+      // Tree bindings ignore bSuspended -- change fires regardless, matching JSONTreeBinding
+      assert.ok(
+        changeCount > 0,
+        "change fires even while 'suspended' -- tree bindings do not support suspend",
+      );
+      const roots = binding.getRootContexts();
+      assert.strictEqual(roots.length, 2, "tree updated despite suspend");
       model.destroy();
       done();
-    }, 50);
-  });
-
-  QUnit.test("resume fires pending update for tree binding", (assert) => {
-    const done = assert.async();
-    const model = new SignalModel({
-      tree: [{ name: "Root" }],
-    });
-    const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
-    binding.getRootContexts();
-    let changeCount = 0;
-
-    binding.attachChange(() => changeCount++);
-    binding.suspend();
-
-    model.setProperty("/tree", [{ name: "Root" }, { name: "New" }]);
-
-    setTimeout(() => {
-      assert.strictEqual(changeCount, 0, "no change while suspended");
-      binding.resume();
-      setTimeout(() => {
-        assert.ok(changeCount > 0, "change fired on resume");
-        const roots = binding.getRootContexts();
-        assert.strictEqual(roots.length, 2, "tree has 2 roots after resume");
-        model.destroy();
-        done();
-      }, 50);
     }, 50);
   });
 
