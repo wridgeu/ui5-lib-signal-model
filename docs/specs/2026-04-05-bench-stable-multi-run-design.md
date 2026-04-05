@@ -1,7 +1,5 @@
 # Multi-Run Stability Script Design
 
-**Issue:** [#14 — bench: add multi-run stability script with merged results table](https://github.com/wridgeu/ui5-lib-signal-model/issues/14)
-
 ## Problem
 
 Benchmark results vary across runs due to JIT warm-up, GC pauses, thermal throttling, and background activity. A single run cannot distinguish stable performance wins from measurement noise. Manual multi-run comparison is tedious and error-prone.
