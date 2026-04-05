@@ -1,6 +1,6 @@
 <mvc:View
 	controllerName="demo.app.controller.Comparison"
-	xmlns:mvc="sap.ui.core"
+	xmlns:mvc="sap.ui.core.mvc"
 	xmlns="sap.m"
 	xmlns:f="sap.ui.layout.form"
 	xmlns:l="sap.ui.layout">

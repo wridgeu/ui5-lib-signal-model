@@ -3,14 +3,13 @@ import ChangeReason from "sap/ui/model/ChangeReason";
 import type Context from "sap/ui/model/Context";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
-import { scheduleFlush, cancelFlush } from "./FlushQueue";
+import { scheduleFlush, cancelFlush, teardownWatcher } from "./FlushQueue";
 
 // Runtime properties/methods not exposed by @openui5/types.
 // getResolvedPath, isRelative are on the public API and don't need casting.
 type TreeBindingInternal = ClientTreeBinding & {
   sPath: string;
   oContext: Context | undefined;
-  oModel: SignalModel;
   bSuspended: boolean;
   _fireChange(params: { reason: string }): void;
 };
@@ -30,6 +29,7 @@ function asInternal(self: SignalTreeBinding): TreeBindingInternal {
  * @namespace ui5.model.signal
  */
 export default class SignalTreeBinding extends ClientTreeBinding {
+  declare oModel: SignalModel;
   watcher: Signal.subtle.Watcher | null = null;
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
@@ -48,8 +48,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;
 
-    const internal = asInternal(this);
-    const signal = internal.oModel.getSignal(resolvedPath);
+    const signal = this.oModel.getSignal(resolvedPath);
 
     this.watcher = new Signal.subtle.Watcher(() => {
       scheduleFlush(this, signal);
@@ -58,23 +57,17 @@ export default class SignalTreeBinding extends ClientTreeBinding {
 
     this._subscribedPath = resolvedPath;
     this._resubscribeCb = () => this.subscribe();
-    internal.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
+    this.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
   }
 
   unsubscribe(): void {
     if (this._resubscribeCb && this._subscribedPath) {
-      asInternal(this).oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
+      this.oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
       this._resubscribeCb = null;
       this._subscribedPath = null;
     }
     cancelFlush(this);
-    if (this.watcher) {
-      const sources = Signal.subtle.introspectSources(this.watcher);
-      if (sources.length) {
-        this.watcher.unwatch(...sources);
-      }
-      this.watcher = null;
-    }
+    this.watcher = teardownWatcher(this.watcher);
   }
 
   override initialize(): this {

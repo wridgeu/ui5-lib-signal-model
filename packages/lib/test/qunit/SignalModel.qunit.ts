@@ -134,11 +134,20 @@ QUnit.module(
       model.destroy();
     });
 
-    QUnit.test("checkUpdate is a no-op", (assert) => {
+    QUnit.test("checkUpdate without force is a no-op", (assert) => {
+      const done = assert.async();
       const model = new SignalModel({ name: "Alice" });
+      const binding = model.bindProperty("/name");
+      let changeCount = 0;
+
+      binding.attachChange(() => changeCount++);
       model.checkUpdate();
-      assert.ok(true, "checkUpdate completes without error");
-      model.destroy();
+
+      setTimeout(() => {
+        assert.strictEqual(changeCount, 0, "no binding notification from checkUpdate()");
+        model.destroy();
+        done();
+      }, 50);
     });
 
     QUnit.test("getSignal returns the signal for a path", (assert) => {
@@ -255,7 +264,7 @@ QUnit.module(
 
       // After destroy, setting property should not notify binding
       // (registry is cleared, signals no longer exist).
-      // setProperty may throw or silently succeed — either is acceptable.
+      // setProperty may throw or silently succeed -- either is acceptable.
       // The key assertion is that changeCount stays 0 regardless.
       let threw = false;
       try {
@@ -267,7 +276,7 @@ QUnit.module(
       setTimeout(() => {
         assert.strictEqual(changeCount, 0, "no change events after destroy");
         if (!threw) {
-          assert.ok(true, "setProperty did not throw — cleanup prevented notification");
+          assert.ok(true, "setProperty did not throw -- cleanup prevented notification");
         }
         done();
       }, 50);
@@ -313,7 +322,7 @@ QUnit.module(
 
     QUnit.test("getProperty with null path returns null (JSONModel parity)", (assert) => {
       const model = new SignalModel({ name: "Alice" });
-      // @ts-expect-error — testing runtime behavior with null path
+      // @ts-expect-error -- testing runtime behavior with null path
       const result = model.getProperty(null);
       assert.strictEqual(result, null, "null path returns null");
       model.destroy();
@@ -324,7 +333,7 @@ QUnit.module(
         teamMembers: [{ firstName: "Alice" }, { firstName: "Bob" }],
       });
       const ctx = model.createBindingContext("/teamMembers");
-      // @ts-expect-error — testing runtime behavior with null path
+      // @ts-expect-error -- testing runtime behavior with null path
       const result = model.getProperty(null, ctx);
       assert.ok(Array.isArray(result), "returns the array at context path");
       assert.strictEqual(
@@ -371,7 +380,7 @@ QUnit.module(
     // Two models on the same control (JSONModel parity)
     // =========================================================================
 
-    QUnit.test("createBindingContext with two models — child model takes precedence", (assert) => {
+    QUnit.test("createBindingContext with two models -- child model takes precedence", (assert) => {
       const done = assert.async();
       const parentModel = new SignalModel({
         teamMembers: [{ firstName: "Alice" }],
@@ -409,7 +418,7 @@ QUnit.module(
     // Context inheritance (JSONModel parity)
     // =========================================================================
 
-    QUnit.test("context inheritance — child inherits parent context via model", (assert) => {
+    QUnit.test("context inheritance -- child inherits parent context via model", (assert) => {
       const done = assert.async();
       const model = new SignalModel({
         pets: [{ type: "ape" }, { type: "bird" }],
@@ -479,7 +488,7 @@ QUnit.module(
       }, 50);
     });
 
-    QUnit.test("bindElement before setBindingContext — order independent", (assert) => {
+    QUnit.test("bindElement before setBindingContext -- order independent", (assert) => {
       const model = new SignalModel({
         data: {
           level1: { text: "L1", level2: { text: "L2" } },

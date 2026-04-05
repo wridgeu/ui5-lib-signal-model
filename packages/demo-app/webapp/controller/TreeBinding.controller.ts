@@ -1,10 +1,10 @@
-import Controller from "sap/ui/core/mvc/Controller";
 import SignalModel from "ui5/model/signal/SignalModel";
+import BaseController from "./BaseController";
 
 /**
  * @namespace demo.app.controller
  */
-export default class TreeBinding extends Controller {
+export default class TreeBinding extends BaseController {
   private treeModel: SignalModel | null = null;
 
   override onInit(): void {
@@ -37,8 +37,8 @@ export default class TreeBinding extends Controller {
   }
 
   onAddEmployee(): void {
-    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
-    const model = this.getView()!.getModel("tree") as SignalModel;
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- assigned in onInit
+    const model = this.treeModel!;
     const ctoReports = model.getProperty("/org/0/reports/0/reports") as unknown[];
     const updated = [...ctoReports, { name: "New Hire", role: "Developer", reports: [] }];
     model.setProperty("/org/0/reports/0/reports", updated);

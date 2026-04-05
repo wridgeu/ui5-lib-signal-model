@@ -160,7 +160,7 @@ QUnit.module("ComputedSignals", () => {
       model.removeComputed("/result");
       model.createComputed("/result", ["/a"], (a) => (a as number) * 3);
 
-      // Trigger a dependency change — binding should see the new formula
+      // Trigger a dependency change -- binding should see the new formula
       binding.attachChange(() => {
         assert.strictEqual(binding.getValue(), 21, "binding sees new computed (7 * 3 = 21)");
         model.destroy();
@@ -181,7 +181,7 @@ QUnit.module("ComputedSignals", () => {
       const binding = model.bindProperty("/result");
       assert.strictEqual(binding.getValue(), 15, "binding reads original computed");
 
-      // Redefine with DIFFERENT dependencies — the real test.
+      // Redefine with DIFFERENT dependencies -- the real test.
       // Without re-subscribe, changing /b would never fire the old watcher.
       model.removeComputed("/result");
       model.createComputed("/result", ["/b"], (b) => (b as number) * 2);
@@ -192,7 +192,7 @@ QUnit.module("ComputedSignals", () => {
         done();
       });
 
-      // Change the NEW dependency — binding must update
+      // Change the NEW dependency -- binding must update
       model.setProperty("/b", 200);
     },
   );
@@ -242,7 +242,7 @@ QUnit.module("ComputedSignals", () => {
       done();
     });
 
-    // Make Bob active — the computed should re-evaluate
+    // Make Bob active -- the computed should re-evaluate
     model.setProperty("/items", [
       { name: "Alice", active: true },
       { name: "Bob", active: true },
@@ -408,7 +408,7 @@ QUnit.module("ComputedSignals", () => {
     }, 50);
   });
 
-  QUnit.test("list binding on computed array — relative getProperty", (assert) => {
+  QUnit.test("list binding on computed array -- relative getProperty", (assert) => {
     const model = new SignalModel({
       items: [
         { name: "Alice", active: true },
@@ -467,7 +467,7 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
-  QUnit.test("computed returning null — sub-path returns null", (assert) => {
+  QUnit.test("computed returning null -- sub-path returns null", (assert) => {
     const model = new SignalModel({ x: 1 });
     model.createComputed("/nullable", ["/x"], () => null);
 
@@ -479,7 +479,7 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
-  QUnit.test("computed returning primitive — sub-path returns undefined", (assert) => {
+  QUnit.test("computed returning primitive -- sub-path returns undefined", (assert) => {
     const model = new SignalModel({ x: 1 });
     model.createComputed("/prim", ["/x"], (x) => (x as number) * 2);
 
@@ -530,7 +530,7 @@ QUnit.module("ComputedSignals", () => {
   // List/tree binding computed sub-path edge cases
   // =========================================================================
 
-  QUnit.test("list binding on computed — item property change propagates", (assert) => {
+  QUnit.test("list binding on computed -- item property change propagates", (assert) => {
     const done = assert.async();
     const model = new SignalModel({
       items: [
@@ -564,7 +564,7 @@ QUnit.module("ComputedSignals", () => {
     ]);
   });
 
-  QUnit.test("list binding on computed — item removal propagates", (assert) => {
+  QUnit.test("list binding on computed -- item removal propagates", (assert) => {
     const done = assert.async();
     const model = new SignalModel({
       items: [
@@ -595,7 +595,7 @@ QUnit.module("ComputedSignals", () => {
     ]);
   });
 
-  QUnit.test("list binding on computed — complete list replacement", (assert) => {
+  QUnit.test("list binding on computed -- complete list replacement", (assert) => {
     const done = assert.async();
     const model = new SignalModel({
       items: [{ name: "Alice" }, { name: "Bob" }],
@@ -649,7 +649,7 @@ QUnit.module("ComputedSignals", () => {
     }, 50);
   });
 
-  QUnit.test("tree binding on computed — sub-path getProperty on nodes", (assert) => {
+  QUnit.test("tree binding on computed -- sub-path getProperty on nodes", (assert) => {
     const model = new SignalModel({
       rawNodes: [
         { name: "Root", children: [{ name: "Child A", children: [] }] },
@@ -686,7 +686,7 @@ QUnit.module("ComputedSignals", () => {
       model.removeComputed("/c");
       model.createComputed("/c", ["/y"], (y) => ({ name: "y=" + (y as number) }));
 
-      // Change the NEW dependency — sub-path binding must see it
+      // Change the NEW dependency -- sub-path binding must see it
       model.setProperty("/y", 200);
 
       setTimeout(() => {
@@ -721,13 +721,13 @@ QUnit.module("ComputedSignals", () => {
         done();
       });
 
-      // Change the NEW dependency — list binding must see it
+      // Change the NEW dependency -- list binding must see it
       model.setProperty("/y", [10, 20, 30, 40]);
     },
   );
 
   // =========================================================================
-  // Resubscription safety — recursion / reentrant edge cases
+  // Resubscription safety -- recursion / reentrant edge cases
   // =========================================================================
 
   QUnit.test(
@@ -749,7 +749,7 @@ QUnit.module("ComputedSignals", () => {
       assert.strictEqual(bindingB.getValue(), "x-b-1", "initial b");
       assert.strictEqual(bindingC.getValue(), "x-c-1", "initial c");
 
-      // Redefine with different deps — triggers _firePathResubscribe
+      // Redefine with different deps -- triggers _firePathResubscribe
       // which must snapshot sub-path entries to avoid infinite loop
       model.removeComputed("/obj");
       model.createComputed("/obj", ["/y"], (y) => ({
@@ -771,7 +771,7 @@ QUnit.module("ComputedSignals", () => {
   );
 
   QUnit.test(
-    "chained computed redefine — both levels redefined, downstream binding updates",
+    "chained computed redefine -- both levels redefined, downstream binding updates",
     (assert) => {
       const done = assert.async();
       const model = new SignalModel({ x: 5, y: 100 });
@@ -782,7 +782,7 @@ QUnit.module("ComputedSignals", () => {
       const binding = model.bindProperty("/derived");
       assert.strictEqual(binding.getValue(), 11, "initial: (5*2)+1 = 11");
 
-      // Redefine both levels — each removeComputed+createComputed triggers
+      // Redefine both levels -- each removeComputed+createComputed triggers
       // _firePathResubscribe so bindings re-wire to the new signal objects
       model.removeComputed("/derived");
       model.removeComputed("/base");
@@ -807,7 +807,7 @@ QUnit.module("ComputedSignals", () => {
     const binding = model.bindProperty("/val");
     assert.strictEqual(binding.getValue(), "a=1", "initial");
 
-    // Rapid redefine — 3 times without waiting
+    // Rapid redefine -- 3 times without waiting
     model.removeComputed("/val");
     model.createComputed("/val", ["/b"], (b) => "b=" + (b as number));
 

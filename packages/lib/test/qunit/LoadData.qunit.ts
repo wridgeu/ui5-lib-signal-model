@@ -26,7 +26,7 @@ QUnit.module("loadData", () => {
   });
 
   // =========================================================================
-  // loadData — basic
+  // loadData -- basic
   // =========================================================================
 
   QUnit.test("loadData loads JSON and sets model data", (assert) => {
@@ -261,7 +261,7 @@ QUnit.module("loadData", () => {
   // =========================================================================
 
   QUnit.test(
-    "multiple loadData calls execute sequentially — last data wins (no merge)",
+    "multiple loadData calls execute sequentially -- last data wins (no merge)",
     (assert) => {
       const done = assert.async();
       const model = new SignalModel<Record<string, unknown>>();
@@ -271,7 +271,7 @@ QUnit.module("loadData", () => {
       model.loadData(MERGE_URL);
 
       model.dataLoaded().then(() => {
-        // merge.json contains { age: 30, customer: { ... } } — sample.json's /name should be gone
+        // merge.json contains { age: 30, customer: { ... } } -- sample.json's /name should be gone
         assert.strictEqual(model.getProperty("/age"), 30, "second load data present");
         assert.strictEqual(model.getProperty("/name"), undefined, "first load data overwritten");
         model.destroy();
@@ -280,7 +280,7 @@ QUnit.module("loadData", () => {
     },
   );
 
-  QUnit.test("multiple loadData calls with merge — data accumulates", (assert) => {
+  QUnit.test("multiple loadData calls with merge -- data accumulates", (assert) => {
     const done = assert.async();
     const model = new SignalModel<Record<string, unknown>>();
 
@@ -296,7 +296,7 @@ QUnit.module("loadData", () => {
     });
   });
 
-  QUnit.test("dataLoaded resolves after all pending calls — not just the last", (assert) => {
+  QUnit.test("dataLoaded resolves after all pending calls -- not just the last", (assert) => {
     const done = assert.async();
     const model = new SignalModel<Record<string, unknown>>();
     let completedCount = 0;
@@ -314,7 +314,7 @@ QUnit.module("loadData", () => {
   });
 
   // =========================================================================
-  // Error handling — event parameters
+  // Error handling -- event parameters
   // =========================================================================
 
   QUnit.test("requestFailed includes statusCode and statusText", (assert) => {
@@ -422,11 +422,11 @@ QUnit.module("loadData", () => {
     const model = new SignalModel<Record<string, unknown>>({ name: "before" });
     model.destroy();
 
-    // loadData on a destroyed model — should not update data or throw
+    // loadData on a destroyed model -- should not update data or throw
     try {
       model.loadData(SAMPLE_URL);
     } catch {
-      // may throw — that's acceptable
+      // may throw -- that's acceptable
     }
 
     setTimeout(() => {

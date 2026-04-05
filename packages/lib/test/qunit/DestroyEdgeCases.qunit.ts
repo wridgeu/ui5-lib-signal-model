@@ -54,65 +54,53 @@ QUnit.module("Destroy Edge Cases", () => {
     model.destroy();
   });
 
-  QUnit.test("getProperty after destroy returns undefined", (assert) => {
+  QUnit.test("getProperty after destroy does not crash", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.destroy();
 
     // After destroy, registry is cleared and model may be in a broken state.
-    // We just verify it doesn't throw unrecoverably.
-    let threw = false;
+    // Either returning a value or throwing is acceptable -- verify no unrecoverable crash.
     try {
       model.getProperty("/name");
+      assert.ok(true, "getProperty did not throw after destroy");
     } catch {
-      threw = true;
+      assert.ok(true, "getProperty threw after destroy (acceptable)");
     }
-    assert.ok(
-      true,
-      threw
-        ? "getProperty threw after destroy (acceptable)"
-        : "getProperty did not throw after destroy",
-    );
   });
 
-  QUnit.test("bindProperty after destroy does not throw", (assert) => {
+  QUnit.test("bindProperty after destroy does not crash", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.destroy();
 
-    let threw = false;
     try {
       model.bindProperty("/name");
+      assert.ok(true, "bindProperty succeeded after destroy");
     } catch {
-      threw = true;
+      assert.ok(true, "bindProperty threw after destroy (acceptable)");
     }
-    assert.ok(
-      true,
-      threw ? "bindProperty threw (acceptable)" : "bindProperty succeeded (acceptable)",
-    );
   });
 
-  QUnit.test("bindList after destroy does not throw", (assert) => {
+  QUnit.test("bindList after destroy does not crash", (assert) => {
     const model = new SignalModel({ items: [1, 2] });
     model.destroy();
 
-    let threw = false;
     try {
       model.bindList("/items");
+      assert.ok(true, "bindList succeeded after destroy");
     } catch {
-      threw = true;
+      assert.ok(true, "bindList threw after destroy (acceptable)");
     }
-    assert.ok(true, threw ? "bindList threw (acceptable)" : "bindList succeeded (acceptable)");
   });
 
-  QUnit.test("setData after destroy does not corrupt state", (assert) => {
+  QUnit.test("setData after destroy does not crash", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.destroy();
 
-    let threw = false;
     try {
       model.setData({ name: "Bob" });
+      assert.ok(true, "setData succeeded after destroy");
     } catch {
-      threw = true;
+      assert.ok(true, "setData threw after destroy (acceptable)");
     }
-    assert.ok(true, threw ? "setData threw (acceptable)" : "setData succeeded (acceptable)");
   });
 });

@@ -1,6 +1,6 @@
 <mvc:View
 	controllerName="demo.app.controller.TreeBinding"
-	xmlns:mvc="sap.ui.core"
+	xmlns:mvc="sap.ui.core.mvc"
 	xmlns="sap.m">
 	<Panel headerText="Tree Binding Demo" class="sapUiContentPadding">
 		<Tree id="orgTree" items="{path: 'tree>/org', parameters: {arrayNames: ['reports']}}">

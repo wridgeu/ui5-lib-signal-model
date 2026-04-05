@@ -1,6 +1,6 @@
 <mvc:View
 	controllerName="demo.app.controller.ProgrammaticAccess"
-	xmlns:mvc="sap.ui.core"
+	xmlns:mvc="sap.ui.core.mvc"
 	xmlns="sap.m">
 	<Panel headerText="Programmatic Signal Access" class="sapUiContentPadding">
 		<VBox class="sapUiSmallMargin">

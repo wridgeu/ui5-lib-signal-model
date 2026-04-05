@@ -40,7 +40,7 @@ Options:
 ## Merged ASCII Table
 
 ```
-SignalModel vs JSONModel — 2000 bindings, 4 runs (500 iter, 20 rounds)
+SignalModel vs JSONModel -- 2000 bindings, 4 runs (500 iter, 20 rounds)
 
  #  Scenario                                  Run 1       Run 2       Run 3       Run 4       Verdict
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ Cell display: `~equal`, `13.1x faster`, or `1.3x slower` (no ANSI color in cells
 
 Each run is classified into a direction: `faster`, `slower`, or `equal`.
 
-- `equal` is **neutral** — ignored when determining consistency.
+- `equal` is **neutral** -- ignored when determining consistency.
 - If all non-equal directions agree, or all runs are equal: **stable**.
 - If both `faster` and `slower` appear across runs: **noise**.
 

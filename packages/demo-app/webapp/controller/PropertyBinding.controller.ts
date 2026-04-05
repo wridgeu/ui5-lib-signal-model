@@ -1,14 +1,12 @@
-import Controller from "sap/ui/core/mvc/Controller";
-import type SignalModel from "ui5/model/signal/SignalModel";
+import BaseController from "./BaseController";
 import { getSampleData } from "../model/sampleData";
 
 /**
  * @namespace demo.app.controller
  */
-export default class PropertyBinding extends Controller {
+export default class PropertyBinding extends BaseController {
   onReset(): void {
-    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
-    const model = this.getView()!.getModel() as SignalModel;
+    const model = this.getModel();
     const data = getSampleData();
     model.setProperty("/firstName", data.firstName);
     model.setProperty("/lastName", data.lastName);

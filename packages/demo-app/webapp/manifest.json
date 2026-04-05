@@ -40,7 +40,7 @@
         "routerClass": "sap.m.routing.Router",
         "type": "View",
         "viewType": "XML",
-        "viewPath": "demo.app.view",
+        "path": "demo.app.view",
         "controlId": "navContainer",
         "controlAggregation": "pages"
       },

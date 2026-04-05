@@ -1,17 +1,16 @@
-import Controller from "sap/ui/core/mvc/Controller";
 import Filter from "sap/ui/model/Filter";
 import FilterOperator from "sap/ui/model/FilterOperator";
 import Sorter from "sap/ui/model/Sorter";
 import type ListBinding from "sap/ui/model/ListBinding";
-import type SignalModel from "ui5/model/signal/SignalModel";
 import type Table from "sap/m/Table";
 import type SearchField from "sap/m/SearchField";
 import type Event from "sap/ui/base/Event";
+import BaseController from "./BaseController";
 
 /**
  * @namespace demo.app.controller
  */
-export default class ListBindingController extends Controller {
+export default class ListBindingController extends BaseController {
   private getItemsBinding(): ListBinding {
     const table = this.byId("itemsTable") as Table;
     return table.getBinding("items") as unknown as ListBinding;
@@ -37,8 +36,7 @@ export default class ListBindingController extends Controller {
   }
 
   onAddItem(): void {
-    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
-    const model = this.getView()!.getModel() as SignalModel;
+    const model = this.getModel();
     const items = (model.getProperty("/items") as unknown[]).slice();
     const newId = items.length + 1;
     items.push({ id: newId, name: `New Item ${newId}`, price: 9.99, active: true });

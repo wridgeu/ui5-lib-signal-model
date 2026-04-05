@@ -1,5 +1,5 @@
 /**
- * WDIO benchmark spec — CLI-native benchmark runner.
+ * WDIO benchmark spec -- CLI-native benchmark runner.
  *
  * Drives a headless Chrome session against the benchmark HTML page,
  * polls {@link window.__bench} for streaming results, and formats
@@ -13,7 +13,7 @@
  * | `BENCH_BINDINGS`   | `500`   | Number of UI5 bindings         |
  * | `BENCH_ITERATIONS` | `500`   | Iterations per scenario        |
  * | `BENCH_ROUNDS`     | `20`    | Measured rounds (alternating)  |
- * | `BENCH_JSON`       | —       | Path to save JSON results to   |
+ * | `BENCH_JSON`       | --       | Path to save JSON results to   |
  *
  * @example
  *   BENCH_BINDINGS=1000 wdio run packages/lib/test/benchmark/wdio-bench.conf.ts
@@ -79,7 +79,7 @@ function fmtRatio(signal, json) {
 
 const bindings = process.env.BENCH_BINDINGS || "500";
 const iterations = process.env.BENCH_ITERATIONS || "500";
-const rounds = process.env.BENCH_ROUNDS || "10";
+const rounds = process.env.BENCH_ROUNDS || "20";
 const jsonFile = process.env.BENCH_JSON || "";
 
 // ── Spec ─────────────────────────────────────────────────────────────

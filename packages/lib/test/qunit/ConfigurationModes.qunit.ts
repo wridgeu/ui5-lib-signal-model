@@ -34,7 +34,7 @@ QUnit.module("Configuration Modes", () => {
   });
 
   // =========================================================================
-  // autoCreatePaths: true — extended mode
+  // autoCreatePaths: true -- extended mode
   // =========================================================================
 
   QUnit.test("autoCreatePaths: creates intermediate objects for deep paths", (assert) => {
@@ -54,7 +54,7 @@ QUnit.module("Configuration Modes", () => {
   });
 
   // =========================================================================
-  // strictLeafCheck: true — reject nonexistent leaf properties
+  // strictLeafCheck: true -- reject nonexistent leaf properties
   // =========================================================================
 
   QUnit.test("strictLeafCheck: returns false for nonexistent leaf on existing parent", (assert) => {

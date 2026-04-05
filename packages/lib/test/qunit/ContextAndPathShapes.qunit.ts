@@ -137,9 +137,9 @@ QUnit.module("Context and Path Shapes", () => {
   // Context shape edge cases
   // =========================================================================
 
-  QUnit.test("bindProperty with relative path and no context — graceful no-op", (assert) => {
+  QUnit.test("bindProperty with relative path and no context -- graceful no-op", (assert) => {
     const model = new SignalModel({ name: "Alice" });
-    // Relative path, no context — resolvedPath will be undefined
+    // Relative path, no context -- resolvedPath will be undefined
     const binding = model.bindProperty("name");
     // Value should be null since path can't resolve (JSONModel parity)
     assert.strictEqual(binding.getValue(), null, "relative path without context yields null");
