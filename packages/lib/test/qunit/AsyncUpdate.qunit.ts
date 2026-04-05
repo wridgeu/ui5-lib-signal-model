@@ -43,7 +43,7 @@ QUnit.module("AsyncUpdate (bAsyncUpdate)", () => {
     bindingB.attachChange(() => bCount++);
     bindingC.attachChange(() => cCount++);
 
-    // All three use async update — should batch
+    // All three use async update -- should batch
     model.setProperty("/a", 10, undefined, true);
     model.setProperty("/b", 20, undefined, true);
     model.setProperty("/c", 30, undefined, true);
@@ -108,7 +108,7 @@ QUnit.module("AsyncUpdate (bAsyncUpdate)", () => {
 
     binding.attachChange(() => changeCount++);
 
-    // Rapid async writes — only one setTimeout should be scheduled
+    // Rapid async writes -- only one setTimeout should be scheduled
     for (let i = 1; i <= 10; i++) {
       model.setProperty("/x", i, undefined, true);
     }

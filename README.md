@@ -111,7 +111,7 @@ npm run clean  # remove dist and .ui5 caches
 ### Benchmark
 
 ```bash
-npm run bench                                    # CLI — headless
+npm run bench                                    # CLI -- headless
 npm run bench -- --bindings 1000 --json out.json  # custom config
 npm run bench:stable                              # multi-run stability
 ```

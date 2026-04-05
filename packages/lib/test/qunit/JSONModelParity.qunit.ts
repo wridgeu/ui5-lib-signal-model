@@ -94,7 +94,7 @@ QUnit.module("JSONModel Parity", () => {
         { id: 3, value: "d" },
       ],
     };
-    // Merge payload only has 2 items — indices 2 and 3 must survive
+    // Merge payload only has 2 items -- indices 2 and 3 must survive
     const merge = {
       items: [
         { id: 0, value: "X" },
@@ -475,7 +475,7 @@ QUnit.module("JSONModel Parity", () => {
 
   // --- unbindElement context cleanup (issue #8 parity) ---
 
-  QUnit.test("unbindElement clears stale value — parity with JSONModel", (assert) => {
+  QUnit.test("unbindElement clears stale value -- parity with JSONModel", (assert) => {
     const done = assert.async();
     const jsonModel = new JSONModel({
       data: { level1: { text: "L1" } },

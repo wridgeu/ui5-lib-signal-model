@@ -180,23 +180,23 @@ Computed signals are **define-once**: calling `createComputed` on a path that al
 ```typescript
 model.createComputed("/total", ["/price", "/tax"], (p, t) => p * (1 + t));
 
-// Throws — computed already exists at /total:
+// Throws -- computed already exists at /total:
 model.createComputed("/total", ["/price"], (p) => p);
 
-// Correct — remove first, then redefine:
+// Correct -- remove first, then redefine:
 model.removeComputed("/total");
 model.createComputed("/total", ["/price"], (p) => p);
 ```
 
 > **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters, the closest existing equivalent, are also fixed in code and never replaced at runtime.
 >
-> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative — bindings are declared in XML and the developer never touches them directly. SignalModel's automatic resubscription mechanism (described below) ensures that `removeComputed` + `createComputed` works seamlessly regardless of how bindings were created.
+> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative -- bindings are declared in XML and the developer never touches them directly. SignalModel's automatic resubscription mechanism (described below) ensures that `removeComputed` + `createComputed` works seamlessly regardless of how bindings were created.
 
 ### Automatic Resubscription
 
-When a `Signal.Computed` is created, its derivation function is fixed. To change what a computed derives, you must replace it with `removeComputed` + `createComputed`. But the bindings watching that path still hold a watcher on the **old** signal object — they would never see updates from the new one.
+When a `Signal.Computed` is created, its derivation function is fixed. To change what a computed derives, you must replace it with `removeComputed` + `createComputed`. But the bindings watching that path still hold a watcher on the **old** signal object -- they would never see updates from the new one.
 
-SignalModel solves this with **automatic resubscription**. When `createComputed` is called, the model notifies every existing binding to that path (and to any sub-path below it). Each notified binding tears down its watcher on the old signal and subscribes to the new one — transparently, in a single synchronous step.
+SignalModel solves this with **automatic resubscription**. When `createComputed` is called, the model notifies every existing binding to that path (and to any sub-path below it). Each notified binding tears down its watcher on the old signal and subscribes to the new one -- transparently, in a single synchronous step.
 
 This means you can redefine a computed at any time and all bindings will see the new derivation, even if it has entirely different dependencies:
 
@@ -219,7 +219,7 @@ When a computed signal returns an object or array, you can bind to paths **insid
 ```typescript
 model.createComputed("/currentUser", ["/users", "/selectedId"], (users, id) => users[id]);
 
-// Bind to sub-paths — these read through the computed's return value
+// Bind to sub-paths -- these read through the computed's return value
 // <Text text="{/currentUser/name}" />
 // <Text text="{/currentUser/email}" />
 
@@ -228,7 +228,7 @@ model.createComputed("/activeItems", ["/items"], (items) => items.filter((i) => 
 // <List items="{/activeItems}"> <StandardListItem title="{name}" /> </List>
 ```
 
-In a path like `/currentUser/name`, the model resolves `/currentUser` as a computed signal, calls its derivation function, then navigates `.name` within the returned object. Only **one** computed "pivot" can exist per path — everything below it is plain object traversal.
+In a path like `/currentUser/name`, the model resolves `/currentUser` as a computed signal, calls its derivation function, then navigates `.name` within the returned object. Only **one** computed "pivot" can exist per path -- everything below it is plain object traversal.
 
 **Computed paths are read-only.** `setProperty`, `mergeProperty`, and two-way bindings on computed paths (or their sub-paths) return `false` and log a warning. This matches the industry consensus: [Vue](https://vuejs.org/guide/essentials/computed.html), [MobX](https://mobx.js.org/computeds.html), [SolidJS](https://docs.solidjs.com/reference/basic-reactivity/create-memo), and [Angular Signals](https://angular.dev/guide/signals) all treat computeds as read-only.
 
@@ -245,11 +245,11 @@ model.createComputed("/computedRows", ["/sourceRows"], (rows) =>
 // When /sourceRows is replaced (setProperty("/sourceRows", newArray)):
 // 1. The computed re-evaluates → returns a new array
 // 2. ALL cell bindings are notified (they resolve through the computed)
-// 3. Each cell runs checkUpdate — compares old vs new value
+// 3. Each cell runs checkUpdate -- compares old vs new value
 // 4. Only cells whose value actually changed trigger a DOM update
 ```
 
-**Rendering is correct** — unchanged cells do not re-render. But every binding performs the comparison check. For a grid table with 2000 rows and 3 columns, 6000 bindings are checked even if only 1 value changed. This is the expected behavior, not a limitation.
+**Rendering is correct** -- unchanged cells do not re-render. But every binding performs the comparison check. For a grid table with 2000 rows and 3 columns, 6000 bindings are checked even if only 1 value changed. This is the expected behavior, not a limitation.
 
 #### Why Computed Signals Are Atomic
 
@@ -257,7 +257,7 @@ The [TC39 Signals proposal](https://github.com/tc39/proposal-signals) explicitly
 
 This is a deliberate design choice shared across the signals ecosystem:
 
-- **SolidJS** separates [`createSignal`](https://docs.solidjs.com/reference/basic-reactivity/create-signal) (atomic, single value) from [`createStore`](https://docs.solidjs.com/concepts/stores) (Proxy-based, fine-grained per-property tracking). These are two distinct primitives — stores are not "better signals," they are a fundamentally different reactive architecture built on top of `Proxy`.
+- **SolidJS** separates [`createSignal`](https://docs.solidjs.com/reference/basic-reactivity/create-signal) (atomic, single value) from [`createStore`](https://docs.solidjs.com/concepts/stores) (Proxy-based, fine-grained per-property tracking). These are two distinct primitives -- stores are not "better signals," they are a fundamentally different reactive architecture built on top of `Proxy`.
 - **Angular Signals** are fully atomic. There is no built-in store primitive. The recommended approach for reducing notifications is to decompose large objects into smaller, focused signals.
 - **Preact Signals** are atomic. The community-built [`deepsignal`](https://github.com/luisherranz/deepsignal) package adds Proxy-based fine-grained tracking as an opt-in layer on top.
 
@@ -285,7 +285,7 @@ When a computed re-evaluates, the notification cost is O(N) where N is the numbe
 3. Each binding's `checkUpdate` re-reads its value and compares with the previous value
 4. Only bindings whose value actually changed trigger a DOM update (O(k) where k ≤ N)
 
-For primitive leaf values (strings, numbers — typical for table cells), the comparison is a strict equality check (`===`) which is effectively free. The per-binding overhead is dominated by path resolution, not the comparison itself. For large tables, this overhead is measurable but does not affect rendering correctness.
+For primitive leaf values (strings, numbers -- typical for table cells), the comparison is a strict equality check (`===`) which is effectively free. The per-binding overhead is dominated by path resolution, not the comparison itself. For large tables, this overhead is measurable but does not affect rendering correctness.
 
 #### Dependency Granularity
 
@@ -301,13 +301,13 @@ model.setProperty("/sourceRows", [...newArray]); // computed IS notified
 ```
 
 ```typescript
-model.setProperty("/currentUser/name", "Bob"); // returns false — computed path is read-only
+model.setProperty("/currentUser/name", "Bob"); // returns false -- computed path is read-only
 ```
 
 To update the data, write to the **source** path. The computed re-derives automatically and all sub-path bindings update:
 
 ```typescript
-model.setProperty("/users/0/name", "Bob"); // writes to source data — /currentUser/name updates
+model.setProperty("/users/0/name", "Bob"); // writes to source data -- /currentUser/name updates
 ```
 
 ## Configuration Modes
@@ -340,11 +340,11 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 ```typescript
 // Given: /customer = { name: "Alice", age: 28, city: "Berlin" }
 
-// setProperty REPLACES the entire object — name and city are gone:
+// setProperty REPLACES the entire object -- name and city are gone:
 model.setProperty("/customer", { age: 30 });
 // Result: /customer = { age: 30 }
 
-// mergeProperty MERGES into the existing object — name and city survive:
+// mergeProperty MERGES into the existing object -- name and city survive:
 model.mergeProperty("/customer", { age: 30 });
 // Result: /customer = { name: "Alice", age: 30, city: "Berlin" }
 ```
@@ -361,7 +361,7 @@ model.mergeProperty("/customer", { age: 30 });
 // Data constructor (most common)
 new SignalModel<T>(data?: T, options?: { autoCreatePaths?: boolean; strictLeafCheck?: boolean })
 
-// URL constructor — loads JSON from a URL (calls loadData internally)
+// URL constructor -- loads JSON from a URL (calls loadData internally)
 new SignalModel(url: string, options?: { autoCreatePaths?: boolean; strictLeafCheck?: boolean })
 ```
 

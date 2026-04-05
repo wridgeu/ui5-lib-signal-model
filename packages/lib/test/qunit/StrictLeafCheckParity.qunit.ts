@@ -4,7 +4,7 @@ import JSONModel from "sap/ui/model/json/JSONModel";
 /**
  * strictLeafCheck parity tests: verify that strictLeafCheck does NOT alter
  * setData, getData, or getProperty behavior (those must remain identical to
- * JSONModel). Only setProperty on nonexistent LEAF properties diverges —
+ * JSONModel). Only setProperty on nonexistent LEAF properties diverges --
  * it returns false instead of creating the property.
  */
 QUnit.module("strictLeafCheck JSONModel Parity", () => {
@@ -18,7 +18,7 @@ QUnit.module("strictLeafCheck JSONModel Parity", () => {
   }
 
   // =========================================================================
-  // setData — behavior MUST be identical regardless of strictLeafCheck
+  // setData -- behavior MUST be identical regardless of strictLeafCheck
   // =========================================================================
 
   QUnit.test("setData replace: identical with strictLeafCheck", (assert) => {
@@ -75,7 +75,7 @@ QUnit.module("strictLeafCheck JSONModel Parity", () => {
   });
 
   // =========================================================================
-  // setProperty on EXISTING paths — must match JSONModel (both succeed)
+  // setProperty on EXISTING paths -- must match JSONModel (both succeed)
   // =========================================================================
 
   QUnit.test("setProperty on existing leaf: identical to JSONModel", (assert) => {
@@ -114,7 +114,7 @@ QUnit.module("strictLeafCheck JSONModel Parity", () => {
   });
 
   // =========================================================================
-  // setProperty on NEW LEAF — this is where strictLeafCheck DIVERGES
+  // setProperty on NEW LEAF -- this is where strictLeafCheck DIVERGES
   // =========================================================================
 
   QUnit.test("setProperty on new leaf: JSONModel creates, strictLeafCheck rejects", (assert) => {
@@ -131,7 +131,7 @@ QUnit.module("strictLeafCheck JSONModel Parity", () => {
     assert.ok(jsonResult, "JSONModel creates new leaf (returns true)");
     assert.notOk(signalResult, "strictLeafCheck rejects new leaf (returns false)");
 
-    // Data diverges intentionally here — JSONModel has the property, SignalModel doesn't
+    // Data diverges intentionally here -- JSONModel has the property, SignalModel doesn't
     assert.strictEqual(
       json.getProperty("/customer/email"),
       "alice@example.com",

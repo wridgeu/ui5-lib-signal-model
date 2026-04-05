@@ -42,7 +42,7 @@ export function scheduleFlush(
       for (const [b, s] of batch) {
         // Skip bindings destroyed/unsubscribed since they were queued.
         // cancelFlush() operates on the live pendingUpdates map, but after
-        // the swap the binding is in the detached batch — unreachable by cancel.
+        // the swap the binding is in the detached batch -- unreachable by cancel.
         if (!b.watcher) continue;
         s.get();
         b.watcher.watch();

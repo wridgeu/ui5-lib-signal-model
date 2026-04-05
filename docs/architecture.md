@@ -62,15 +62,15 @@ Where a pure deep clone is needed (not a merge), `structuredClone()` replaces `d
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` flag that defers `checkUpdate` into a `setTimeout`, collapsing N synchronous `setProperty` calls into a single binding check pass. This is SAP's recommended workaround for the O(N²) problem documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-SignalModel supports this flag. When `bAsyncUpdate=true`, signal notifications are deferred — the data is written immediately but signal updates are batched into a single `setTimeout` pass that syncs all signals afterward. Both models perform equivalently in this scenario (~18ms each at 2000 bindings). Without the flag (default), SignalModel uses its push-based microtask flush which provides O(1) per-path notification.
+SignalModel supports this flag. When `bAsyncUpdate=true`, signal notifications are deferred -- the data is written immediately but signal updates are batched into a single `setTimeout` pass that syncs all signals afterward. Both models perform equivalently in this scenario (~18ms each at 2000 bindings). Without the flag (default), SignalModel uses its push-based microtask flush which provides O(1) per-path notification.
 
 ## Microtask vs Macrotask Scheduling
 
 SignalModel has two scheduling paths depending on how `setProperty` is called:
 
 - **Default (no `bAsyncUpdate`):** signal changes fire synchronously, and the FlushQueue batches binding updates via `queueMicrotask`. Microtasks run before the browser paints, so the first frame always shows correct data. One paint, always consistent.
-- **`bAsyncUpdate=true`:** signal notifications are skipped entirely during the `setProperty` loop. A single `setTimeout` syncs all signals afterward. This uses the same macrotask scheduling as JSONModel's `bAsyncUpdate` — the browser may render one stale frame before bindings update.
+- **`bAsyncUpdate=true`:** signal notifications are skipped entirely during the `setProperty` loop. A single `setTimeout` syncs all signals afterward. This uses the same macrotask scheduling as JSONModel's `bAsyncUpdate` -- the browser may render one stale frame before bindings update.
 
 The browser event loop processes work in this order: **current JS > all microtasks > render (paint) > next macrotask**.
 
-The default path gives SignalModel a visual consistency advantage over JSONModel's `bAsyncUpdate`: no stale frames. When `bAsyncUpdate=true` is explicitly requested, SignalModel matches JSONModel's `setTimeout`-based batching — same scheduling, same visual behavior, same performance.
+The default path gives SignalModel a visual consistency advantage over JSONModel's `bAsyncUpdate`: no stale frames. When `bAsyncUpdate=true` is explicitly requested, SignalModel matches JSONModel's `setTimeout`-based batching -- same scheduling, same visual behavior, same performance.

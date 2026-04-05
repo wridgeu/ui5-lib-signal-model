@@ -55,12 +55,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    *
    * Uses `fetch()` internally. Fires `requestSent`, `requestCompleted`,
    * and `requestFailed` events matching the JSONModel contract.
-   * Calls are chained sequentially — multiple `loadData` calls execute
+   * Calls are chained sequentially -- multiple `loadData` calls execute
    * in order, matching JSONModel's `pSequentialImportCompleted` behavior.
    *
    * @param sURL URL to load JSON from
    * @param oParameters Query parameters (appended to URL for GET, sent as body for POST)
-   * @param _bAsync Deprecated — always async. Kept for JSONModel signature compatibility.
+   * @param _bAsync Deprecated -- always async. Kept for JSONModel signature compatibility.
    * @param sType HTTP method: "GET" (default) or "POST"
    * @param bMerge Whether to merge loaded data instead of replacing
    * @param bCache Set to false to append a cache-busting timestamp
@@ -114,7 +114,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     });
 
     // Combine the model's internal abort signal with any user-provided signal.
-    // AbortSignal.any() fires when either signal aborts — on destroy() or caller abort.
+    // AbortSignal.any() fires when either signal aborts -- on destroy() or caller abort.
     // oxlint-disable-next-line typescript/no-non-null-assertion -- initialized in constructor
     const signals = [this._abortController!.signal, oSignal].filter(Boolean) as AbortSignal[];
     const combinedSignal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
@@ -314,7 +314,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       if (bAsyncUpdate) {
         // Deferred mode: skip signal notification, schedule a bulk sync.
         // This avoids 2000 synchronous notify callbacks during a batch
-        // of setProperty calls — the signals are synced once afterward.
+        // of setProperty calls -- the signals are synced once afterward.
         this._scheduleBulkSync();
       } else {
         this.registry.set(sResolvedPath, oValue);
@@ -463,7 +463,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Signal-based bindings self-update via watchers, so routine polling
     // (bForceUpdate=false) is unnecessary. However, the framework calls
     // checkUpdate(true) during context propagation (e.g. setBindingContext)
-    // — delegate to Model.prototype.checkUpdate so bindings re-evaluate.
+    // -- delegate to Model.prototype.checkUpdate so bindings re-evaluate.
     if (bForceUpdate) {
       (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
         this,
@@ -505,7 +505,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     fn: (...args: unknown[]) => unknown,
   ): Signal.Computed<unknown> {
     // Ensure dependency signals exist before creating the computed.
-    // Skip deps that already exist — they may be computed signals from
+    // Skip deps that already exist -- they may be computed signals from
     // a chained computed, and getOrCreate would shadow them with orphaned state signals.
     for (const dep of aDeps) {
       if (!this.registry.has(dep)) {

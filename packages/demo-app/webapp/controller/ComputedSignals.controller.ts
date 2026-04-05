@@ -16,7 +16,7 @@ export default class ComputedSignals extends Controller {
     // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
     const model = this.getView()!.getModel() as SignalModel;
 
-    // Scalar computed — derived from two dependencies
+    // Scalar computed -- derived from two dependencies
     model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => {
       return `${first} ${last}`;
     });
@@ -24,18 +24,18 @@ export default class ComputedSignals extends Controller {
       return new Date().getFullYear() - (age as number);
     });
 
-    // Computed object — sub-path traversal (/mostExpensive/name, /mostExpensive/price)
+    // Computed object -- sub-path traversal (/mostExpensive/name, /mostExpensive/price)
     model.createComputed("/mostExpensive", ["/items"], (items) => {
       const arr = items as Item[];
       return arr.reduce((best, cur) => (cur.price > best.price ? cur : best), arr[0]);
     });
 
-    // Computed array — list binding on filtered results
+    // Computed array -- list binding on filtered results
     model.createComputed("/activeItems", ["/items"], (items) => {
       return (items as Item[]).filter((i) => i.active);
     });
 
-    // Computed scalar from computed array — chained dependency
+    // Computed scalar from computed array -- chained dependency
     model.createComputed("/activeTotal", ["/activeItems"], (activeItems) => {
       return (activeItems as Item[]).reduce((sum, i) => sum + i.price, 0).toFixed(2);
     });

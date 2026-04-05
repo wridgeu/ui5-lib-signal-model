@@ -7,8 +7,8 @@
  *
  * Architecture:
  * ```
- * run-benchmark.mjs          (this file — arg parsing, env setup)
- *   └─ run-with-server.mjs   (server lifecycle — start, wait, cleanup)
+ * run-benchmark.mjs          (this file -- arg parsing, env setup)
+ *   └─ run-with-server.mjs   (server lifecycle -- start, wait, cleanup)
  *       ├─ ui5 serve          (serves the benchmark HTML page)
  *       └─ wdio run ...       (headless Chrome → benchmark page)
  *           └─ bench.spec.mjs (polls results, formats terminal output)

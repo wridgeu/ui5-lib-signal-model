@@ -5,11 +5,11 @@ Self-contained benchmark comparing SignalModel and JSONModel across all binding 
 ## Quick Start
 
 ```bash
-npm run start:bench                                        # browser — opens benchmark page
-npm run bench                                              # CLI — headless, streams to terminal
+npm run start:bench                                        # browser -- opens benchmark page
+npm run bench                                              # CLI -- headless, streams to terminal
 npm run bench -- --bindings 1000 --iterations 500 --rounds 10
 npm run bench -- --bindings 2000 --json results.json       # save results as JSON
-npm run bench:stable                                       # CLI — multi-run stability analysis
+npm run bench:stable                                       # CLI -- multi-run stability analysis
 ```
 
 ### Multi-run stability analysis
@@ -28,12 +28,12 @@ npm run bench:stable -- --runs 4 --json stability.json     # save merged results
 | `--bindings N`   | `2000`  | Number of UI5 property bindings |
 | `--iterations N` | `500`   | Iterations per scenario         |
 | `--rounds N`     | `20`    | Measured rounds per run         |
-| `--json <file>`  | —       | Save merged results as JSON     |
+| `--json <file>`  | --      | Save merged results as JSON     |
 
 **Verdict logic:**
 
 - Each run is classified as `faster`, `slower`, or `~equal` using the same significance checks as the single-run CLI
-- `~equal` is neutral — ignored when determining consistency
+- `~equal` is neutral -- ignored when determining consistency
 - If all non-equal runs agree (or all are `~equal`): **stable**
 - If both `faster` and `slower` appear: **noise**
 
@@ -50,9 +50,9 @@ npm run bench:stable -- --runs 4 --json stability.json     # save merged results
 | `--bindings N`   | `500`   | Number of UI5 property bindings   |
 | `--iterations N` | `500`   | Iterations per scenario           |
 | `--rounds N`     | `20`    | Measured rounds (alternating A-B) |
-| `--json <file>`  | —       | Save results as JSON              |
+| `--json <file>`  | --      | Save results as JSON              |
 
-The CLI reuses the same benchmark page and WDIO infrastructure as the QUnit tests — no additional dependencies. The benchmark HTML page accepts URL parameters (`?n=&iterations=&rounds=&autorun`) and exposes a `window.__bench` global that the WDIO spec polls for streaming results.
+The CLI reuses the same benchmark page and WDIO infrastructure as the QUnit tests -- no additional dependencies. The benchmark HTML page accepts URL parameters (`?n=&iterations=&rounds=&autorun`) and exposes a `window.__bench` global that the WDIO spec polls for streaming results.
 
 JSON output format:
 
@@ -215,7 +215,7 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it ba
 >
 > 1. **Watcher re-arm hypothesis.** The TC39 `Signal.subtle.Watcher` requires an explicit re-arm (`signal.get()` + `watcher.watch()`) after each notification. Initial suspicion was that this per-binding overhead caused the gap. Other frameworks (Preact, Solid, Vue) avoid it via persistent subscriptions.
 > 2. **Polyfill swap.** Tested [alien-signals](https://github.com/stackblitz/alien-signals) (a high-performance reactive engine, being considered as the new `signal-polyfill` base in [PR #44](https://github.com/proposal-signals/signal-polyfill/pull/44)) as a drop-in replacement. Result: identical performance across all scenarios. The polyfill engine was not the bottleneck.
-> 3. **Flush loop instrumentation.** Instrumented the flush loop to measure per-step cost. `checkUpdate()` (UI5's binding refresh) accounted for the majority of the flush time. The re-arm calls (`signal.get()` + `watcher.watch()`) appeared small in instrumentation and were confirmed negligible by removing `signal.get()` entirely — 143 tests passed but performance was unchanged. The re-arm cycle was not the bottleneck.
+> 3. **Flush loop instrumentation.** Instrumented the flush loop to measure per-step cost. `checkUpdate()` (UI5's binding refresh) accounted for the majority of the flush time. The re-arm calls (`signal.get()` + `watcher.watch()`) appeared small in instrumentation and were confirmed negligible by removing `signal.get()` entirely -- 143 tests passed but performance was unchanged. The re-arm cycle was not the bottleneck.
 > 4. **Root cause.** The cost was not in the flush loop at all. It was in the `setProperty` loop: each of the 2000 calls fired a synchronous Watcher `notify` callback (reactive graph traversal + `Map.set()` in FlushQueue), even when `bAsyncUpdate=true` was meant to defer work. JSONModel's async path skips all notification during the loop and syncs once afterward.
 > 5. **Fix.** When `bAsyncUpdate=true`, SignalModel now writes data immediately but skips signal notification entirely. A single `setTimeout` calls `registry.invalidateAll()` to sync all signals at once. This matches JSONModel's batching strategy: zero notification cost during the write loop, one batched pass afterward. Result: **~equal** performance.
 
@@ -223,7 +223,7 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it ba
 
 The "large dataset, pinpoint merge" scenario (3 items into 20,000) shows **~4x faster** performance. JSONModel's `deepExtend` deep-clones the entire 20,000-item array (each item has 7 properties including nested `metadata`) to overlay 3 items. SignalModel's `_mergeInPlace` walks only the 3 payload keys in-place: O(k) instead of O(n). The advantage grows linearly with the data-to-payload ratio. Fiori apps with large OData entity sets and form-level edits (e.g., editing 3 fields in a 5,000-row table) would see similar improvements.
 
-The "deep merge (all 2k)" scenario, where the entire payload matches the data size, shows ~equal performance across runs (direction flips between runs — sometimes JSON is faster, sometimes Signal is). When the payload covers all items, both models do comparable work.
+The "deep merge (all 2k)" scenario, where the entire payload matches the data size, shows ~equal performance across runs (direction flips between runs -- sometimes JSON is faster, sometimes Signal is). When the payload covers all items, both models do comparable work.
 
 Nested config merge is ~equal, with both models at the same timing at this scale.
 
@@ -235,9 +235,9 @@ Scenario 21 reproduces the conditions from SAP's `checkPerformanceOfUpdate` warn
 
 "Computed (redefined)" redefines all 500 computeds via `removeComputed` + `createComputed` with different dependencies, then measures update propagation. Performance is equivalent to regular computed signals. The re-subscribe bridge adds no measurable cost.
 
-"Computed sub-path" binds 500 controls to sub-paths of computed objects (e.g., `/computed0/label`). The `_getObject` traversal checks `registry.isComputed()` at each path segment — a Map lookup. Performance is equivalent to JSONModel's direct path binding.
+"Computed sub-path" binds 500 controls to sub-paths of computed objects (e.g., `/computed0/label`). The `_getObject` traversal checks `registry.isComputed()` at each path segment -- a Map lookup. Performance is equivalent to JSONModel's direct path binding.
 
-"Computed redefine + sub-path" combines redefinition with sub-path bindings — the most expensive computed path. It redefines all computeds and exercises `_firePathResubscribe`'s prefix scan to re-wire sub-path bindings to new signal objects. Performance is equivalent to JSONModel's direct path binding.
+"Computed redefine + sub-path" combines redefinition with sub-path bindings -- the most expensive computed path. It redefines all computeds and exercises `_firePathResubscribe`'s prefix scan to re-wire sub-path bindings to new signal objects. Performance is equivalent to JSONModel's direct path binding.
 
 **Deep-path setProperty confirms zero computed overhead:**
 
@@ -253,7 +253,7 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), se
 
 1. **Correct by default.** Developers do not need to remember to pass `bAsyncUpdate=true`. SAP added `checkPerformanceOfUpdate` specifically because developers keep using the synchronous default. Without `bAsyncUpdate`, SignalModel is always O(1) per notification per `setProperty` call. With `bAsyncUpdate=true`, both models batch into a single pass.
 
-2. **Per-path notification (default path).** Without `bAsyncUpdate`, each `setProperty` notifies only the bindings on the changed path — O(1) per call. JSONModel's synchronous `setProperty` iterates ALL bindings each time — O(N) per call. With `bAsyncUpdate=true`, both models iterate all bindings/signals in a single batched pass.
+2. **Per-path notification (default path).** Without `bAsyncUpdate`, each `setProperty` notifies only the bindings on the changed path -- O(1) per call. JSONModel's synchronous `setProperty` iterates ALL bindings each time -- O(N) per call. With `bAsyncUpdate=true`, both models iterate all bindings/signals in a single batched pass.
 
 3. **Computed signals.** Model-layer derived values (`createComputed`) that update reactively. JSONModel has no equivalent; formatters are view-layer and do not participate in the model's dependency graph.
 

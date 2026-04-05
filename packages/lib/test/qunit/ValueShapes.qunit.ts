@@ -10,7 +10,7 @@ QUnit.module("Value Shapes", () => {
   // null values
   // =========================================================================
 
-  QUnit.test("setProperty with null value — binding fires (parity)", (assert) => {
+  QUnit.test("setProperty with null value -- binding fires (parity)", (assert) => {
     const done = assert.async();
     const json = new JSONModel({ name: "Alice" });
     const signal = new SignalModel({ name: "Alice" });
@@ -39,7 +39,7 @@ QUnit.module("Value Shapes", () => {
     }, 50);
   });
 
-  QUnit.test("null to null setProperty — binding does not fire", (assert) => {
+  QUnit.test("null to null setProperty -- binding does not fire", (assert) => {
     const done = assert.async();
     const model = new SignalModel({ name: null as unknown });
     const binding = model.bindProperty("/name");
@@ -47,16 +47,16 @@ QUnit.module("Value Shapes", () => {
 
     binding.attachChange(() => changeCount++);
 
-    // Set null again — signal equality for null: typeof null === "object",
+    // Set null again -- signal equality for null: typeof null === "object",
     // so signalEquals returns false, meaning the signal WILL update.
     // However checkUpdate compares old vs new: both are null, but typeof null === "object"
     // means checkUpdate always fires for object-typed values.
     model.setProperty("/name", null);
 
     setTimeout(() => {
-      // This tests the actual behavior — null is typeof "object" so checkUpdate
+      // This tests the actual behavior -- null is typeof "object" so checkUpdate
       // considers it always-changed. This matches JSONModel which also re-fires.
-      assert.ok(true, "test completed — behavior documented");
+      assert.ok(true, "test completed -- behavior documented");
       model.destroy();
       done();
     }, 50);

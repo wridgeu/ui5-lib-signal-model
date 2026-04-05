@@ -224,7 +224,7 @@ QUnit.module("SignalPropertyBinding", () => {
     const bindingB = model.bindProperty("/b");
     let bChangeCount = 0;
 
-    // Destroy bindingA during its own flush — bindingB should still work afterward
+    // Destroy bindingA during its own flush -- bindingB should still work afterward
     bindingA.attachChange(() => {
       bindingA.destroy();
     });
@@ -238,7 +238,7 @@ QUnit.module("SignalPropertyBinding", () => {
       assert.strictEqual(bChangeCount, 1, "surviving binding was notified");
       assert.strictEqual(bindingB.getValue(), 20, "surviving binding has correct value");
 
-      // Verify FlushQueue is not stuck — subsequent changes still work
+      // Verify FlushQueue is not stuck -- subsequent changes still work
       bChangeCount = 0;
       model.setProperty("/b", 30);
 
@@ -318,7 +318,7 @@ QUnit.module("SignalPropertyBinding", () => {
 
     binding.attachChange(() => changeCount++);
 
-    // Value is still "Alice" — normal checkUpdate would skip, but force should fire
+    // Value is still "Alice" -- normal checkUpdate would skip, but force should fire
     binding.checkUpdate(true);
 
     setTimeout(() => {
@@ -337,7 +337,7 @@ QUnit.module("SignalPropertyBinding", () => {
 
     binding.attachChange(() => changeCount++);
 
-    // Mutate data directly (bypassing setProperty — simulates external data change)
+    // Mutate data directly (bypassing setProperty -- simulates external data change)
     (model.getData() as Record<string, unknown>).name = "Bob";
 
     // refresh(true) calls checkUpdate(true), which re-reads from model
@@ -387,7 +387,7 @@ QUnit.module("SignalPropertyBinding", () => {
       items: [{ name: "Bob" }],
     });
 
-    // Absolute path binding — not relative
+    // Absolute path binding -- not relative
     const binding = model.bindProperty("/name");
     assert.strictEqual(binding.getValue(), "Alice", "absolute binding works");
 
@@ -398,7 +398,7 @@ QUnit.module("SignalPropertyBinding", () => {
       origSubscribe();
     };
 
-    // Setting context on absolute binding — should not resubscribe
+    // Setting context on absolute binding -- should not resubscribe
     // (isRelative() returns false, so checkUpdate runs but subscribe doesn't)
     const ctx = model.createBindingContext("/items/0");
     binding.setContext(ctx!);

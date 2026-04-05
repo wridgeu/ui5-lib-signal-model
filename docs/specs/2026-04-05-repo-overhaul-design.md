@@ -43,8 +43,8 @@ Restructure the repository for public consumption. Split the 530-line root READM
   - Brief list of 7 demo pages
 
 ## Repository Structure
-  - packages/lib — the library (published to npm)
-  - packages/demo-app — interactive showcase (private)
+  - packages/lib -- the library (published to npm)
+  - packages/demo-app -- interactive showcase (private)
 
 ## Development
   - npm install, npm run start, npm run test:qunit, npm run check, npm run build
@@ -200,11 +200,11 @@ Extracted from the current root README "Architecture" and "Learnings" sections.
 
 ### Delete entirely
 
-- `docs/superpowers/` — entire directory (plans and specs moved to `docs/plans/` and `docs/specs/`)
+- `docs/superpowers/` -- entire directory (plans and specs moved to `docs/plans/` and `docs/specs/`)
 
 ### Keep
 
-- `docs/plans/` — stays as the plans directory; existing plan content from `docs/superpowers/plans/` moves here
+- `docs/plans/` -- stays as the plans directory; existing plan content from `docs/superpowers/plans/` moves here
 
 ### Flatten and clean specs
 
@@ -247,8 +247,8 @@ Action SHAs (from issue #5, verify at implementation time):
 
 Runs on pushes to `main` (after CI). Two jobs:
 
-1. **release-please** — creates/updates release PR from conventional commits
-2. **publish** — if release created, builds and publishes to npm with OIDC provenance
+1. **release-please** -- creates/updates release PR from conventional commits
+2. **publish** -- if release created, builds and publishes to npm with OIDC provenance
 
 Action SHAs:
 
@@ -271,7 +271,7 @@ Permissions: `contents: write`, `pull-requests: write`, `id-token: write`
 
 ### npm environment (manual, post-PR)
 
-Not part of this PR — requires manual GitHub repo settings:
+Not part of this PR -- requires manual GitHub repo settings:
 
 1. Create `npm` environment in repo Settings
 2. Add `NPM_TOKEN` secret
@@ -281,7 +281,7 @@ Not part of this PR — requires manual GitHub repo settings:
 
 - Create a feature branch for this work
 - PR references issue #5
-- PR title: `chore: repository overhaul — docs, structure, CI/CD (#5)`
+- PR title: `chore: repository overhaul -- docs, structure, CI/CD (#5)`
 
 ## Implementation Order
 
