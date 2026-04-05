@@ -1,6 +1,6 @@
 <mvc:View
 	controllerName="demo.app.controller.StrictMode"
-	xmlns:mvc="sap.ui.core"
+	xmlns:mvc="sap.ui.core.mvc"
 	xmlns="sap.m">
 	<Panel headerText="Strict Mode Demo" class="sapUiContentPadding">
 		<VBox class="sapUiSmallMargin">

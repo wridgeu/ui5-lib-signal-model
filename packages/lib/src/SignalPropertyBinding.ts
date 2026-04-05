@@ -3,7 +3,7 @@ import ChangeReason from "sap/ui/model/ChangeReason";
 import type Context from "sap/ui/model/Context";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
-import { scheduleFlush, cancelFlush } from "./FlushQueue";
+import { scheduleFlush, cancelFlush, teardownWatcher } from "./FlushQueue";
 
 // Runtime properties/methods not exposed by @openui5/types.
 // setValue and initialize are @ui5-protected on PropertyBinding and don't need casting.
@@ -101,13 +101,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       this._subscribedPath = null;
     }
     cancelFlush(this);
-    if (this.watcher) {
-      const sources = Signal.subtle.introspectSources(this.watcher);
-      if (sources.length) {
-        this.watcher.unwatch(...sources);
-      }
-      this.watcher = null;
-    }
+    this.watcher = teardownWatcher(this.watcher);
   }
 
   override initialize(): this {

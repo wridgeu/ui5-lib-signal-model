@@ -14,7 +14,7 @@ npm install ui5-lib-signal-model
 ```
 
 > [!NOTE]
-> The npm package ships both pre-built distributables (`dist/`) and TypeScript sources (`src/`) to support multiple [serving options](#serving-the-library). At runtime, the browser loads only the `library-preload.js` bundle.
+> The npm package ships both `dist/` and `src/` -- see [Serving the library](#serving-the-library) for why and when each is used.
 
 ### TypeScript
 

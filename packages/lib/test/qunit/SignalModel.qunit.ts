@@ -134,11 +134,20 @@ QUnit.module(
       model.destroy();
     });
 
-    QUnit.test("checkUpdate is a no-op", (assert) => {
+    QUnit.test("checkUpdate without force is a no-op", (assert) => {
+      const done = assert.async();
       const model = new SignalModel({ name: "Alice" });
+      const binding = model.bindProperty("/name");
+      let changeCount = 0;
+
+      binding.attachChange(() => changeCount++);
       model.checkUpdate();
-      assert.ok(true, "checkUpdate completes without error");
-      model.destroy();
+
+      setTimeout(() => {
+        assert.strictEqual(changeCount, 0, "no binding notification from checkUpdate()");
+        model.destroy();
+        done();
+      }, 50);
     });
 
     QUnit.test("getSignal returns the signal for a path", (assert) => {

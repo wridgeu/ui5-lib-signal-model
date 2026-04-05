@@ -1,6 +1,6 @@
 <mvc:View
 	controllerName="demo.app.controller.ComputedSignals"
-	xmlns:mvc="sap.ui.core"
+	xmlns:mvc="sap.ui.core.mvc"
 	xmlns="sap.m"
 	xmlns:f="sap.ui.layout.form">
 	<Page title="Computed Signals" class="sapUiContentPadding">

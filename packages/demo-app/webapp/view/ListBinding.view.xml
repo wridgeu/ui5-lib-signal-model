@@ -1,6 +1,6 @@
 <mvc:View
 	controllerName="demo.app.controller.ListBinding"
-	xmlns:mvc="sap.ui.core"
+	xmlns:mvc="sap.ui.core.mvc"
 	xmlns="sap.m">
 	<Panel headerText="List Binding Demo" class="sapUiContentPadding">
 		<Toolbar>

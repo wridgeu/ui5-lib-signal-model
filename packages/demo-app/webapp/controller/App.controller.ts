@@ -1,14 +1,13 @@
-import Controller from "sap/ui/core/mvc/Controller";
 import type SegmentedButton from "sap/m/SegmentedButton";
-import type UIComponent from "sap/ui/core/UIComponent";
+import BaseController from "./BaseController";
 
 /**
  * @namespace demo.app.controller
  */
-export default class App extends Controller {
+export default class App extends BaseController {
   onNavChange(): void {
     const navButton = this.byId("navButton") as SegmentedButton;
     const sKey = navButton.getSelectedKey();
-    (this.getOwnerComponent() as UIComponent).getRouter().navTo(sKey);
+    this.getRouter().navTo(sKey);
   }
 }

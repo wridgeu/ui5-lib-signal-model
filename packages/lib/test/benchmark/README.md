@@ -175,28 +175,28 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 
 | Binding Type              | Scenario                              | JSONModel | SignalModel | Comparison      |
 | ------------------------- | ------------------------------------- | --------- | ----------- | --------------- |
-| Model API                 | setProperty (no bindings)             | 0.20ms    | 0.30ms      | ~equal          |
-| Model API                 | getProperty                           | 0.00ms    | 0.10ms      | ~equal          |
-| Property (sap.m.Text)     | Single-path update, 2000 bindings     | 5.45ms    | 5.00ms      | ~equal          |
-| Property (sap.m.Text)     | Update all 2000 (sync)                | 823.85ms  | 48.80ms     | **~17x faster** |
-| Property (sap.m.Text)     | Update all 2000 (async)               | 17.25ms   | 17.10ms     | ~equal          |
-| Property (sap.m.Text)     | Sparse async, 1 of 2000               | 4.95ms    | 4.75ms      | ~equal          |
-| List (sap.m.List)         | List binding replace, 500 items       | 8.45ms    | 8.50ms      | ~equal          |
-| List (sap.m.Table)        | Table binding replace, 500 rows       | 7.15ms    | 7.50ms      | ~equal          |
-| List (sap.ui.table.Table) | Grid table binding replace, 2000 rows | 7.25ms    | 5.80ms      | ~equal          |
-| Tree (sap.m.Tree)         | Tree binding replace, 200 nodes       | 10.00ms   | 9.20ms      | ~equal          |
-| Expression (sap.m.Text)   | Expression binding, 500 controls      | 5.20ms    | 4.60ms      | ~equal          |
-| Computed (sap.m.Text)     | Computed signals, 2000 computeds      | 5.10ms    | 4.85ms      | ~equal          |
-| Computed (sap.m.Text)     | Computed (redefined), 2000 computeds  | 4.80ms    | 4.75ms      | ~equal          |
-| Computed (sap.m.Text)     | Computed sub-path, 2000 computeds     | 5.45ms    | 4.80ms      | ~equal          |
-| Computed (sap.m.Text)     | Computed redefine + sub-path, 2000    | 5.30ms    | 4.80ms      | ~equal          |
-| Property (sap.m.Text)     | setData replace, 2000 bindings        | 20.35ms   | 21.95ms     | ~equal          |
-| Property (sap.m.Text)     | setData merge (shallow), 5 into 2k    | 5.20ms    | 4.80ms      | ~equal          |
-| Property (sap.m.Text)     | setData merge (deep), all 2k          | 20.00ms   | 21.55ms     | ~equal          |
-| Property (sap.m.Text)     | setData merge (nested config)         | 5.45ms    | 4.60ms      | ~equal          |
-| Property (sap.m.Text)     | setData merge (large, pinpoint) 20k   | 20.35ms   | 4.75ms      | **~4x faster**  |
-| Property (sap.m.Text)     | Real-world: checkPerformanceOfUpdate  | 24.90ms   | 6.50ms      | **~4x faster**  |
-| Property (sap.m.Text)     | Deep-path setProperty (no computeds)  | 5.25ms    | 4.85ms      | ~equal          |
+| Model API                 | setProperty (no bindings)             | 0.10ms    | 0.20ms      | ~equal          |
+| Model API                 | getProperty                           | 0.10ms    | 0.10ms      | ~equal          |
+| Property (sap.m.Text)     | Single-path update, 2000 bindings     | 5.50ms    | 4.90ms      | ~equal          |
+| Property (sap.m.Text)     | Update all 2000 (sync)                | 823.10ms  | 48.65ms     | **~17x faster** |
+| Property (sap.m.Text)     | Update all 2000 (async)               | 19.35ms   | 18.50ms     | ~equal          |
+| Property (sap.m.Text)     | Sparse async, 1 of 2000               | 5.20ms    | 5.15ms      | ~equal          |
+| List (sap.m.List)         | List binding replace, 500 items       | 8.30ms    | 8.20ms      | ~equal          |
+| List (sap.m.Table)        | Table binding replace, 500 rows       | 7.25ms    | 7.80ms      | ~equal          |
+| List (sap.ui.table.Table) | Grid table binding replace, 2000 rows | 7.05ms    | 6.15ms      | ~equal          |
+| Tree (sap.m.Tree)         | Tree binding replace, 200 nodes       | 9.70ms    | 8.85ms      | ~equal          |
+| Expression (sap.m.Text)   | Expression binding, 500 controls      | 5.35ms    | 4.95ms      | ~equal          |
+| Computed (sap.m.Text)     | Computed signals, 2000 computeds      | 5.10ms    | 4.65ms      | ~equal          |
+| Computed (sap.m.Text)     | Computed (redefined), 2000 computeds  | 4.90ms    | 4.70ms      | ~equal          |
+| Computed (sap.m.Text)     | Computed sub-path, 2000 computeds     | 5.20ms    | 4.75ms      | ~equal          |
+| Computed (sap.m.Text)     | Computed redefine + sub-path, 2000    | 5.40ms    | 5.25ms      | ~equal          |
+| Property (sap.m.Text)     | setData replace, 2000 bindings        | 20.55ms   | 21.90ms     | ~equal          |
+| Property (sap.m.Text)     | setData merge (shallow), 5 into 2k    | 5.65ms    | 4.70ms      | ~equal          |
+| Property (sap.m.Text)     | setData merge (deep), all 2k          | 20.00ms   | 20.55ms     | ~equal          |
+| Property (sap.m.Text)     | setData merge (nested config)         | 6.00ms    | 4.30ms      | ~equal          |
+| Property (sap.m.Text)     | setData merge (large, pinpoint) 20k   | 20.00ms   | 4.85ms      | **~4x faster**  |
+| Property (sap.m.Text)     | Real-world: checkPerformanceOfUpdate  | 25.85ms   | 7.05ms      | **~4x faster**  |
+| Property (sap.m.Text)     | Deep-path setProperty (no computeds)  | 5.15ms    | 4.90ms      | ~equal          |
 
 ### Honest Observations
 

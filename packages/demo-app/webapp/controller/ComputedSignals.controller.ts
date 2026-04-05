@@ -1,5 +1,4 @@
-import Controller from "sap/ui/core/mvc/Controller";
-import type SignalModel from "ui5/model/signal/SignalModel";
+import BaseController from "./BaseController";
 
 interface Item {
   id: number;
@@ -11,10 +10,9 @@ interface Item {
 /**
  * @namespace demo.app.controller
  */
-export default class ComputedSignals extends Controller {
+export default class ComputedSignals extends BaseController {
   override onInit(): void {
-    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
-    const model = this.getView()!.getModel() as SignalModel;
+    const model = this.getModel();
 
     // Scalar computed -- derived from two dependencies
     model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => {
@@ -42,8 +40,7 @@ export default class ComputedSignals extends Controller {
   }
 
   override onExit(): void {
-    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
-    const model = this.getView()!.getModel() as SignalModel;
+    const model = this.getModel();
     model.removeComputed("/activeTotal");
     model.removeComputed("/activeItems");
     model.removeComputed("/mostExpensive");

@@ -79,7 +79,7 @@ function fmtRatio(signal, json) {
 
 const bindings = process.env.BENCH_BINDINGS || "500";
 const iterations = process.env.BENCH_ITERATIONS || "500";
-const rounds = process.env.BENCH_ROUNDS || "10";
+const rounds = process.env.BENCH_ROUNDS || "20";
 const jsonFile = process.env.BENCH_JSON || "";
 
 // ── Spec ─────────────────────────────────────────────────────────────

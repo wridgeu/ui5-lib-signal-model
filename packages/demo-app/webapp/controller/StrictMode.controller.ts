@@ -1,12 +1,12 @@
-import Controller from "sap/ui/core/mvc/Controller";
 import SignalModel from "ui5/model/signal/SignalModel";
 import type Input from "sap/m/Input";
 import type MessageStrip from "sap/m/MessageStrip";
+import BaseController from "./BaseController";
 
 /**
  * @namespace demo.app.controller
  */
-export default class StrictMode extends Controller {
+export default class StrictMode extends BaseController {
   private strictModel: SignalModel | null = null;
 
   override onInit(): void {
