@@ -191,11 +191,47 @@ model.createComputed("/computedRows", ["/sourceRows"], (rows) =>
 // 4. Only cells whose value actually changed trigger a DOM update
 ```
 
-**Rendering is correct** — unchanged cells do not re-render. But every binding performs the comparison check. For a grid table with 2000 rows and 3 columns, 6000 bindings are checked even if only 1 value changed.
+**Rendering is correct** — unchanged cells do not re-render. But every binding performs the comparison check. For a grid table with 2000 rows and 3 columns, 6000 bindings are checked even if only 1 value changed. This is the expected behavior, not a limitation.
 
-**Why this differs from MobX and Vue.** MobX and Vue use Proxy-based reactivity: when you access `computed.value[3].name`, the framework tracks that specific property access and creates a fine-grained dependency. When the computed re-evaluates, only observers of the specific properties that changed are notified. TC39 Signals do not have a Proxy layer — a `Signal.Computed` is a single reactive node with no internal structure. All observers are notified when the computed changes, regardless of which part of the return value changed.
+#### Why Computed Signals Are Atomic
 
-**Dependency granularity matters.** A computed that depends on a parent path (e.g., `/sourceRows`) re-evaluates when that path is **replaced** (`setProperty("/sourceRows", newArray)`). It does **not** re-evaluate when a sub-path is modified in-place (`setProperty("/sourceRows/3/name", "new")`), because the signal at `/sourceRows` (the array reference) did not change. To react to individual property changes within an array, use multiple computeds with specific dependencies, or bind directly to the source paths.
+The [TC39 Signals proposal](https://github.com/tc39/proposal-signals) explicitly defines `Signal.Computed` as a single, atomic reactive node. A computed produces one value, compares it as a whole via `Object.is`, and notifies all downstream consumers uniformly. There is no concept of sub-path or partial notification in the specification.
+
+This is a deliberate design choice shared across the signals ecosystem:
+
+- **SolidJS** separates [`createSignal`](https://docs.solidjs.com/reference/basic-reactivity/create-signal) (atomic, single value) from [`createStore`](https://docs.solidjs.com/concepts/stores) (Proxy-based, fine-grained per-property tracking). These are two distinct primitives — stores are not "better signals," they are a fundamentally different reactive architecture built on top of `Proxy`.
+- **Angular Signals** are fully atomic. There is no built-in store primitive. The recommended approach for reducing notifications is to decompose large objects into smaller, focused signals.
+- **Preact Signals** are atomic. The community-built [`deepsignal`](https://github.com/luisherranz/deepsignal) package adds Proxy-based fine-grained tracking as an opt-in layer on top.
+
+SignalModel follows the TC39 model: a `Signal.Computed` is a single reactive node, and all observers are notified when it changes.
+
+#### Signals vs Proxy-Based Reactivity
+
+MobX and Vue use a fundamentally different architecture. They wrap objects in JavaScript `Proxy` instances that intercept every property `get` and `set`. When a computed getter reads `state.items[3].name`, the Proxy's `get` trap records that specific property access, creating a per-property dependency. When `state.items[3].name` changes, only the computations that read that exact property are notified.
+
+| Aspect                     | TC39 Signals (SignalModel, SolidJS signals, Angular) | Proxy-based (MobX, Vue `reactive()`, SolidJS stores) |
+| -------------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| **Unit of tracking**       | The entire signal value                              | Individual properties on an object                   |
+| **Dependency granularity** | "I depend on signal X"                               | "I depend on property `a` of object X"               |
+| **Notification**           | All subscribers of signal X                          | Only subscribers of `X.a`                            |
+| **Mechanism**              | Value comparison via `equals`                        | Proxy `get`/`set` traps                              |
+
+The Proxy-based approach is more fine-grained by default but comes with trade-offs: Proxy objects have identity issues (the proxy is not the original object), they add overhead on every property access, and they cannot be serialized directly. The TC39 proposal intentionally chose the atomic model as the primitive because it is simpler, composable, and avoids forcing Proxy overhead on all signal usage. Fine-grained tracking can always be layered on top, but you cannot remove Proxy overhead from a system that requires it.
+
+#### Notification Cost
+
+When a computed re-evaluates, the notification cost is O(N) where N is the number of bindings that resolve through the computed:
+
+1. Each binding's `Signal.subtle.Watcher` callback fires (TC39 mechanism, cannot be intercepted)
+2. Each binding is scheduled in the shared flush queue
+3. Each binding's `checkUpdate` re-reads its value and compares with the previous value
+4. Only bindings whose value actually changed trigger a DOM update (O(k) where k ≤ N)
+
+For primitive leaf values (strings, numbers — typical for table cells), the comparison is a strict equality check (`===`) which is effectively free. The per-binding overhead is dominated by path resolution, not the comparison itself. For large tables, this overhead is measurable but does not affect rendering correctness.
+
+#### Dependency Granularity
+
+A computed that depends on a parent path (e.g., `/sourceRows`) re-evaluates when that path is **replaced** (`setProperty("/sourceRows", newArray)`). It does **not** re-evaluate when a sub-path is modified in-place (`setProperty("/sourceRows/3/name", "new")`), because the signal at `/sourceRows` (the array reference) did not change. To react to individual property changes within an array, use multiple computeds with specific dependencies, or bind directly to the source paths.
 
 ```typescript
 // Re-evaluates when /sourceRows is replaced:
@@ -205,8 +241,6 @@ model.createComputed("/computed", ["/sourceRows"], (rows) => transform(rows));
 model.setProperty("/sourceRows/3/name", "updated"); // computed is NOT notified
 model.setProperty("/sourceRows", [...newArray]); // computed IS notified
 ```
-
-This behavior is consistent with the TC39 Signals specification and matches how signals work in SolidJS and Angular Signals. MobX and Vue achieve finer granularity through Proxy wrappers, which is a fundamentally different reactive architecture.
 
 ```typescript
 model.setProperty("/currentUser/name", "Bob"); // returns false — computed path is read-only
