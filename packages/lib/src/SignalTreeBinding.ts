@@ -1,6 +1,7 @@
 import ClientTreeBinding from "sap/ui/model/ClientTreeBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
 import type Context from "sap/ui/model/Context";
+import deepEqual from "sap/base/util/deepEqual";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
 import { scheduleFlush, cancelFlush, teardownWatcher } from "./FlushQueue";
@@ -11,8 +12,10 @@ type TreeBindingInternal = ClientTreeBinding & {
   sPath: string;
   oContext: Context | undefined;
   bSuspended: boolean;
+  oTreeData: unknown;
   _mLengthsCache: Record<string, number>;
   applyFilter(): void;
+  cloneData(data: unknown): unknown;
   _fireChange(params: { reason: string }): void;
 };
 
@@ -41,11 +44,15 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     if (internal.bSuspended && !bForceUpdate) {
       return;
     }
-    // Match ClientTreeBinding.checkUpdate: reapply filters and clear length cache
-    // so tree controls get correct data after signal-driven updates.
+    // Match ClientTreeBinding.checkUpdate: reapply filters, clear length cache,
+    // and only fire change when data actually changed (or forced).
+    const oCurrentTreeData = this.oModel._getObject(internal.sPath, internal.oContext);
     internal.applyFilter();
     internal._mLengthsCache = {};
-    internal._fireChange({ reason: ChangeReason.Change });
+    if (bForceUpdate || !deepEqual(internal.oTreeData, oCurrentTreeData)) {
+      internal.oTreeData = internal.cloneData(oCurrentTreeData);
+      internal._fireChange({ reason: ChangeReason.Change });
+    }
   }
 
   subscribe(): void {

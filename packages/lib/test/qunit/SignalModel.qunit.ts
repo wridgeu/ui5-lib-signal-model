@@ -316,6 +316,48 @@ QUnit.module(
       model.destroy();
     });
 
+    QUnit.test("setJSON with invalid JSON fires parseError event", (assert) => {
+      const model = new SignalModel({ name: "Alice" });
+      let errorFired = false;
+      let srcText = "";
+
+      model.attachParseError((event: { getParameter(name: string): unknown }) => {
+        errorFired = true;
+        srcText = event.getParameter("srcText") as string;
+      });
+
+      model.setJSON("{ not valid json }");
+
+      assert.ok(errorFired, "parseError event fired for invalid JSON");
+      assert.strictEqual(
+        srcText,
+        "{ not valid json }",
+        "srcText parameter contains the invalid input",
+      );
+      assert.strictEqual(
+        model.getProperty("/name"),
+        "Alice",
+        "data NOT updated when JSON is invalid",
+      );
+      model.destroy();
+    });
+
+    QUnit.test("setJSON with valid JSON does not fire parseError", (assert) => {
+      const model = new SignalModel({ name: "Alice" });
+      let errorFired = false;
+
+      model.attachParseError(() => {
+        errorFired = true;
+      });
+
+      model.setJSON('{"name":"Bob","age":30}');
+
+      assert.notOk(errorFired, "parseError NOT fired for valid JSON");
+      assert.strictEqual(model.getProperty("/name"), "Bob", "name updated");
+      assert.strictEqual(model.getProperty("/age"), 30, "age set");
+      model.destroy();
+    });
+
     // =========================================================================
     // getProperty edge cases
     // =========================================================================

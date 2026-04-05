@@ -307,4 +307,161 @@ QUnit.module("SignalTreeBinding", () => {
       done();
     }, 50);
   });
+
+  // =========================================================================
+  // Filter re-application after setData
+  // =========================================================================
+
+  QUnit.test("setData replaces data and filter is re-applied automatically", (assert) => {
+    const done = assert.async();
+    const treeData = {
+      org: [
+        {
+          name: "Alice",
+          role: "CEO",
+          children: [
+            {
+              name: "Bob",
+              role: "CTO",
+              children: [
+                { name: "Carol", role: "Dev", children: [] },
+                { name: "Dave", role: "Dev", children: [] },
+              ],
+            },
+            { name: "Eve", role: "CFO", children: [] },
+          ],
+        },
+      ],
+    };
+
+    const model = new SignalModel(treeData);
+    const binding = model.bindTree("/org", undefined, [], { arrayNames: ["children"] }, []);
+
+    // Tree filter is a recursive whitelist: matching nodes + all ancestors are kept.
+    // getRootContexts returns root-level entries that have matching descendants.
+    binding.filter([new Filter("name", FilterOperator.Contains, "Carol")]);
+    let roots = binding.getRootContexts();
+    assert.strictEqual(roots.length, 1, "filter keeps 1 root (ancestor of Carol)");
+    assert.strictEqual(
+      model.getProperty("name", roots[0]),
+      "Alice",
+      "root is Alice (Carol's ancestor)",
+    );
+
+    // Walk down: Alice -> Bob -> Carol (Dave is pruned by filter)
+    let children = binding.getNodeContexts(roots[0]);
+    assert.strictEqual(children.length, 1, "Alice has 1 filtered child (Bob, ancestor of Carol)");
+    let leaves = binding.getNodeContexts(children[0]);
+    assert.strictEqual(leaves.length, 1, "Bob has 1 filtered child (Carol)");
+    assert.strictEqual(model.getProperty("name", leaves[0]), "Carol", "leaf is Carol");
+
+    binding.attachChange(() => {
+      // After setData, filter is re-applied on new data.
+      // New tree: Frank -> Grace -> Carol (+ Heidi pruned by filter)
+      roots = binding.getRootContexts();
+      assert.strictEqual(roots.length, 1, "filter re-applied: 1 root in new data");
+      assert.strictEqual(model.getProperty("name", roots[0]), "Frank", "new root is Frank");
+      children = binding.getNodeContexts(roots[0]);
+      assert.strictEqual(children.length, 1, "Frank has 1 filtered child (Grace)");
+      leaves = binding.getNodeContexts(children[0]);
+      assert.strictEqual(leaves.length, 1, "Grace has 1 filtered child (Carol)");
+      assert.strictEqual(model.getProperty("name", leaves[0]), "Carol", "leaf is still Carol");
+      model.destroy();
+      done();
+    });
+
+    // Replace all data; the filter should be re-applied on the new data
+    model.setData({
+      org: [
+        {
+          name: "Frank",
+          role: "CEO",
+          children: [
+            {
+              name: "Grace",
+              role: "CTO",
+              children: [
+                { name: "Carol", role: "Architect", children: [] },
+                { name: "Heidi", role: "Dev", children: [] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  // =========================================================================
+  // checkUpdate edge cases
+  // =========================================================================
+
+  QUnit.test("checkUpdate without force does NOT fire when data unchanged", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      org: [
+        {
+          name: "Alice",
+          role: "CEO",
+          children: [
+            {
+              name: "Bob",
+              role: "CTO",
+              children: [
+                { name: "Carol", role: "Dev", children: [] },
+                { name: "Dave", role: "Dev", children: [] },
+              ],
+            },
+            { name: "Eve", role: "CFO", children: [] },
+          ],
+        },
+      ],
+    });
+    const binding = model.bindTree("/org", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+    binding.checkUpdate();
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "checkUpdate() without force does not fire");
+      model.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("checkUpdate(true) fires change even when data unchanged", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({
+      org: [
+        {
+          name: "Alice",
+          role: "CEO",
+          children: [
+            {
+              name: "Bob",
+              role: "CTO",
+              children: [
+                { name: "Carol", role: "Dev", children: [] },
+                { name: "Dave", role: "Dev", children: [] },
+              ],
+            },
+            { name: "Eve", role: "CFO", children: [] },
+          ],
+        },
+      ],
+    });
+    const binding = model.bindTree("/org", undefined, [], { arrayNames: ["children"] }, []);
+    binding.getRootContexts();
+    let changeCount = 0;
+
+    binding.attachChange(() => changeCount++);
+    binding.checkUpdate(true);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 1, "checkUpdate(true) fires change on tree binding");
+      model.destroy();
+      done();
+    }, 50);
+  });
 });
