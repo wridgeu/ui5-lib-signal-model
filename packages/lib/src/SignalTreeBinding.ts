@@ -97,6 +97,9 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     if (internal.oContext !== oContext) {
       internal.oContext = oContext as Context;
       if (this.isRelative()) {
+        // Match ClientTreeBinding.setContext: snapshot tree data for the new context
+        const oTreeData = this.oModel._getObject(internal.sPath, internal.oContext);
+        internal.oTreeData = internal.cloneData(oTreeData);
         this.subscribe();
         internal._fireChange({ reason: ChangeReason.Context });
       }

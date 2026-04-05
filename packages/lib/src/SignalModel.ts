@@ -235,9 +235,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         url: "",
         errorCode: -1,
         reason: "",
-        srcText: sJSON,
-        line: 0,
-        linepos: 0,
+        srcText: e instanceof Error ? e.message : String(e),
+        line: -1,
+        linepos: -1,
       });
     }
   }

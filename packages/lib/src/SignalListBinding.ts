@@ -51,15 +51,12 @@ export default class SignalListBinding extends ClientListBinding {
         internal.oList = internal.bUseExtendedChangeDetection
           ? (structuredClone(oList) as unknown[])
           : oList.slice();
-        internal.updateIndices();
       } else {
         internal.oList = internal.bUseExtendedChangeDetection
           ? (structuredClone(oList) as Record<string, unknown>)
           : Object.assign({}, oList);
-        // ClientListBinding.updateIndices only handles arrays.
-        // For objects, generate string indices from keys (JSONModel parity).
-        internal.aIndices = Object.keys(internal.oList);
       }
+      this.updateIndices();
       internal.applyFilter();
       internal.applySort();
       internal.iLength = internal._getLength();
@@ -67,6 +64,25 @@ export default class SignalListBinding extends ClientListBinding {
       internal.oList = [];
       internal.aIndices = [];
       internal.iLength = 0;
+    }
+  }
+
+  /**
+   * Override ClientListBinding.updateIndices to handle both arrays and objects.
+   * ClientListBinding only handles arrays (numeric indices). JSONListBinding
+   * overrides this to also handle objects (string keys via for...in).
+   */
+  updateIndices(): void {
+    const internal = asInternal(this);
+    internal.aIndices = [];
+    if (Array.isArray(internal.oList)) {
+      for (let i = 0; i < internal.oList.length; i++) {
+        internal.aIndices.push(i);
+      }
+    } else {
+      for (const key in internal.oList) {
+        internal.aIndices.push(key);
+      }
     }
   }
 

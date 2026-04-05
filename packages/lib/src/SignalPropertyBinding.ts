@@ -14,7 +14,7 @@ type ClientPropertyBindingInternal = ClientPropertyBinding & {
   oContext: Context | undefined;
   sPath: string;
   checkUpdate(bForceUpdate?: boolean): void;
-  getDataState(): { setValue(v: unknown): void };
+  getDataState(): { setValue(v: unknown): void; getControlMessages(): unknown[] };
   checkDataState(): void;
   _getValue(): unknown;
   _fireChange(oEvent: { reason: ChangeReason }): void;
@@ -117,6 +117,13 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   setContext(oContext?: Context): void {
     const self = asInternal(this);
     if (self.oContext != oContext) {
+      // Match ClientPropertyBinding: clear stale control messages before context switch
+      const Messaging = sap.ui.require("sap/ui/core/Messaging") as
+        | { removeMessages(messages: unknown[], bKeepMessages: boolean): void }
+        | undefined;
+      if (Messaging) {
+        Messaging.removeMessages(self.getDataState().getControlMessages(), true);
+      }
       const oldResolved = this.getResolvedPath();
       self.oContext = oContext;
       if (this.isRelative()) {
