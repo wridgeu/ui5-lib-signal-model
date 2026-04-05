@@ -174,6 +174,40 @@ In a path like `/currentUser/name`, the model resolves `/currentUser` as a compu
 
 **Computed paths are read-only.** `setProperty`, `mergeProperty`, and two-way bindings on computed paths (or their sub-paths) return `false` and log a warning. This matches the industry consensus: [Vue](https://vuejs.org/guide/essentials/computed.html), [MobX](https://mobx.js.org/computeds.html), [SolidJS](https://docs.solidjs.com/reference/basic-reactivity/create-memo), and [Angular Signals](https://angular.dev/guide/signals) all treat computeds as read-only.
 
+### Computed Re-Evaluation and Sub-Path Notifications
+
+When a computed re-evaluates, **all** bindings that resolve through it are notified, including sub-path bindings. Each notified binding compares its old value to its new value (`checkUpdate`), and only bindings whose value actually changed trigger a DOM update.
+
+```typescript
+model.createComputed("/computedRows", ["/sourceRows"], (rows) =>
+  rows.map((r) => ({ ...r, display: `${r.name} ($${r.price})` })),
+);
+
+// Grid table bound to /computedRows, each cell bound to {name}, {price}, etc.
+// When /sourceRows is replaced (setProperty("/sourceRows", newArray)):
+// 1. The computed re-evaluates → returns a new array
+// 2. ALL cell bindings are notified (they resolve through the computed)
+// 3. Each cell runs checkUpdate — compares old vs new value
+// 4. Only cells whose value actually changed trigger a DOM update
+```
+
+**Rendering is correct** — unchanged cells do not re-render. But every binding performs the comparison check. For a grid table with 2000 rows and 3 columns, 6000 bindings are checked even if only 1 value changed.
+
+**Why this differs from MobX and Vue.** MobX and Vue use Proxy-based reactivity: when you access `computed.value[3].name`, the framework tracks that specific property access and creates a fine-grained dependency. When the computed re-evaluates, only observers of the specific properties that changed are notified. TC39 Signals do not have a Proxy layer — a `Signal.Computed` is a single reactive node with no internal structure. All observers are notified when the computed changes, regardless of which part of the return value changed.
+
+**Dependency granularity matters.** A computed that depends on a parent path (e.g., `/sourceRows`) re-evaluates when that path is **replaced** (`setProperty("/sourceRows", newArray)`). It does **not** re-evaluate when a sub-path is modified in-place (`setProperty("/sourceRows/3/name", "new")`), because the signal at `/sourceRows` (the array reference) did not change. To react to individual property changes within an array, use multiple computeds with specific dependencies, or bind directly to the source paths.
+
+```typescript
+// Re-evaluates when /sourceRows is replaced:
+model.createComputed("/computed", ["/sourceRows"], (rows) => transform(rows));
+
+// Does NOT re-evaluate when /sourceRows/3/name changes in-place:
+model.setProperty("/sourceRows/3/name", "updated"); // computed is NOT notified
+model.setProperty("/sourceRows", [...newArray]); // computed IS notified
+```
+
+This behavior is consistent with the TC39 Signals specification and matches how signals work in SolidJS and Angular Signals. MobX and Vue achieve finer granularity through Proxy wrappers, which is a fundamentally different reactive architecture.
+
 ```typescript
 model.setProperty("/currentUser/name", "Bob"); // returns false — computed path is read-only
 ```
