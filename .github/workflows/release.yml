@@ -1,8 +1,18 @@
 name: Release
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      force-publish:
+        description: "Force npm publish (bypass release_created check)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -10,7 +20,11 @@ permissions:
   id-token: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   release-please:
+    needs: ci
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs['packages/lib--release_created'] }}
@@ -18,13 +32,17 @@ jobs:
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
         id: release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   publish:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: [release-please, ci]
+    if: needs.release-please.outputs.release_created == 'true' || inputs.force-publish == true
     runs-on: ubuntu-latest
-    environment: npm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -33,9 +51,6 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
       - run: npm ci
-      - run: npm run check
-      - run: npm run test:qunit
       - run: npm run build
-      - run: npm publish --workspace=packages/lib --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Authenticate via GitHub OIDC (id-token: write); empty token prevents PAT override
+      - run: NODE_AUTH_TOKEN="" npm publish -w packages/lib --provenance --access public
