@@ -199,6 +199,7 @@ async function runBenchmark(runIndex) {
 
   const code = await new Promise((resolve) => child.on("close", resolve));
   if (code !== 0) {
+    await unlink(tmpFile).catch(() => {});
     console.error(`\n${RED}Run ${runIndex} failed with exit code ${code}${RESET}`);
     process.exit(1);
   }
