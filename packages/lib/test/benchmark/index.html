@@ -784,120 +784,6 @@
       }
 
       /**
-       * Grid table binding with computed rows (virtualized).
-       *
-       * For SignalModel: creates a computed at /computedRows that derives from
-       * /sourceRows, adding a "display" field per row. The grid table binds
-       * to the computed path. Measures the overhead of routing a list binding
-       * through the computed signal layer.
-       *
-       * For JSONModel: binds directly to /sourceRows (no computed concept).
-       */
-      async function benchGridTableComputedReplace(
-        ModelClass,
-        isSignal,
-        n,
-        warmupRounds,
-        measuredRounds,
-      ) {
-        var data = { sourceRows: [] };
-        for (var i = 0; i < n; i++) {
-          data.sourceRows.push({
-            id: i,
-            name: "item-" + i,
-            price: (i * 1.5).toFixed(2),
-            active: i % 2 === 0,
-          });
-        }
-        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
-        var container = document.getElementById("hidden-container");
-
-        var rowsPath = "/sourceRows";
-        if (isSignal && model.createComputed) {
-          model.createComputed("/computedRows", ["/sourceRows"], function (rows) {
-            return rows.map(function (row) {
-              return {
-                id: row.id,
-                name: row.name,
-                price: row.price,
-                display: row.name + " ($" + row.price + ")",
-              };
-            });
-          });
-          rowsPath = "/computedRows";
-        }
-
-        var gridTable = new sap.ui.table.Table({
-          visibleRowCount: 20,
-          rows: "{" + rowsPath + "}",
-          columns: [
-            new sap.ui.table.Column({
-              label: new sap.m.Text({ text: "ID" }),
-              template: new sap.m.Text({ text: "{id}" }),
-            }),
-            new sap.ui.table.Column({
-              label: new sap.m.Text({ text: "Name" }),
-              template: new sap.m.Text({ text: "{name}" }),
-            }),
-            new sap.ui.table.Column({
-              label: new sap.m.Text({ text: "Price" }),
-              template: new sap.m.Text({ text: "{price}" }),
-            }),
-          ],
-        });
-        gridTable.setModel(model);
-        gridTable.placeAt(container);
-        await flush();
-        await new Promise(function (r) {
-          setTimeout(r, 100);
-        });
-
-        // Warmup: replace the entire source array
-        for (var w = 0; w < warmupRounds; w++) {
-          var warmupRows = [];
-          for (var j = 0; j < n; j++) {
-            warmupRows.push({
-              id: j,
-              name: "warm-" + w + "-" + j,
-              price: (j * 2).toFixed(2),
-              active: true,
-            });
-          }
-          model.setProperty("/sourceRows", warmupRows);
-          await flush();
-          await new Promise(function (r) {
-            setTimeout(r, 50);
-          });
-        }
-
-        var times = [];
-        for (var round = 0; round < measuredRounds; round++) {
-          var newRows = [];
-          for (var k = 0; k < n; k++) {
-            newRows.push({
-              id: k,
-              name: "meas-" + round + "-" + k,
-              price: (k * 3).toFixed(2),
-              active: k % 3 === 0,
-            });
-          }
-          var start = performance.now();
-          model.setProperty("/sourceRows", newRows);
-          await flush();
-          times.push(performance.now() - start);
-          // Allow DOM to settle between rounds (outside timed region)
-          await new Promise(function (r) {
-            setTimeout(r, 10);
-          });
-        }
-
-        gridTable.destroy();
-        model.destroy();
-        container.innerHTML = "";
-        return times;
-      }
-
-      /**
        * Tree binding - replace tree data
        *
        * Creates a sap.m.Tree with hierarchical data via tree binding, then replaces it.
@@ -1917,49 +1803,7 @@
           signal: stats(rGrid.signalTimes),
         });
 
-        // --- Scenario 10: Grid table binding with computed rows (virtualized) ---
-        setStatus(
-          "Running: grid table (computed rows) with " +
-            n +
-            " rows (virtualized, alternating)...",
-        );
-        var gridCompJsonTimes = [];
-        var gridCompSignalTimes = [];
-        var gridCompHalf = Math.ceil(measuredRounds / 2);
-        for (var gcp = 0; gcp < gridCompHalf; gcp++) {
-          if (gcp % 2 === 0) {
-            var gcjt = await benchGridTableComputedReplace(base.JSONModel, false, n, warmup, 1);
-            gridCompJsonTimes.push(gcjt[0]);
-            var gcst = await benchGridTableComputedReplace(
-              base.SignalModel,
-              true,
-              n,
-              warmup,
-              1,
-            );
-            gridCompSignalTimes.push(gcst[0]);
-          } else {
-            var gcst2 = await benchGridTableComputedReplace(
-              base.SignalModel,
-              true,
-              n,
-              warmup,
-              1,
-            );
-            gridCompSignalTimes.push(gcst2[0]);
-            var gcjt2 = await benchGridTableComputedReplace(base.JSONModel, false, n, warmup, 1);
-            gridCompJsonTimes.push(gcjt2[0]);
-          }
-        }
-        pushResult({
-          name: "Grid table (computed rows), " + n + " rows",
-          detail: "Computed derives rows, 3 columns, virtualized (20 visible)",
-          category: "Computed (sap.ui.table.Table)",
-          json: stats(gridCompJsonTimes),
-          signal: stats(gridCompSignalTimes),
-        });
-
-        // --- Scenario 11: Tree binding ---
+        // --- Scenario 10: Tree binding ---
         var treeN = Math.min(n, 200); // Cap tree nodes to avoid DOM explosion
         setStatus("Running: tree binding replace with " + treeN + " root nodes (alternating)...");
         var r8 = await runAlternating(
@@ -1975,7 +1819,7 @@
           signal: stats(r8.signalTimes),
         });
 
-        // --- Scenario 12: Expression binding ---
+        // --- Scenario 11: Expression binding ---
         var exprN = Math.min(n, 500);
         setStatus("Running: expression binding with " + exprN + " controls (alternating)...");
         var r9 = await runAlternating(
@@ -1991,7 +1835,7 @@
           signal: stats(r9.signalTimes),
         });
 
-        // --- Scenario 13: Computed signals ---
+        // --- Scenario 12: Computed signals ---
         var compN = n;
         setStatus("Running: computed signals with " + compN + " computeds (alternating)...");
         // Computed needs special handling: isSignal flag differs per model
@@ -2019,7 +1863,7 @@
           signal: stats(compSignalTimes),
         });
 
-        // --- Scenario 14: Computed signals with redefinition ---
+        // --- Scenario 13: Computed signals with redefinition ---
         setStatus("Running: computed (redefined) with " + compN + " computeds (alternating)...");
         var compRedefJsonTimes = [];
         var compRedefSignalTimes = [];
@@ -2044,7 +1888,7 @@
           signal: stats(compRedefSignalTimes),
         });
 
-        // --- Scenario 15: Computed sub-path traversal ---
+        // --- Scenario 14: Computed sub-path traversal ---
         setStatus("Running: computed sub-path with " + compN + " computeds (alternating)...");
         var compSubJsonTimes = [];
         var compSubSignalTimes = [];
@@ -2069,7 +1913,7 @@
           signal: stats(compSubSignalTimes),
         });
 
-        // --- Scenario 16: Computed redefine with sub-path bindings ---
+        // --- Scenario 15: Computed redefine with sub-path bindings ---
         setStatus("Running: computed redefine + sub-path with " + compN + " computeds (alternating)...");
         var compRedefSubJsonTimes = [];
         var compRedefSubSignalTimes = [];
@@ -2094,7 +1938,7 @@
           signal: stats(compRedefSubSignalTimes),
         });
 
-        // --- Scenario 17: setData replace ---
+        // --- Scenario 16: setData replace ---
         setStatus("Running: setData replace with " + n + " bindings (alternating)...");
         var r11 = await runAlternating(
           benchSetDataReplace,
@@ -2109,7 +1953,7 @@
           signal: stats(r11.signalTimes),
         });
 
-        // --- Scenario 18: setData merge (shallow) ---
+        // --- Scenario 17: setData merge (shallow) ---
         setStatus("Running: setData merge (shallow) with " + n + " bindings (alternating)...");
         var r12 = await runAlternating(
           benchSetDataMergeShallow,
@@ -2124,7 +1968,7 @@
           signal: stats(r12.signalTimes),
         });
 
-        // --- Scenario 19: setData merge (deep) ---
+        // --- Scenario 18: setData merge (deep) ---
         setStatus("Running: setData merge (deep) with " + n + " bindings (alternating)...");
         var r13 = await runAlternating(
           benchSetDataMergeDeep,
@@ -2139,7 +1983,7 @@
           signal: stats(r13.signalTimes),
         });
 
-        // --- Scenario 20: setData merge (deeply nested config) ---
+        // --- Scenario 19: setData merge (deeply nested config) ---
         setStatus(
           "Running: setData merge (deeply nested config) with " + n + " bindings (alternating)...",
         );
@@ -2156,7 +2000,7 @@
           signal: stats(r14.signalTimes),
         });
 
-        // --- Scenario 21: setData merge (large dataset, pinpoint) ---
+        // --- Scenario 20: setData merge (large dataset, pinpoint) ---
         var largeN = n * 10;
         setStatus(
           "Running: setData merge (large dataset " +
@@ -2178,7 +2022,7 @@
           signal: stats(r15.signalTimes),
         });
 
-        // --- Scenario 22: Real-world checkPerformanceOfUpdate threshold ---
+        // --- Scenario 21: Real-world checkPerformanceOfUpdate threshold ---
         setStatus(
           "Running: real-world checkPerformanceOfUpdate threshold (3,449 bindings, 29 calls, alternating)...",
         );
@@ -2195,7 +2039,7 @@
           signal: stats(r16.signalTimes),
         });
 
-        // --- Scenario 23: Deep-path setProperty overhead ---
+        // --- Scenario 22: Deep-path setProperty overhead ---
         setStatus("Running: deep-path setProperty with " + n + " bindings (alternating)...");
         var r20 = await runAlternating(
           benchDeepPathSetProperty,
