@@ -64,39 +64,56 @@ JSON output format:
     {
       "name": "Update all 1000 bindings",
       "category": "Property (sap.m.Text)",
-      "json": { "median": 204.6, "mean": 210.3, "stddev": 12.1, "min": 195.0, "max": 240.1, "p5": 196.2, "p95": 235.8 },
-      "signal": { "median": 18.5, "mean": 19.1, "stddev": 1.8, "min": 16.2, "max": 23.4, "p5": 16.5, "p95": 22.9 }
+      "json": {
+        "median": 204.6,
+        "mean": 210.3,
+        "stddev": 12.1,
+        "min": 195.0,
+        "max": 240.1,
+        "p5": 196.2,
+        "p95": 235.8
+      },
+      "signal": {
+        "median": 18.5,
+        "mean": 19.1,
+        "stddev": 1.8,
+        "min": 16.2,
+        "max": 23.4,
+        "p5": 16.5,
+        "p95": 22.9
+      }
     }
   ]
 }
+```
 
 ## What It Tests
 
 22 scenarios across all binding types, model operations, and merge strategies:
 
-| #   | Binding Type                | Scenario                                | What It Measures                                            |
-| --- | --------------------------- | --------------------------------------- | ----------------------------------------------------------- |
-| 1   | Model API                   | setProperty throughput (no bindings)    | Raw per-call overhead of model layer                        |
-| 2   | Model API                   | getProperty throughput                  | Read performance                                            |
-| 3   | Property (`sap.m.Text`)     | Single-path update, N bindings          | O(1) vs O(N) notification, the key benchmark                |
-| 4   | Property (`sap.m.Text`)     | Update all N bindings (sync)            | O(N) vs O(N^2) cumulative cost                              |
-| 5   | Property (`sap.m.Text`)     | Update all N bindings (async)           | JSONModel `bAsyncUpdate=true` vs signals                    |
-| 6   | Property (`sap.m.Text`)     | Sparse async, 1 of N (async)           | Single path change with N bindings, async mode              |
-| 7   | List (`sap.m.List`)         | List binding replace                    | Array replacement with `StandardListItem` template          |
-| 8   | List (`sap.m.Table`)        | Table binding replace                   | Row replacement with 3 `ColumnListItem` cells               |
-| 9   | List (`sap.ui.table.Table`) | Grid table binding replace              | Virtualized row replacement, 3 columns, no row cap          |
-| 10  | Tree (`sap.m.Tree`)         | Tree binding replace                    | Hierarchical data replacement with `StandardTreeItem`       |
-| 11  | Expression (`sap.m.Text`)   | Expression binding                      | Composite `{= ${/path1} + ${/path2}}` re-evaluation         |
-| 12  | Computed (`sap.m.Text`)     | Computed signals                        | `createComputed` dependency chain propagation               |
-| 13  | Computed (`sap.m.Text`)     | Computed (redefined)                    | `removeComputed` + `createComputed` re-subscribe cost       |
-| 14  | Computed (`sap.m.Text`)     | Computed sub-path                       | Binding to sub-path of computed object, `_getObject` traversal |
-| 15  | Computed (`sap.m.Text`)     | Computed redefine + sub-path            | `_firePathResubscribe` prefix scan with sub-path bindings   |
-| 16  | Property (`sap.m.Text`)     | setData replace                         | Full data replacement propagation                           |
-| 17  | Property (`sap.m.Text`)     | setData merge (shallow)                 | Merge 5 items into N, small payload into large data         |
-| 18  | Property (`sap.m.Text`)     | setData merge (deep)                    | Merge all N items, full payload, worst case for merge       |
-| 19  | Property (`sap.m.Text`)     | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree          |
-| 20  | Property (`sap.m.Text`)     | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N, tests O(k) vs O(n) merge          |
-| 21  | Property (`sap.m.Text`)     | Real-world: checkPerformanceOfUpdate    | 3,449 bindings, 29 sync calls, exceeds SAP's 100k threshold |
+| #   | Binding Type                | Scenario                                | What It Measures                                                |
+| --- | --------------------------- | --------------------------------------- | --------------------------------------------------------------- |
+| 1   | Model API                   | setProperty throughput (no bindings)    | Raw per-call overhead of model layer                            |
+| 2   | Model API                   | getProperty throughput                  | Read performance                                                |
+| 3   | Property (`sap.m.Text`)     | Single-path update, N bindings          | O(1) vs O(N) notification, the key benchmark                    |
+| 4   | Property (`sap.m.Text`)     | Update all N bindings (sync)            | O(N) vs O(N^2) cumulative cost                                  |
+| 5   | Property (`sap.m.Text`)     | Update all N bindings (async)           | JSONModel `bAsyncUpdate=true` vs signals                        |
+| 6   | Property (`sap.m.Text`)     | Sparse async, 1 of N (async)            | Single path change with N bindings, async mode                  |
+| 7   | List (`sap.m.List`)         | List binding replace                    | Array replacement with `StandardListItem` template              |
+| 8   | List (`sap.m.Table`)        | Table binding replace                   | Row replacement with 3 `ColumnListItem` cells                   |
+| 9   | List (`sap.ui.table.Table`) | Grid table binding replace              | Virtualized row replacement, 3 columns, no row cap              |
+| 10  | Tree (`sap.m.Tree`)         | Tree binding replace                    | Hierarchical data replacement with `StandardTreeItem`           |
+| 11  | Expression (`sap.m.Text`)   | Expression binding                      | Composite `{= ${/path1} + ${/path2}}` re-evaluation             |
+| 12  | Computed (`sap.m.Text`)     | Computed signals                        | `createComputed` dependency chain propagation                   |
+| 13  | Computed (`sap.m.Text`)     | Computed (redefined)                    | `removeComputed` + `createComputed` re-subscribe cost           |
+| 14  | Computed (`sap.m.Text`)     | Computed sub-path                       | Binding to sub-path of computed object, `_getObject` traversal  |
+| 15  | Computed (`sap.m.Text`)     | Computed redefine + sub-path            | `_firePathResubscribe` prefix scan with sub-path bindings       |
+| 16  | Property (`sap.m.Text`)     | setData replace                         | Full data replacement propagation                               |
+| 17  | Property (`sap.m.Text`)     | setData merge (shallow)                 | Merge 5 items into N, small payload into large data             |
+| 18  | Property (`sap.m.Text`)     | setData merge (deep)                    | Merge all N items, full payload, worst case for merge           |
+| 19  | Property (`sap.m.Text`)     | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree              |
+| 20  | Property (`sap.m.Text`)     | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N, tests O(k) vs O(n) merge              |
+| 21  | Property (`sap.m.Text`)     | Real-world: checkPerformanceOfUpdate    | 3,449 bindings, 29 sync calls, exceeds SAP's 100k threshold     |
 | 22  | Property (`sap.m.Text`)     | Deep-path setProperty (no computeds)    | 4-segment path `_findComputedAncestor` overhead, zero computeds |
 
 ### Merge Scenario Design
@@ -156,30 +173,30 @@ Uses Bessel-corrected (sample) variance. Reports: median, mean, standard deviati
 
 ### Full results at 2000 bindings
 
-| Binding Type                  | Scenario                                | JSONModel  | SignalModel | Comparison         |
-| ----------------------------- | --------------------------------------- | ---------- | ----------- | ------------------ |
-| Model API                     | setProperty (no bindings)               | 0.20ms     | 0.30ms      | ~equal             |
-| Model API                     | getProperty                             | 0.00ms     | 0.10ms      | ~equal             |
-| Property (sap.m.Text)         | Single-path update, 2000 bindings       | 5.45ms     | 5.00ms      | ~equal             |
-| Property (sap.m.Text)         | Update all 2000 (sync)                  | 823.85ms   | 48.80ms     | **~17x faster**    |
-| Property (sap.m.Text)         | Update all 2000 (async)                 | 17.25ms    | 17.10ms     | ~equal             |
-| Property (sap.m.Text)         | Sparse async, 1 of 2000                | 4.95ms     | 4.75ms      | ~equal             |
-| List (sap.m.List)             | List binding replace, 500 items         | 8.45ms     | 8.50ms      | ~equal             |
-| List (sap.m.Table)            | Table binding replace, 500 rows         | 7.15ms     | 7.50ms      | ~equal             |
-| List (sap.ui.table.Table)     | Grid table binding replace, 2000 rows   | 7.25ms     | 5.80ms      | ~equal             |
-| Tree (sap.m.Tree)             | Tree binding replace, 200 nodes         | 10.00ms    | 9.20ms      | ~equal             |
-| Expression (sap.m.Text)       | Expression binding, 500 controls        | 5.20ms     | 4.60ms      | ~equal             |
-| Computed (sap.m.Text)         | Computed signals, 2000 computeds        | 5.10ms     | 4.85ms      | ~equal             |
-| Computed (sap.m.Text)         | Computed (redefined), 2000 computeds    | 4.80ms     | 4.75ms      | ~equal             |
-| Computed (sap.m.Text)         | Computed sub-path, 2000 computeds       | 5.45ms     | 4.80ms      | ~equal             |
-| Computed (sap.m.Text)         | Computed redefine + sub-path, 2000      | 5.30ms     | 4.80ms      | ~equal             |
-| Property (sap.m.Text)         | setData replace, 2000 bindings          | 20.35ms    | 21.95ms     | ~equal             |
-| Property (sap.m.Text)         | setData merge (shallow), 5 into 2k      | 5.20ms     | 4.80ms      | ~equal             |
-| Property (sap.m.Text)         | setData merge (deep), all 2k            | 20.00ms    | 21.55ms     | ~equal             |
-| Property (sap.m.Text)         | setData merge (nested config)           | 5.45ms     | 4.60ms      | ~equal             |
-| Property (sap.m.Text)         | setData merge (large, pinpoint) 20k     | 20.35ms    | 4.75ms      | **~4x faster**     |
-| Property (sap.m.Text)         | Real-world: checkPerformanceOfUpdate    | 24.90ms    | 6.50ms      | **~4x faster**     |
-| Property (sap.m.Text)         | Deep-path setProperty (no computeds)    | 5.25ms     | 4.85ms      | ~equal             |
+| Binding Type              | Scenario                              | JSONModel | SignalModel | Comparison      |
+| ------------------------- | ------------------------------------- | --------- | ----------- | --------------- |
+| Model API                 | setProperty (no bindings)             | 0.20ms    | 0.30ms      | ~equal          |
+| Model API                 | getProperty                           | 0.00ms    | 0.10ms      | ~equal          |
+| Property (sap.m.Text)     | Single-path update, 2000 bindings     | 5.45ms    | 5.00ms      | ~equal          |
+| Property (sap.m.Text)     | Update all 2000 (sync)                | 823.85ms  | 48.80ms     | **~17x faster** |
+| Property (sap.m.Text)     | Update all 2000 (async)               | 17.25ms   | 17.10ms     | ~equal          |
+| Property (sap.m.Text)     | Sparse async, 1 of 2000               | 4.95ms    | 4.75ms      | ~equal          |
+| List (sap.m.List)         | List binding replace, 500 items       | 8.45ms    | 8.50ms      | ~equal          |
+| List (sap.m.Table)        | Table binding replace, 500 rows       | 7.15ms    | 7.50ms      | ~equal          |
+| List (sap.ui.table.Table) | Grid table binding replace, 2000 rows | 7.25ms    | 5.80ms      | ~equal          |
+| Tree (sap.m.Tree)         | Tree binding replace, 200 nodes       | 10.00ms   | 9.20ms      | ~equal          |
+| Expression (sap.m.Text)   | Expression binding, 500 controls      | 5.20ms    | 4.60ms      | ~equal          |
+| Computed (sap.m.Text)     | Computed signals, 2000 computeds      | 5.10ms    | 4.85ms      | ~equal          |
+| Computed (sap.m.Text)     | Computed (redefined), 2000 computeds  | 4.80ms    | 4.75ms      | ~equal          |
+| Computed (sap.m.Text)     | Computed sub-path, 2000 computeds     | 5.45ms    | 4.80ms      | ~equal          |
+| Computed (sap.m.Text)     | Computed redefine + sub-path, 2000    | 5.30ms    | 4.80ms      | ~equal          |
+| Property (sap.m.Text)     | setData replace, 2000 bindings        | 20.35ms   | 21.95ms     | ~equal          |
+| Property (sap.m.Text)     | setData merge (shallow), 5 into 2k    | 5.20ms    | 4.80ms      | ~equal          |
+| Property (sap.m.Text)     | setData merge (deep), all 2k          | 20.00ms   | 21.55ms     | ~equal          |
+| Property (sap.m.Text)     | setData merge (nested config)         | 5.45ms    | 4.60ms      | ~equal          |
+| Property (sap.m.Text)     | setData merge (large, pinpoint) 20k   | 20.35ms   | 4.75ms      | **~4x faster**  |
+| Property (sap.m.Text)     | Real-world: checkPerformanceOfUpdate  | 24.90ms   | 6.50ms      | **~4x faster**  |
+| Property (sap.m.Text)     | Deep-path setProperty (no computeds)  | 5.25ms    | 4.85ms      | ~equal          |
 
 ### Honest Observations
 
@@ -197,13 +214,9 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter. When `true`, it ba
 > SignalModel originally showed **2.5x slower** performance in this scenario (~52ms vs ~21ms at 2000 bindings). The root cause was investigated through several steps:
 >
 > 1. **Watcher re-arm hypothesis.** The TC39 `Signal.subtle.Watcher` requires an explicit re-arm (`signal.get()` + `watcher.watch()`) after each notification. Initial suspicion was that this per-binding overhead caused the gap. Other frameworks (Preact, Solid, Vue) avoid it via persistent subscriptions.
->
 > 2. **Polyfill swap.** Tested [alien-signals](https://github.com/stackblitz/alien-signals) (a high-performance reactive engine, being considered as the new `signal-polyfill` base in [PR #44](https://github.com/proposal-signals/signal-polyfill/pull/44)) as a drop-in replacement. Result: identical performance across all scenarios. The polyfill engine was not the bottleneck.
->
 > 3. **Flush loop instrumentation.** Instrumented the flush loop to measure per-step cost. `checkUpdate()` (UI5's binding refresh) accounted for the majority of the flush time. The re-arm calls (`signal.get()` + `watcher.watch()`) appeared small in instrumentation and were confirmed negligible by removing `signal.get()` entirely — 143 tests passed but performance was unchanged. The re-arm cycle was not the bottleneck.
->
 > 4. **Root cause.** The cost was not in the flush loop at all. It was in the `setProperty` loop: each of the 2000 calls fired a synchronous Watcher `notify` callback (reactive graph traversal + `Map.set()` in FlushQueue), even when `bAsyncUpdate=true` was meant to defer work. JSONModel's async path skips all notification during the loop and syncs once afterward.
->
 > 5. **Fix.** When `bAsyncUpdate=true`, SignalModel now writes data immediately but skips signal notification entirely. A single `setTimeout` calls `registry.invalidateAll()` to sync all signals at once. This matches JSONModel's batching strategy: zero notification cost during the write loop, one batched pass afterward. Result: **~equal** performance.
 
 **In-place merge:**
@@ -254,4 +267,7 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), se
 - [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600) - documents the `checkUpdate` O(N) bottleneck
 - [openui5 issue 4351](https://github.com/UI5/openui5/issues/4351) - related DOM accumulation problem in large apps
 - SAP commit `cb6c7f7a` - added `checkPerformanceOfUpdate` warning at 100,000 cumulative binding checks
+
+```
+
 ```
