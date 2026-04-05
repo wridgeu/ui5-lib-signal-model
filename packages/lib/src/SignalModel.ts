@@ -401,6 +401,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   ): SignalPropertyBinding {
     // ClientPropertyBinding's constructor is protected in type stubs but callable from subclasses at runtime
     const binding = new (SignalPropertyBinding as unknown as new (
+      // oxlint-ignore-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
       model: SignalModel<any>,
       path: string,
       context?: Context,
@@ -418,6 +419,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     mParameters?: object,
   ): SignalListBinding {
     const binding = new (SignalListBinding as unknown as new (
+      // oxlint-ignore-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
       model: SignalModel<any>,
       path: string,
       context?: Context,
@@ -437,6 +439,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     aSorters?: object | object[],
   ): SignalTreeBinding {
     const binding = new (SignalTreeBinding as unknown as new (
+      // oxlint-ignore-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
       model: SignalModel<any>,
       path: string,
       context?: Context,
