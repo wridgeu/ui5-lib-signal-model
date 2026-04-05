@@ -1,4 +1,4 @@
-import { Signal } from "signal-polyfill";
+import type { Signal } from "signal-polyfill";
 import SignalRegistry from "ui5/model/signal/SignalRegistry";
 
 QUnit.module("SignalRegistry", () => {

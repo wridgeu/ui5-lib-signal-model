@@ -11,6 +11,7 @@ export default class StrictMode extends Controller {
 
   override onInit(): void {
     this.strictModel = new SignalModel({ name: "Alice", age: 28 }, { strictLeafCheck: true });
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
     this.getView()!.setModel(this.strictModel, "strict");
   }
 
@@ -19,6 +20,7 @@ export default class StrictMode extends Controller {
     const value = (this.byId("valueInput") as Input).getValue();
     const result = this.byId("result") as MessageStrip;
 
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- assigned in onInit
     const success = this.strictModel!.setProperty(path, value);
     if (success) {
       result.setText(`Set "${path}" = "${value}"`);

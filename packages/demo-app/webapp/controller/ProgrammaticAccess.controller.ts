@@ -1,5 +1,5 @@
 import Controller from "sap/ui/core/mvc/Controller";
-import SignalModel from "ui5/model/signal/SignalModel";
+import type SignalModel from "ui5/model/signal/SignalModel";
 import type Text from "sap/m/Text";
 import type Input from "sap/m/Input";
 
@@ -8,6 +8,7 @@ import type Input from "sap/m/Input";
  */
 export default class ProgrammaticAccess extends Controller {
   onReadSignal(): void {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
     const model = this.getView()!.getModel() as SignalModel;
     const signal = model.getSignal("/firstName");
     const display = this.byId("signalValue") as Text;
@@ -15,6 +16,7 @@ export default class ProgrammaticAccess extends Controller {
   }
 
   onWriteSignal(): void {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
     const model = this.getView()!.getModel() as SignalModel;
     const input = this.byId("writeInput") as Input;
     const value = input.getValue();

@@ -115,6 +115,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     // Combine the model's internal abort signal with any user-provided signal.
     // AbortSignal.any() fires when either signal aborts — on destroy() or caller abort.
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- initialized in constructor
     const signals = [this._abortController!.signal, oSignal].filter(Boolean) as AbortSignal[];
     const combinedSignal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 
@@ -253,6 +254,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (!oContext || typeof (oContext as Context).getPath === "function") {
       const sResolvedPath = asInternal(this).resolve(sPath, oContext as Context | undefined);
       if (sResolvedPath && this.registry.isComputed(sResolvedPath)) {
+        // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
         return this.registry.get(sResolvedPath)!.get();
       }
     }
@@ -401,7 +403,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   ): SignalPropertyBinding {
     // ClientPropertyBinding's constructor is protected in type stubs but callable from subclasses at runtime
     const binding = new (SignalPropertyBinding as unknown as new (
-      // oxlint-ignore-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
+      // oxlint-disable-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
       model: SignalModel<any>,
       path: string,
       context?: Context,
@@ -419,7 +421,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     mParameters?: object,
   ): SignalListBinding {
     const binding = new (SignalListBinding as unknown as new (
-      // oxlint-ignore-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
+      // oxlint-disable-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
       model: SignalModel<any>,
       path: string,
       context?: Context,
@@ -439,7 +441,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     aSorters?: object | object[],
   ): SignalTreeBinding {
     const binding = new (SignalTreeBinding as unknown as new (
-      // oxlint-ignore-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
+      // oxlint-disable-next-line typescript/no-explicit-any -- UI5 type stubs: protected constructor workaround
       model: SignalModel<any>,
       path: string,
       context?: Context,
@@ -487,6 +489,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       while (idx > 0) {
         const sParentPath = sPath.substring(0, idx);
         if (this.registry.isComputed(sParentPath)) {
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
           return this.registry.get(sParentPath)!;
         }
         idx = sPath.lastIndexOf("/", idx - 1);
@@ -552,6 +555,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Computed signals live in the registry, not in oData.
     // Return the computed value so list/tree bindings can see it.
     if (this.registry.isComputed(sResolvedPath)) {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
       return this.registry.get(sResolvedPath)!.get();
     }
 
@@ -567,6 +571,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         sCurrentPath += "/" + sPart;
 
         if (this.registry.isComputed(sCurrentPath)) {
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
           oNode = this.registry.get(sCurrentPath)!.get();
           continue;
         }

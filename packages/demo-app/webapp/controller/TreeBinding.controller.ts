@@ -32,10 +32,12 @@ export default class TreeBinding extends Controller {
       ],
     });
     this.treeModel = treeModel;
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
     this.getView()!.setModel(treeModel, "tree");
   }
 
   onAddEmployee(): void {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
     const model = this.getView()!.getModel("tree") as SignalModel;
     const ctoReports = model.getProperty("/org/0/reports/0/reports") as unknown[];
     const updated = [...ctoReports, { name: "New Hire", role: "Developer", reports: [] }];

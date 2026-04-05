@@ -3,7 +3,7 @@ import Filter from "sap/ui/model/Filter";
 import FilterOperator from "sap/ui/model/FilterOperator";
 import Sorter from "sap/ui/model/Sorter";
 import type ListBinding from "sap/ui/model/ListBinding";
-import SignalModel from "ui5/model/signal/SignalModel";
+import type SignalModel from "ui5/model/signal/SignalModel";
 import type Table from "sap/m/Table";
 import type SearchField from "sap/m/SearchField";
 import type Event from "sap/ui/base/Event";
@@ -37,6 +37,7 @@ export default class ListBindingController extends Controller {
   }
 
   onAddItem(): void {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
     const model = this.getView()!.getModel() as SignalModel;
     const items = (model.getProperty("/items") as unknown[]).slice();
     const newId = items.length + 1;
