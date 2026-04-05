@@ -31,7 +31,7 @@ const { values } = parseArgs({
   options: {
     bindings: { type: "string", default: "500" },
     iterations: { type: "string", default: "500" },
-    rounds: { type: "string", default: "10" },
+    rounds: { type: "string", default: "20" },
     json: { type: "string" },
     help: { type: "boolean", short: "h", default: false },
   },
@@ -45,7 +45,7 @@ if (values.help) {
 Options:
   --bindings N      Number of bindings (default: 500)
   --iterations N    Iterations per scenario (default: 500)
-  --rounds N        Measured rounds (default: 10)
+  --rounds N        Measured rounds (default: 20)
   --json <file>     Save results to JSON file
   -h, --help        Show this help`);
   process.exit(0);

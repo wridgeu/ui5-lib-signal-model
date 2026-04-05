@@ -12,7 +12,7 @@
  * |--------------------|---------|--------------------------------|
  * | `BENCH_BINDINGS`   | `500`   | Number of UI5 bindings         |
  * | `BENCH_ITERATIONS` | `500`   | Iterations per scenario        |
- * | `BENCH_ROUNDS`     | `10`    | Measured rounds (alternating)  |
+ * | `BENCH_ROUNDS`     | `20`    | Measured rounds (alternating)  |
  * | `BENCH_JSON`       | —       | Path to save JSON results to   |
  *
  * @example
