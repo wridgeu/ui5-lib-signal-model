@@ -371,13 +371,13 @@ npm run bench -- --bindings 1000 --json results.json   # custom config + JSON ex
 
 The benchmark uses alternating A-B execution order, JIT warmup, Bessel-corrected sample statistics, and a three-stage async flush protocol. It directly measures the `checkUpdate` bottleneck documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-With default synchronous `setProperty`, **"Update all N bindings"** shows ~15x improvement at 2000 bindings (807ms vs 52ms). The advantage scales super-linearly: JSONModel's cost is O(*n*²) (2000 calls × 2000 bindings checked each), while SignalModel's is O(_n_) (2000 notifications, one per changed path).
+With default synchronous `setProperty`, **"Update all N bindings"** shows ~17x improvement at 2000 bindings (854ms vs 49ms). The advantage scales super-linearly: JSONModel's cost is O(*n*²) (2000 calls × 2000 bindings checked each), while SignalModel's is O(_n_) (2000 notifications, one per changed path).
 
-With JSONModel's `bAsyncUpdate=true`, both models perform equivalently (~18ms each at 2000 bindings). SignalModel defers signal notifications when `bAsyncUpdate` is set, writing data immediately and syncing all signals in a single `setTimeout` pass — matching JSONModel's batching strategy.
+With JSONModel's `bAsyncUpdate=true`, both models perform equivalently (~19ms each at 2000 bindings). SignalModel defers signal notifications when `bAsyncUpdate` is set, writing data immediately and syncing all signals in a single `setTimeout` pass — matching JSONModel's batching strategy.
 
-For full data replacement (`setData`), both models perform equivalently. For list/table/tree replace operations, both are equivalent because DOM rendering cost dominates. In-place merge shines at scale: merging 3 items into 20,000 is **4.20x faster** because JSONModel deep-clones all 20,000 items while SignalModel touches only the 3 payload keys.
+For full data replacement (`setData`), both models perform equivalently. For list/table/tree replace operations, both are equivalent because DOM rendering cost dominates. In-place merge shines at scale: merging 3 items into 20,000 is **~4x faster** because JSONModel deep-clones all 20,000 items while SignalModel touches only the 3 payload keys.
 
-The checkPerformanceOfUpdate scenario reproduces SAP's 100k threshold: 3,449 bindings with 29 consecutive sync calls, **3.91x faster** (27ms vs 7ms).
+The checkPerformanceOfUpdate scenario reproduces SAP's 100k threshold: 3,449 bindings with 29 consecutive sync calls, **~4x faster** (27ms vs 7ms).
 
 See [packages/lib/test/benchmark/README.md](packages/lib/test/benchmark/README.md) for the full analysis.
 
