@@ -987,23 +987,30 @@
         if (isSignal && model.createComputed) {
           // Create N computed signals, each returning an object from the items array
           for (var i = 0; i < n; i++) {
-            model.createComputed("/computed" + i, ["/items/" + i + "/name", "/items/" + i + "/value"], function (name, value) {
-              return { label: name + "=" + value };
-            });
+            model.createComputed(
+              "/computed" + i,
+              ["/items/" + i + "/name", "/items/" + i + "/value"],
+              function (name, value) {
+                return { label: name + "=" + value };
+              },
+            );
           }
         }
 
         // Bind to sub-paths: /computed0/label (Signal) or /items/0/name (JSON)
         var controls = [];
         for (var j = 0; j < n; j++) {
-          var path = isSignal && model.createComputed ? "/computed" + j + "/label" : "/items/" + j + "/name";
+          var path =
+            isSignal && model.createComputed ? "/computed" + j + "/label" : "/items/" + j + "/name";
           var text = new sap.m.Text({ text: "{" + path + "}" });
           text.setModel(model);
           text.placeAt(container);
           controls.push(text);
         }
         await flush();
-        await new Promise(function (r) { setTimeout(r, 50); });
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
 
         // Warmup
         for (var w = 0; w < warmupRounds; w++) {
@@ -1075,7 +1082,9 @@
           }
         }
         await flush();
-        await new Promise(function (r) { setTimeout(r, 50); });
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
 
         // Warmup — update the NEW dependency
         for (var w = 0; w < warmupRounds; w++) {
@@ -1106,7 +1115,13 @@
        * Exercises _firePathResubscribe's prefix scan + Map snapshot.
        * For JSONModel: plain nested path update (no computed concept).
        */
-      async function benchComputedRedefineSubPath(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
+      async function benchComputedRedefineSubPath(
+        ModelClass,
+        isSignal,
+        n,
+        warmupRounds,
+        measuredRounds,
+      ) {
         var data = { values: [], alt: [] };
         for (var i = 0; i < n; i++) {
           data.values.push({ label: "v" + i });
@@ -1126,14 +1141,19 @@
         // Bind to sub-paths: /computed0/text (Signal) or /values/0/label (JSON)
         var controls = [];
         for (var j = 0; j < n; j++) {
-          var path = isSignal && model.createComputed ? "/computed" + j + "/text" : "/values/" + j + "/label";
+          var path =
+            isSignal && model.createComputed
+              ? "/computed" + j + "/text"
+              : "/values/" + j + "/label";
           var text = new sap.m.Text({ text: "{" + path + "}" });
           text.setModel(model);
           text.placeAt(container);
           controls.push(text);
         }
         await flush();
-        await new Promise(function (r) { setTimeout(r, 50); });
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
 
         if (isSignal && model.removeComputed) {
           // Redefine all computeds: switch dependency from /values to /alt
@@ -1146,7 +1166,9 @@
           }
         }
         await flush();
-        await new Promise(function (r) { setTimeout(r, 50); });
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
 
         // Warmup
         for (var w = 0; w < warmupRounds; w++) {
@@ -1539,7 +1561,9 @@
           controls.push(text);
         }
         await flush();
-        await new Promise(function (r) { setTimeout(r, 50); });
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
 
         for (var w = 0; w < warmupRounds; w++) {
           model.setProperty("/items/0/meta/value", "warmup" + w);
@@ -1914,19 +1938,39 @@
         });
 
         // --- Scenario 15: Computed redefine with sub-path bindings ---
-        setStatus("Running: computed redefine + sub-path with " + compN + " computeds (alternating)...");
+        setStatus(
+          "Running: computed redefine + sub-path with " + compN + " computeds (alternating)...",
+        );
         var compRedefSubJsonTimes = [];
         var compRedefSubSignalTimes = [];
         for (var crs = 0; crs < compHalf; crs++) {
           if (crs % 2 === 0) {
             var crsjt = await benchComputedRedefineSubPath(base.JSONModel, false, compN, warmup, 1);
             compRedefSubJsonTimes.push(crsjt[0]);
-            var crsst = await benchComputedRedefineSubPath(base.SignalModel, true, compN, warmup, 1);
+            var crsst = await benchComputedRedefineSubPath(
+              base.SignalModel,
+              true,
+              compN,
+              warmup,
+              1,
+            );
             compRedefSubSignalTimes.push(crsst[0]);
           } else {
-            var crsst2 = await benchComputedRedefineSubPath(base.SignalModel, true, compN, warmup, 1);
+            var crsst2 = await benchComputedRedefineSubPath(
+              base.SignalModel,
+              true,
+              compN,
+              warmup,
+              1,
+            );
             compRedefSubSignalTimes.push(crsst2[0]);
-            var crsjt2 = await benchComputedRedefineSubPath(base.JSONModel, false, compN, warmup, 1);
+            var crsjt2 = await benchComputedRedefineSubPath(
+              base.JSONModel,
+              false,
+              compN,
+              warmup,
+              1,
+            );
             compRedefSubJsonTimes.push(crsjt2[0]);
           }
         }
