@@ -486,5 +486,227 @@ QUnit.module(
       json.destroy();
       signal.destroy();
     });
+
+    // =========================================================================
+    // 9. Tree binding suspend parity (tree bindings ignore suspend)
+    // =========================================================================
+
+    QUnit.test("tree binding suspend has no effect -- parity with JSONModel", (assert) => {
+      const done = assert.async();
+      const data = {
+        tree: [{ name: "Root", children: [{ name: "Child", children: [] }] }],
+      };
+
+      const json = new JSONModel(JSON.parse(JSON.stringify(data)));
+      const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(data)));
+
+      const jsonBinding = json.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+      const signalBinding = signal.bindTree(
+        "/tree",
+        undefined,
+        [],
+        { arrayNames: ["children"] },
+        [],
+      );
+
+      let jsonChangeCount = 0;
+      let signalChangeCount = 0;
+
+      jsonBinding.attachChange(() => jsonChangeCount++);
+      signalBinding.attachChange(() => signalChangeCount++);
+
+      // Suspend both -- tree bindings should ignore it
+      jsonBinding.suspend();
+      signalBinding.suspend();
+
+      json.setProperty("/tree/0/name", "Updated");
+      signal.setProperty("/tree/0/name", "Updated");
+
+      // Force checkUpdate to simulate framework behavior
+      (jsonBinding as unknown as { checkUpdate(force: boolean): void }).checkUpdate(true);
+      (signalBinding as unknown as { checkUpdate(force: boolean): void }).checkUpdate(true);
+
+      setTimeout(() => {
+        // Both should have fired despite suspend (tree bindings don't support it)
+        assert.ok(jsonChangeCount > 0, "JSONModel tree binding fires despite suspend");
+        assert.ok(signalChangeCount > 0, "SignalModel tree binding fires despite suspend");
+        assert.strictEqual(
+          signalChangeCount > 0,
+          jsonChangeCount > 0,
+          "both models agree: suspend has no effect on tree bindings",
+        );
+
+        json.destroy();
+        signal.destroy();
+        done();
+      }, 100);
+    });
+
+    // =========================================================================
+    // 10. List binding resume without data change parity
+    // =========================================================================
+
+    QUnit.test("list binding resume without data change -- parity", (assert) => {
+      const done = assert.async();
+      const data = { items: [{ name: "A" }, { name: "B" }] };
+
+      const json = new JSONModel(JSON.parse(JSON.stringify(data)));
+      const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(data)));
+
+      const jsonBinding = json.bindList("/items");
+      const signalBinding = signal.bindList("/items");
+
+      // Prime contexts
+      jsonBinding.getContexts(0, 10);
+      signalBinding.getContexts(0, 10);
+
+      jsonBinding.suspend();
+      signalBinding.suspend();
+
+      // No data changes during suspend
+
+      jsonBinding.resume();
+      signalBinding.resume();
+
+      setTimeout(() => {
+        const jsonContexts = jsonBinding.getContexts(0, 10);
+        const signalContexts = signalBinding.getContexts(0, 10);
+
+        assert.strictEqual(
+          signalContexts.length,
+          jsonContexts.length,
+          "context count matches after resume without changes",
+        );
+
+        for (let i = 0; i < jsonContexts.length; i++) {
+          assert.strictEqual(
+            signal.getProperty("name", signalContexts[i]),
+            json.getProperty("name", jsonContexts[i]),
+            `item ${i} name matches after resume`,
+          );
+        }
+
+        json.destroy();
+        signal.destroy();
+        done();
+      }, 100);
+    });
+
+    // =========================================================================
+    // 11. checkUpdate(true) forces all binding types -- parity
+    // =========================================================================
+
+    QUnit.test("checkUpdate(true) forces tree binding re-evaluation -- parity", (assert) => {
+      const done = assert.async();
+      const data = {
+        tree: [{ name: "Root", children: [] }],
+      };
+
+      const json = new JSONModel(JSON.parse(JSON.stringify(data)));
+      const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(data)));
+
+      const jsonBinding = json.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
+      const signalBinding = signal.bindTree(
+        "/tree",
+        undefined,
+        [],
+        { arrayNames: ["children"] },
+        [],
+      );
+
+      jsonBinding.getRootContexts();
+      signalBinding.getRootContexts();
+
+      let jsonCount = 0;
+      let signalCount = 0;
+
+      jsonBinding.attachChange(() => jsonCount++);
+      signalBinding.attachChange(() => signalCount++);
+
+      // Force checkUpdate without any data change
+      (jsonBinding as unknown as { checkUpdate(force: boolean): void }).checkUpdate(true);
+      (signalBinding as unknown as { checkUpdate(force: boolean): void }).checkUpdate(true);
+
+      setTimeout(() => {
+        assert.strictEqual(
+          signalCount,
+          jsonCount,
+          "checkUpdate(true) change count matches on tree binding",
+        );
+
+        json.destroy();
+        signal.destroy();
+        done();
+      }, 50);
+    });
+
+    // =========================================================================
+    // 12. List binding filter while suspended -- parity
+    // =========================================================================
+
+    QUnit.test("list binding filter while suspended -- parity", (assert) => {
+      const data = {
+        items: [
+          { name: "Alice", active: true },
+          { name: "Bob", active: false },
+          { name: "Carol", active: true },
+        ],
+      };
+
+      const json = new JSONModel(JSON.parse(JSON.stringify(data)));
+      const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(data)));
+
+      const jsonBinding = json.bindList("/items");
+      const signalBinding = signal.bindList("/items");
+
+      jsonBinding.getContexts(0, 10);
+      signalBinding.getContexts(0, 10);
+
+      jsonBinding.suspend();
+      signalBinding.suspend();
+
+      // filter() uses bIgnoreSuspend, so it should work on both
+      jsonBinding.filter([new Filter("active", FilterOperator.EQ, true)]);
+      signalBinding.filter([new Filter("active", FilterOperator.EQ, true)]);
+
+      const jsonContexts = jsonBinding.getContexts(0, 10);
+      const signalContexts = signalBinding.getContexts(0, 10);
+
+      assert.strictEqual(
+        signalContexts.length,
+        jsonContexts.length,
+        "filtered context count matches while suspended",
+      );
+
+      for (let i = 0; i < jsonContexts.length; i++) {
+        assert.strictEqual(
+          signal.getProperty("name", signalContexts[i]),
+          json.getProperty("name", jsonContexts[i]),
+          `suspended filter item ${i} name matches`,
+        );
+      }
+
+      jsonBinding.resume();
+      signalBinding.resume();
+      json.destroy();
+      signal.destroy();
+    });
+
+    // =========================================================================
+    // 13. forceNoCache parity
+    // =========================================================================
+
+    QUnit.test("forceNoCache method exists and is callable", (assert) => {
+      const signal = new SignalModel({});
+
+      assert.ok(typeof signal.forceNoCache === "function", "forceNoCache exists");
+
+      // Should not throw
+      signal.forceNoCache(true);
+      signal.forceNoCache(false);
+
+      assert.ok(true, "forceNoCache completes without error");
+      signal.destroy();
+    });
   },
 );
