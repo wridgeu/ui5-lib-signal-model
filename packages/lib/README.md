@@ -351,7 +351,7 @@ model.mergeProperty("/customer", { age: 30 });
 
 `mergeProperty` only fires signals for paths that actually changed (here, only `/customer/age`). Bindings to `/customer/name` and `/customer/city` are not notified.
 
-`setData(partial, true)` uses the same merge logic starting at the root, equivalent to `mergeProperty("/", partial)`.
+`setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally.
 
 ## API
 
@@ -379,10 +379,18 @@ model.bindList("/path");
 model.bindTree("/path", context, filters, { arrayNames: ["children"] }, sorters);
 
 // Load JSON from a URL (fires requestSent/requestCompleted/requestFailed events)
-model.loadData(url, params?, async?, method?, merge?, cache?, headers?);
+model.loadData(url, params?, async?, method?, merge?, cache?, headers?, abortSignal?);
 
 // Promise that resolves when all pending loadData calls complete
 await model.dataLoaded();
+
+// Serialize / parse JSON
+model.getJSON();                       // returns JSON string
+model.setJSON(json);                   // parse and set
+model.setJSON(json, true);             // parse and merge
+
+// Cache control
+model.forceNoCache(true);              // append cache-buster to loadData URLs
 ```
 
 ### Extended Methods
@@ -398,6 +406,9 @@ model.removeComputed("/fullName");
 // Direct signal access (read-only recommended)
 const signal = model.getSignal("/path");
 signal.get(); // read current value
+
+// Lifecycle
+model.destroy(); // aborts in-flight requests, clears all subscriptions
 ```
 
 ### Binding Classes
@@ -414,7 +425,7 @@ signal.get(); // read current value
 | ------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified via signals              |
 | **Notification granularity**   | O(_n_) per `setProperty` call                                     | O(_k_) per `setProperty` call                                                    |
-| **Change detection**           | `deepEqual` comparison on every binding                           | Signal-based: no comparison for primitives, object-aware for mutations           |
+| **Change detection**           | `deepEqual` comparison on every binding                           | Signal-based: strict equality for primitives, always-fire for objects            |
 | **Property binding**           | `{/path}` in XML views                                            | Identical                                                                        |
 | **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                        |
 | **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                                   |

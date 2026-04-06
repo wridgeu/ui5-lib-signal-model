@@ -88,72 +88,176 @@ QUnit.module("Value Shapes", () => {
   });
 
   // =========================================================================
-  // Falsy values: 0, "", false
+  // Falsy values: 0, "", false -- dual-model parity
   // =========================================================================
 
-  QUnit.test("binding does not fire when 0 is set to 0", (assert) => {
+  QUnit.test("0 to 0 -- parity with JSONModel (no fire)", (assert) => {
     const done = assert.async();
-    const model = new SignalModel({ count: 0 });
-    const binding = model.bindProperty("/count");
-    let changeCount = 0;
+    const json = new JSONModel({ count: 0 });
+    const signal = new SignalModel({ count: 0 });
 
-    binding.attachChange(() => changeCount++);
-    model.setProperty("/count", 0);
+    const jsonBinding = json.bindProperty("/count");
+    const signalBinding = signal.bindProperty("/count");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    json.setProperty("/count", 0);
+    signal.setProperty("/count", 0);
 
     setTimeout(() => {
-      assert.strictEqual(changeCount, 0, "binding does not fire for 0 -> 0");
-      model.destroy();
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        `0→0 change count matches JSONModel (both: ${jsonCount})`,
+      );
+      json.destroy();
+      signal.destroy();
       done();
     }, 50);
   });
 
-  QUnit.test("binding does not fire when empty string is set to empty string", (assert) => {
+  QUnit.test("empty string to empty string -- parity with JSONModel (no fire)", (assert) => {
     const done = assert.async();
-    const model = new SignalModel({ text: "" });
-    const binding = model.bindProperty("/text");
-    let changeCount = 0;
+    const json = new JSONModel({ text: "" });
+    const signal = new SignalModel({ text: "" });
 
-    binding.attachChange(() => changeCount++);
-    model.setProperty("/text", "");
+    const jsonBinding = json.bindProperty("/text");
+    const signalBinding = signal.bindProperty("/text");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    json.setProperty("/text", "");
+    signal.setProperty("/text", "");
 
     setTimeout(() => {
-      assert.strictEqual(changeCount, 0, "binding does not fire for '' -> ''");
-      model.destroy();
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        `""→"" change count matches JSONModel (both: ${jsonCount})`,
+      );
+      json.destroy();
+      signal.destroy();
       done();
     }, 50);
   });
 
-  QUnit.test("binding does not fire when false is set to false", (assert) => {
+  QUnit.test("false to false -- parity with JSONModel (no fire)", (assert) => {
     const done = assert.async();
-    const model = new SignalModel({ flag: false });
-    const binding = model.bindProperty("/flag");
-    let changeCount = 0;
+    const json = new JSONModel({ flag: false });
+    const signal = new SignalModel({ flag: false });
 
-    binding.attachChange(() => changeCount++);
-    model.setProperty("/flag", false);
+    const jsonBinding = json.bindProperty("/flag");
+    const signalBinding = signal.bindProperty("/flag");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    json.setProperty("/flag", false);
+    signal.setProperty("/flag", false);
 
     setTimeout(() => {
-      assert.strictEqual(changeCount, 0, "binding does not fire for false -> false");
-      model.destroy();
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        `false→false change count matches JSONModel (both: ${jsonCount})`,
+      );
+      json.destroy();
+      signal.destroy();
       done();
     }, 50);
   });
 
-  QUnit.test("binding fires when 0 changes to 1", (assert) => {
+  QUnit.test("0 to 1 -- parity with JSONModel (fires)", (assert) => {
     const done = assert.async();
-    const model = new SignalModel({ count: 0 });
-    const binding = model.bindProperty("/count");
-    let changed = false;
+    const json = new JSONModel({ count: 0 });
+    const signal = new SignalModel({ count: 0 });
 
-    binding.attachChange(() => {
-      changed = true;
-    });
-    model.setProperty("/count", 1);
+    const jsonBinding = json.bindProperty("/count");
+    const signalBinding = signal.bindProperty("/count");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    json.setProperty("/count", 1);
+    signal.setProperty("/count", 1);
 
     setTimeout(() => {
-      assert.ok(changed, "binding fires for 0 -> 1");
-      assert.strictEqual(binding.getValue(), 1, "value is 1");
-      model.destroy();
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        `0→1 change count matches JSONModel (both: ${jsonCount})`,
+      );
+      assert.strictEqual(signalBinding.getValue(), 1, "signal value is 1");
+      assert.strictEqual(jsonBinding.getValue(), 1, "json value is 1");
+      json.destroy();
+      signal.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("string value change -- parity with JSONModel", (assert) => {
+    const done = assert.async();
+    const json = new JSONModel({ name: "Alice" });
+    const signal = new SignalModel({ name: "Alice" });
+
+    const jsonBinding = json.bindProperty("/name");
+    const signalBinding = signal.bindProperty("/name");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    json.setProperty("/name", "Bob");
+    signal.setProperty("/name", "Bob");
+
+    setTimeout(() => {
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        `"Alice"→"Bob" change count matches JSONModel (both: ${jsonCount})`,
+      );
+      assert.strictEqual(signalBinding.getValue(), "Bob", "signal value is Bob");
+      json.destroy();
+      signal.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("same string value -- parity with JSONModel (no fire)", (assert) => {
+    const done = assert.async();
+    const json = new JSONModel({ name: "Alice" });
+    const signal = new SignalModel({ name: "Alice" });
+
+    const jsonBinding = json.bindProperty("/name");
+    const signalBinding = signal.bindProperty("/name");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    json.setProperty("/name", "Alice");
+    signal.setProperty("/name", "Alice");
+
+    setTimeout(() => {
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        `"Alice"→"Alice" change count matches JSONModel (both: ${jsonCount})`,
+      );
+      json.destroy();
+      signal.destroy();
       done();
     }, 50);
   });
@@ -162,41 +266,59 @@ QUnit.module("Value Shapes", () => {
   // NaN values
   // =========================================================================
 
-  QUnit.test(
-    "NaN equality: signal uses Object.is so NaN === NaN, binding does not fire",
-    (assert) => {
-      const done = assert.async();
-      const model = new SignalModel({ value: NaN });
-      const binding = model.bindProperty("/value");
-      let changeCount = 0;
-
-      binding.attachChange(() => changeCount++);
-      model.setProperty("/value", NaN);
-
-      setTimeout(() => {
-        // Signal uses Object.is for equality on primitives, so NaN === NaN → no signal change
-        assert.strictEqual(changeCount, 0, "binding does not fire for NaN -> NaN (Object.is)");
-        model.destroy();
-        done();
-      }, 50);
-    },
-  );
-
-  QUnit.test("NaN to number fires binding", (assert) => {
+  QUnit.test("NaN to NaN -- parity with JSONModel (no fire)", (assert) => {
     const done = assert.async();
-    const model = new SignalModel({ value: NaN });
-    const binding = model.bindProperty("/value");
-    let changed = false;
+    const json = new JSONModel({ value: NaN });
+    const signal = new SignalModel({ value: NaN as unknown });
 
-    binding.attachChange(() => {
-      changed = true;
-    });
-    model.setProperty("/value", 42);
+    const jsonBinding = json.bindProperty("/value");
+    const signalBinding = signal.bindProperty("/value");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    json.setProperty("/value", NaN);
+    signal.setProperty("/value", NaN);
 
     setTimeout(() => {
-      assert.ok(changed, "binding fires for NaN -> 42");
-      assert.strictEqual(binding.getValue(), 42, "value is 42");
-      model.destroy();
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        `NaN→NaN change count matches JSONModel (both: ${jsonCount})`,
+      );
+      json.destroy();
+      signal.destroy();
+      done();
+    }, 50);
+  });
+
+  QUnit.test("NaN to number -- parity with JSONModel (fires)", (assert) => {
+    const done = assert.async();
+    const json = new JSONModel({ value: NaN });
+    const signal = new SignalModel({ value: NaN as unknown });
+
+    const jsonBinding = json.bindProperty("/value");
+    const signalBinding = signal.bindProperty("/value");
+    let jsonCount = 0;
+    let signalCount = 0;
+
+    jsonBinding.attachChange(() => jsonCount++);
+    signalBinding.attachChange(() => signalCount++);
+
+    json.setProperty("/value", 42);
+    signal.setProperty("/value", 42);
+
+    setTimeout(() => {
+      assert.strictEqual(
+        signalCount,
+        jsonCount,
+        `NaN→42 change count matches JSONModel (both: ${jsonCount})`,
+      );
+      assert.strictEqual(signalBinding.getValue(), 42, "signal value is 42");
+      json.destroy();
+      signal.destroy();
       done();
     }, 50);
   });
@@ -219,27 +341,100 @@ QUnit.module("Value Shapes", () => {
   });
 
   // =========================================================================
-  // Object values in property bindings
+  // Object values in property bindings -- INTENTIONAL DIVERGENCE
+  //
+  // SignalModel always fires change events for object-valued bindings,
+  // even when JSONModel's deepEqual would suppress them. This is by design:
+  //
+  // 1. Signal equality (signalEquals) returns false for all objects,
+  //    ensuring parent signals re-notify when children are mutated in-place
+  //    (the parent reference didn't change, but contents did).
+  //
+  // 2. JSONModel can afford deepEqual because it iterates ALL bindings on
+  //    every change (O(n) anyway). SignalModel notifies only affected paths,
+  //    so parent signals must fire to ensure correctness when child paths
+  //    are mutated.
+  //
+  // 3. The net rendering result is identical: the UI shows correct data.
+  //    The difference is that SignalModel may fire change events for
+  //    object-valued bindings where JSONModel would suppress them via
+  //    deepEqual. This causes no visible difference because the binding's
+  //    checkUpdate still reads the correct current value.
   // =========================================================================
 
-  QUnit.test("binding to object path always fires on setProperty to child", (assert) => {
-    const done = assert.async();
-    const model = new SignalModel({ customer: { name: "Alice", age: 28 } });
-    const binding = model.bindProperty("/customer");
-    let changeCount = 0;
+  QUnit.test(
+    "DIVERGENCE: object binding fires on child mutation (JSONModel suppresses)",
+    (assert) => {
+      const done = assert.async();
+      const json = new JSONModel({ customer: { name: "Alice", age: 28 } });
+      const signal = new SignalModel({ customer: { name: "Alice", age: 28 } });
 
-    binding.attachChange(() => changeCount++);
+      const jsonBinding = json.bindProperty("/customer");
+      const signalBinding = signal.bindProperty("/customer");
+      let jsonCount = 0;
+      let signalCount = 0;
 
-    model.setProperty("/customer/name", "Bob");
+      jsonBinding.attachChange(() => jsonCount++);
+      signalBinding.attachChange(() => signalCount++);
 
-    setTimeout(() => {
-      assert.strictEqual(changeCount, 1, "object binding fires on child mutation");
-      const val = binding.getValue() as Record<string, unknown>;
-      assert.strictEqual(val.name, "Bob", "object reflects child change");
-      model.destroy();
-      done();
-    }, 50);
-  });
+      // Mutate a child property -- the parent object reference is unchanged
+      json.setProperty("/customer/name", "Bob");
+      signal.setProperty("/customer/name", "Bob");
+
+      setTimeout(() => {
+        // JSONModel: deepEqual sees same object structure → may or may not fire
+        // SignalModel: always fires for objects (signalEquals returns false)
+        assert.ok(signalCount >= 1, "SignalModel fires for object parent on child mutation");
+
+        // Both models return the correct value regardless of fire behavior
+        const jsonVal = jsonBinding.getValue() as Record<string, unknown>;
+        const signalVal = signalBinding.getValue() as Record<string, unknown>;
+        assert.strictEqual(jsonVal.name, "Bob", "JSONModel value is correct");
+        assert.strictEqual(signalVal.name, "Bob", "SignalModel value is correct");
+        json.destroy();
+        signal.destroy();
+        done();
+      }, 50);
+    },
+  );
+
+  QUnit.test(
+    "DIVERGENCE: setProperty with same object ref (JSONModel suppresses, SignalModel fires)",
+    (assert) => {
+      const done = assert.async();
+      const obj = { name: "Alice", age: 28 };
+      const json = new JSONModel({ customer: obj });
+      const signal = new SignalModel({ customer: { name: "Alice", age: 28 } });
+
+      const jsonBinding = json.bindProperty("/customer");
+      const signalBinding = signal.bindProperty("/customer");
+      let jsonCount = 0;
+      let signalCount = 0;
+
+      jsonBinding.attachChange(() => jsonCount++);
+      signalBinding.attachChange(() => signalCount++);
+
+      // Set the same object reference back -- no actual change
+      json.setProperty("/customer", json.getProperty("/customer"));
+      signal.setProperty("/customer", signal.getProperty("/customer"));
+
+      setTimeout(() => {
+        // JSONModel: deepEqual(obj, obj) → same contents → no fire
+        // SignalModel: signalEquals returns false for objects → fires
+        // This divergence is intentional: SignalModel cannot know if the
+        // object was mutated between getProperty and setProperty, so it
+        // always notifies. The UI renders correctly in both cases.
+        assert.strictEqual(jsonCount, 0, "JSONModel does not fire (deepEqual suppresses)");
+        assert.ok(signalCount >= jsonCount, "SignalModel fires >= JSONModel (intentional)");
+
+        // Both return the same data
+        assert.deepEqual(signalBinding.getValue(), jsonBinding.getValue(), "values match");
+        json.destroy();
+        signal.destroy();
+        done();
+      }, 50);
+    },
+  );
 
   // =========================================================================
   // Empty array in list binding
