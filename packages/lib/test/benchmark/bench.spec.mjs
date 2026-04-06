@@ -25,7 +25,7 @@
 import { writeFile } from "node:fs/promises";
 import { ANSI, computeRatio } from "./bench-stats.mjs";
 
-const { RESET, BOLD, DIM, GREEN, CYAN } = ANSI;
+const { RESET, BOLD, DIM, GREEN, RED, CYAN } = ANSI;
 
 /** Horizontal rule for the results table. */
 const SEP = "\u2500".repeat(88);
@@ -54,7 +54,7 @@ function fmtMs(ms) {
 function fmtRatio(signal, json) {
   const { direction, ratio } = computeRatio(signal, json);
   if (direction === "faster") return GREEN + ratio.toFixed(2) + "x faster" + RESET;
-  if (direction === "slower") return ANSI.RED + ratio.toFixed(2) + "x slower" + RESET;
+  if (direction === "slower") return RED + ratio.toFixed(2) + "x slower" + RESET;
   return DIM + "~equal" + RESET;
 }
 
