@@ -131,6 +131,8 @@ Issues and pull requests are always welcome. If you spot a bug or want to propos
 
 Large parts of this project were _vibe coded_. I built it with heavy AI assistance while recovering from wrist surgery, one hand and speech-to-text only. If you find rough edges, that is probably why.
 
+The goal was deliberately modest: treat it as a pure experiment to see whether the underlying state mechanism of a JSON model can be swapped to a signal-based variant while remaining a drop-in replacement. No breaking changes, no new API surface, no deviation from how UI5 models and property bindings already work — just swap the engine underneath and see what happens. It is a proof of concept, nothing more.
+
 ## License
 
 [MIT](LICENSE)
