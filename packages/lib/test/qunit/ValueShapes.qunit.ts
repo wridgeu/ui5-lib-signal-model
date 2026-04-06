@@ -382,11 +382,21 @@ QUnit.module("Value Shapes", () => {
       signal.setProperty("/customer/name", "Bob");
 
       setTimeout(() => {
-        // JSONModel: deepEqual sees same object structure → may or may not fire
-        // SignalModel: always fires for objects (signalEquals returns false)
-        assert.ok(signalCount >= 1, "SignalModel fires for object parent on child mutation");
+        // JSONModel: checkUpdate uses deepEqual on the parent object. Since
+        // setProperty mutated the object IN PLACE, deepEqual compares the
+        // already-mutated object to itself → identical → no fire.
+        // SignalModel: signalEquals returns false for all objects → always fires.
+        // This is the key divergence: SignalModel correctly notifies the parent
+        // binding when a child changes, JSONModel does not (because it compares
+        // the same reference to itself after in-place mutation).
+        assert.strictEqual(
+          jsonCount,
+          0,
+          "JSONModel does NOT fire (deepEqual compares mutated obj to itself)",
+        );
+        assert.ok(signalCount >= 1, "SignalModel fires (signalEquals always-diff for objects)");
 
-        // Both models return the correct value regardless of fire behavior
+        // Both models return the correct value
         const jsonVal = jsonBinding.getValue() as Record<string, unknown>;
         const signalVal = signalBinding.getValue() as Record<string, unknown>;
         assert.strictEqual(jsonVal.name, "Bob", "JSONModel value is correct");
