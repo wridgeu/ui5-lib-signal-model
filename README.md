@@ -109,6 +109,10 @@ npm run clean  # remove dist and .ui5 caches
 
 ### Benchmark
 
+A self-contained benchmark page compares SignalModel vs JSONModel across 22 scenarios. With default synchronous `setProperty`, "Update all N bindings" shows ~17x improvement at 2000 bindings. The advantage scales super-linearly: JSONModel's cost is O(n²) while SignalModel's is O(n). For full data replacement and list/table/tree operations, both models perform equivalently because DOM rendering cost dominates.
+
+See the [benchmark documentation](packages/lib/test/benchmark/README.md) for the full analysis, methodology, and results.
+
 ```bash
 npm run bench                                    # CLI -- headless
 npm run bench -- --bindings 1000 --json out.json  # custom config
