@@ -20,17 +20,12 @@
  *
  * @see {@link index.html} Benchmark page (owns all benchmark logic)
  * @see {@link wdio-bench.conf.ts} WDIO configuration
+ * @see {@link bench-stats.mjs} Shared statistics utilities
  */
 import { writeFile } from "node:fs/promises";
+import { ANSI, computeRatio } from "./bench-stats.mjs";
 
-// ── ANSI escape codes ────────────────────────────────────────────────
-
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const CYAN = "\x1b[36m";
+const { RESET, BOLD, DIM, GREEN, RED, CYAN } = ANSI;
 
 /** Horizontal rule for the results table. */
 const SEP = "\u2500".repeat(88);
@@ -48,30 +43,18 @@ function fmtMs(ms) {
 }
 
 /**
- * Compute and format the ratio between SignalModel and JSONModel medians.
+ * Format the ratio between SignalModel and JSONModel as an ANSI-colored string.
  *
- * Uses the same significance checks as the benchmark HTML page:
- * 1. Both below 1ms → `~equal` (resolution floor of `performance.now()`)
- * 2. Absolute difference below pooled standard deviation → `~equal`
- * 3. Ratio below 10% (1.10x) → `~equal`
+ * Delegates significance logic to {@link computeRatio} from bench-stats.mjs.
  *
- * @param {{ median: number, stddev: number }} signal - SignalModel stats
- * @param {{ median: number, stddev: number }} json - JSONModel stats
+ * @param {{ median: number, stddev: number, n?: number }} signal
+ * @param {{ median: number, stddev: number, n?: number }} json
  * @returns {string} ANSI-colored ratio string
  */
 function fmtRatio(signal, json) {
-  const sm = signal.median;
-  const jm = json.median;
-
-  if (sm < 1 && jm < 1) return DIM + "~equal" + RESET;
-
-  const pooledSD = Math.sqrt(signal.stddev ** 2 + json.stddev ** 2);
-  if (Math.abs(jm - sm) < pooledSD) return DIM + "~equal" + RESET;
-  if (sm <= 0) return DIM + "~equal" + RESET;
-
-  const ratio = jm / sm;
-  if (ratio >= 1.1) return GREEN + ratio.toFixed(2) + "x faster" + RESET;
-  if (ratio <= 0.9) return RED + (1 / ratio).toFixed(2) + "x slower" + RESET;
+  const { direction, ratio } = computeRatio(signal, json);
+  if (direction === "faster") return GREEN + ratio.toFixed(2) + "x faster" + RESET;
+  if (direction === "slower") return RED + ratio.toFixed(2) + "x slower" + RESET;
   return DIM + "~equal" + RESET;
 }
 

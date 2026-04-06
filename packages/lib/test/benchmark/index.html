@@ -202,27 +202,59 @@
         return { items: items, counter: 0 };
       }
 
-      /** Statistical summary of an array of numbers. Uses Bessel-corrected (sample) variance. */
-      function stats(arr) {
-        var n = arr.length;
+      /**
+       * Remove outliers using the IQR (Interquartile Range) method.
+       * Samples below Q1 - 1.5*IQR or above Q3 + 1.5*IQR are removed.
+       * Returns the original array if it has < 4 elements or if filtering
+       * would remove more than half the data (likely bimodal distribution).
+       *
+       * Keep in sync with bench-stats.mjs filterOutliers().
+       */
+      function filterOutliers(arr) {
+        if (arr.length < 4) return arr;
         var sorted = arr.slice().sort(function (a, b) {
+          return a - b;
+        });
+        var q1 = sorted[Math.floor(sorted.length * 0.25)];
+        var q3 = sorted[Math.floor(sorted.length * 0.75)];
+        var iqr = q3 - q1;
+        var lower = q1 - 1.5 * iqr;
+        var upper = q3 + 1.5 * iqr;
+        var filtered = arr.filter(function (v) {
+          return v >= lower && v <= upper;
+        });
+        return filtered.length >= arr.length / 2 ? filtered : arr;
+      }
+
+      /**
+       * Statistical summary of an array of numbers.
+       * Uses Bessel-corrected (sample) variance.
+       * Returns sample count `n` for downstream standard-error calculations.
+       *
+       * Keep in sync with bench-stats.mjs stats().
+       */
+      function stats(arr) {
+        var clean = filterOutliers(arr);
+        var n = clean.length;
+        var sorted = clean.slice().sort(function (a, b) {
           return a - b;
         });
         var mid = Math.floor(n / 2);
         var med = n % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
         var mean =
-          arr.reduce(function (s, v) {
+          clean.reduce(function (s, v) {
             return s + v;
           }, 0) / n;
         // Bessel's correction: divide by (n-1) for sample variance
         var variance =
           n > 1
-            ? arr.reduce(function (s, v) {
+            ? clean.reduce(function (s, v) {
                 return s + (v - mean) * (v - mean);
               }, 0) /
               (n - 1)
             : 0;
         return {
+          n: n,
           median: med,
           mean: mean,
           stddev: Math.sqrt(variance),
@@ -241,11 +273,10 @@
       /**
        * Format a ratio as "Nx faster", "Nx slower", or "~equal".
        *
-       * Guards against edge cases (zero/near-zero medians) and uses two
-       * significance checks:
-       * 1. The absolute difference must exceed the pooled standard deviation.
-       * 2. The ratio must exceed 10% (1.10x) to filter out tiny but
-       *    technically-significant differences in rendering-dominated scenarios.
+       * Guards against edge cases (zero/near-zero medians) and uses
+       * standard-error based significance testing at 95% confidence.
+       *
+       * Keep in sync with bench-stats.mjs computeRatio().
        */
       function fmtRatio(signalStats, jsonStats) {
         var sm = signalStats.median;
@@ -255,12 +286,23 @@
         // and cannot be meaningfully compared
         if (sm < 1 && jm < 1) return '<span class="neutral">~equal</span>';
 
-        // Statistical significance: difference must exceed pooled SD
-        var pooledSD = Math.sqrt(
-          signalStats.stddev * signalStats.stddev + jsonStats.stddev * jsonStats.stddev,
-        );
+        // Standard error at 95% confidence (z = 1.96) when sample counts
+        // are available; falls back to raw pooled SD for compatibility.
+        var nSignal = signalStats.n || 0;
+        var nJson = jsonStats.n || 0;
+        var hasN = nSignal > 1 && nJson > 1;
+        var threshold = hasN
+          ? 1.96 *
+            Math.sqrt(
+              (signalStats.stddev * signalStats.stddev) / nSignal +
+                (jsonStats.stddev * jsonStats.stddev) / nJson,
+            )
+          : Math.sqrt(
+              signalStats.stddev * signalStats.stddev + jsonStats.stddev * jsonStats.stddev,
+            );
+
         var diff = Math.abs(jm - sm);
-        if (diff < pooledSD) {
+        if (diff < threshold) {
           return '<span class="neutral">~equal</span>';
         }
 
