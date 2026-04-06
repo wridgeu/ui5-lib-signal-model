@@ -12,10 +12,16 @@ function signalEquals(_a: unknown, _b: unknown): boolean {
   return Object.is(_a, _b);
 }
 
+/**
+ * Manages signal state and computed signals for path-based subscriptions.
+ *
+ * @since 0.1.0
+ */
 export default class SignalRegistry {
   private readonly signals = new Map<string, Signal.State<unknown>>();
   private readonly computeds = new Map<string, Signal.Computed<unknown>>();
 
+  /** @since 0.1.0 */
   getOrCreate(path: string, initialValue: unknown): Signal.State<unknown> {
     let signal = this.signals.get(path);
     if (!signal) {
@@ -25,14 +31,17 @@ export default class SignalRegistry {
     return signal;
   }
 
+  /** @since 0.1.0 */
   get(path: string): Signal.State<unknown> | Signal.Computed<unknown> | undefined {
     return this.computeds.get(path) ?? this.signals.get(path);
   }
 
+  /** @since 0.1.0 */
   has(path: string): boolean {
     return this.signals.has(path) || this.computeds.has(path);
   }
 
+  /** @since 0.1.0 */
   set(path: string, value: unknown): void {
     const signal = this.signals.get(path);
     if (signal) {
@@ -40,6 +49,7 @@ export default class SignalRegistry {
     }
   }
 
+  /** @since 0.1.0 */
   invalidateChildren(parentPath: string, resolver: ValueResolver): void {
     const prefix = parentPath.endsWith("/") ? parentPath : `${parentPath}/`;
     for (const [path, signal] of this.signals) {
@@ -49,12 +59,14 @@ export default class SignalRegistry {
     }
   }
 
+  /** @since 0.1.0 */
   invalidateAll(resolver: ValueResolver): void {
     for (const [path, signal] of this.signals) {
       signal.set(resolver(path));
     }
   }
 
+  /** @since 0.1.0 */
   addComputed(
     path: string,
     deps: string[],
@@ -90,22 +102,27 @@ export default class SignalRegistry {
     return computed;
   }
 
+  /** @since 0.1.0 */
   removeComputed(path: string): void {
     this.computeds.delete(path);
   }
 
+  /** @since 0.1.0 */
   isComputed(path: string): boolean {
     return this.computeds.has(path);
   }
 
+  /** @since 0.1.0 */
   get hasComputeds(): boolean {
     return this.computeds.size > 0;
   }
 
+  /** @since 0.1.0 */
   get size(): number {
     return this.signals.size + this.computeds.size;
   }
 
+  /** @since 0.1.0 */
   destroy(): void {
     this.signals.clear();
     this.computeds.clear();

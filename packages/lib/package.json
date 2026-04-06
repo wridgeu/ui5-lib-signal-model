@@ -30,6 +30,9 @@
     "access": "public"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "files": [
     "dist/**/*",
     "src/**/*",
@@ -50,6 +53,7 @@
     "signal-polyfill": "^0.2.2"
   },
   "devDependencies": {
+    "@openui5/types": "^1.144.0",
     "@types/qunit": "^2.19.13",
     "@ui5/cli": "^4.0.0",
     "ui5-tooling-modules": "^3.35.0",

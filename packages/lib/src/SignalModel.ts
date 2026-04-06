@@ -24,6 +24,7 @@ function asInternal(self: ClientModel): ClientModelInternal {
  * Drop-in replacement for JSONModel.
  *
  * @namespace ui5.model.signal
+ * @since 0.1.0
  */
 export default class SignalModel<T extends object = Record<string, unknown>> extends ClientModel {
   private registry: SignalRegistry;
@@ -67,6 +68,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @param customHeaders Additional HTTP headers
    * @param abortSignal AbortSignal to cancel the request (SignalModel extension)
    * @returns Promise that resolves when data is loaded
+   * @since 0.1.0
    */
   loadData(
     url: string,
@@ -202,6 +204,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * Returns a Promise that resolves when all pending loadData calls complete.
    * Calls queued after this point are not included.
    * JSONModel-compatible API.
+   *
+   * @since 0.1.0
    */
   dataLoaded(): Promise<void> {
     return this._importChain;
@@ -212,6 +216,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * JSONModel-compatible API.
    *
    * @param noCache When true, a cache-buster parameter is appended to every `loadData` URL.
+   * @since 0.1.0
    */
   forceNoCache(noCache: boolean): void {
     (this as unknown as { bCache: boolean }).bCache = !noCache;
@@ -219,6 +224,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   /**
    * Serialize model data as a JSON string. JSONModel-compatible API.
+   *
+   * @since 0.1.0
    */
   getJSON(): string {
     return JSON.stringify(this.oData);
@@ -229,6 +236,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    *
    * @param json JSON string to parse
    * @param merge Whether to merge into existing data instead of replacing
+   * @since 0.1.0
    */
   setJSON(json: string, merge?: boolean): void {
     try {
@@ -255,7 +263,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
+  /** @since 0.1.0 */
   setData(data: T): void;
+  /** @since 0.1.0 */
   setData(data: Partial<T>, merge: true): void;
   setData(data: T | Partial<T>, merge?: boolean): void {
     if (merge) {
@@ -272,11 +282,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
+  /** @since 0.1.0 */
   getData(): T {
     return this.oData;
   }
 
+  /** @since 0.1.0 */
   getProperty<P extends string & ModelPath<T>>(path: P, context?: undefined): PathValue<T, P>;
+  /** @since 0.1.0 */
   getProperty(path: string, context?: object): unknown;
   getProperty(path: string, context?: object): unknown {
     // Only resolve computed check for proper Context objects (not raw data items from FilterProcessor)
@@ -290,12 +303,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return this._getObject(path, context);
   }
 
+  /** @since 0.1.0 */
   setProperty<P extends string & ModelPath<T>>(
     path: P,
     value: PathValue<T, P>,
     context?: undefined,
     asyncUpdate?: boolean,
   ): boolean;
+  /** @since 0.1.0 */
   setProperty(path: string, value: unknown, context?: Context, asyncUpdate?: boolean): boolean;
   setProperty(path: string, value: unknown, context?: Context, asyncUpdate?: boolean): boolean {
     const resolvedPath = asInternal(this).resolve(path, context);
@@ -376,7 +391,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
+  /** @since 0.1.0 */
   mergeProperty<P extends string & ModelPath<T>>(path: P, value: Partial<PathValue<T, P>>): boolean;
+  /** @since 0.1.0 */
   mergeProperty(path: string, value: unknown, context?: Context): boolean;
   mergeProperty(path: string, value: unknown, context?: Context): boolean {
     const resolvedPath = asInternal(this).resolve(path, context);
@@ -422,6 +439,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return this.setProperty(path, value, context);
   }
 
+  /** @since 0.1.0 */
   override bindProperty(
     path: string,
     context?: Context,
@@ -439,6 +457,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return binding;
   }
 
+  /** @since 0.1.0 */
   override bindList(
     path: string,
     context?: Context,
@@ -459,6 +478,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return binding;
   }
 
+  /** @since 0.1.0 */
   override bindTree(
     path: string,
     context?: Context,
@@ -479,12 +499,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return binding;
   }
 
+  /** @since 0.1.0 */
   isList(path: string, context?: Context): boolean {
     const absolutePath = asInternal(this).resolve(path, context);
     if (!absolutePath) return false;
     return Array.isArray(this._getObject(absolutePath));
   }
 
+  /** @since 0.1.0 */
   checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): void {
     // Signal-based bindings self-update via watchers, so routine polling
     // (forceUpdate=false) is unnecessary. However, the framework calls
@@ -499,9 +521,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
+  /** @since 0.1.0 */
   getSignal<P extends string & ModelPath<T>>(
     path: P,
   ): Signal.State<PathValue<T, P>> | Signal.Computed<PathValue<T, P>>;
+  /** @since 0.1.0 */
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown>;
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown> {
     const existing = this.registry.get(path);
@@ -525,6 +549,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return this.registry.getOrCreate(path, this._getObject(path));
   }
 
+  /** @since 0.1.0 */
   createComputed(
     path: string,
     deps: string[],
@@ -545,10 +570,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return result;
   }
 
+  /** @since 0.1.0 */
   removeComputed(path: string): void {
     this.registry.removeComputed(path);
   }
 
+  /** @internal Used by binding classes -- not part of the public API. */
   _getObject(path: string, context?: object): unknown {
     // If context is a raw data object (not a Context instance), navigate into it directly.
     // This is needed for FilterProcessor/SorterProcessor which pass raw list items as context.
@@ -732,6 +759,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
+  /** @internal Used by binding classes -- not part of the public API. */
   _onPathResubscribe(path: string, cb: () => void): void {
     let set = this._pathSubscribers.get(path);
     if (!set) {
@@ -741,6 +769,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     set.add(cb);
   }
 
+  /** @internal Used by binding classes -- not part of the public API. */
   _offPathResubscribe(path: string, cb: () => void): void {
     const set = this._pathSubscribers.get(path);
     if (set) {
@@ -775,6 +804,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
+  /** @since 0.1.0 */
   override destroy(): void {
     // Abort all in-flight loadData requests (matching JSONModel's XHR abort behavior)
     this._abortController?.abort();

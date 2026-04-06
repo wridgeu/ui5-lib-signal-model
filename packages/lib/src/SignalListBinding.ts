@@ -36,6 +36,7 @@ function asInternal(self: SignalListBinding): ListBindingInternal {
  * Reuses ClientListBinding's filter/sort/extended-change-detection.
  *
  * @namespace ui5.model.signal
+ * @since 0.1.0
  */
 export default class SignalListBinding extends ClientListBinding {
   declare oModel: SignalModel;
@@ -43,6 +44,7 @@ export default class SignalListBinding extends ClientListBinding {
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
+  /** @since 0.1.0 */
   update(): void {
     const internal = asInternal(this);
     const list = this.oModel._getObject(internal.sPath, internal.oContext);
@@ -71,6 +73,8 @@ export default class SignalListBinding extends ClientListBinding {
    * Override ClientListBinding.updateIndices to handle both arrays and objects.
    * ClientListBinding only handles arrays (numeric indices). JSONListBinding
    * overrides this to also handle objects (string keys via for...in).
+   *
+   * @since 0.1.0
    */
   updateIndices(): void {
     const internal = asInternal(this);
@@ -86,6 +90,7 @@ export default class SignalListBinding extends ClientListBinding {
     }
   }
 
+  /** @since 0.1.0 */
   checkUpdate(forceUpdate?: boolean): void {
     const internal = asInternal(this);
     if (internal.bSuspended && !internal.bIgnoreSuspend && !forceUpdate) {
@@ -95,6 +100,7 @@ export default class SignalListBinding extends ClientListBinding {
     internal._fireChange({ reason: ChangeReason.Change });
   }
 
+  /** @since 0.1.0 */
   subscribe(): void {
     this.unsubscribe();
 
@@ -113,6 +119,7 @@ export default class SignalListBinding extends ClientListBinding {
     this.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
   }
 
+  /** @since 0.1.0 */
   unsubscribe(): void {
     if (this._resubscribeCb && this._subscribedPath) {
       this.oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
@@ -123,6 +130,7 @@ export default class SignalListBinding extends ClientListBinding {
     this.watcher = teardownWatcher(this.watcher);
   }
 
+  /** @since 0.1.0 */
   override initialize(): this {
     this.update();
     if (!this.watcher) {
@@ -133,6 +141,7 @@ export default class SignalListBinding extends ClientListBinding {
     return this;
   }
 
+  /** @since 0.1.0 */
   setContext(context?: object): void {
     const internal = asInternal(this);
     if (internal.oContext !== context) {
@@ -145,6 +154,7 @@ export default class SignalListBinding extends ClientListBinding {
     }
   }
 
+  /** @since 0.1.0 */
   override destroy(): void {
     this.unsubscribe();
     super.destroy();

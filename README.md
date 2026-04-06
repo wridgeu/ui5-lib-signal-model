@@ -73,7 +73,6 @@ scripts/        Benchmark runners and CI helpers
 ### Prerequisites
 
 - Node.js >= 22
-- npm >= 9 (workspaces)
 
 ### Install and run
 

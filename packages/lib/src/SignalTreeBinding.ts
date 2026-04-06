@@ -31,6 +31,7 @@ function asInternal(self: SignalTreeBinding): TreeBindingInternal {
  * Reuses ClientTreeBinding's filter/sort/tree traversal logic.
  *
  * @namespace ui5.model.signal
+ * @since 0.1.0
  */
 export default class SignalTreeBinding extends ClientTreeBinding {
   declare oModel: SignalModel;
@@ -38,6 +39,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
+  /** @since 0.1.0 */
   checkUpdate(forceUpdate?: boolean): void {
     const internal = asInternal(this);
     // No bSuspended guard: ClientTreeBinding/JSONTreeBinding do not support
@@ -55,6 +57,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     }
   }
 
+  /** @since 0.1.0 */
   subscribe(): void {
     this.unsubscribe();
 
@@ -73,6 +76,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     this.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
   }
 
+  /** @since 0.1.0 */
   unsubscribe(): void {
     if (this._resubscribeCb && this._subscribedPath) {
       this.oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
@@ -83,6 +87,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     this.watcher = teardownWatcher(this.watcher);
   }
 
+  /** @since 0.1.0 */
   override initialize(): this {
     if (!this.watcher) {
       this.subscribe();
@@ -92,6 +97,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     return this;
   }
 
+  /** @since 0.1.0 */
   setContext(context?: object): void {
     const internal = asInternal(this);
     if (internal.oContext !== context) {
@@ -106,6 +112,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     }
   }
 
+  /** @since 0.1.0 */
   override destroy(): void {
     this.unsubscribe();
     super.destroy();

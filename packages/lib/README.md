@@ -450,7 +450,7 @@ SignalModel's typed path system builds on the patterns from UI5's `TypedJSONMode
 
 A self-contained benchmark page compares SignalModel vs JSONModel across 22 scenarios. With default synchronous `setProperty`, "Update all N bindings" shows ~17x improvement at 2000 bindings. The advantage scales super-linearly: JSONModel's cost is O(n²) while SignalModel's is O(n). For full data replacement and list/table/tree operations, both models perform equivalently because DOM rendering cost dominates.
 
-See the [benchmark documentation](test/benchmark/README.md) for the full analysis, methodology, and results.
+See the [benchmark documentation](https://github.com/wridgeu/ui5-lib-signal-model/tree/main/packages/lib/test/benchmark#readme) for the full analysis, methodology, and results.
 
 ## License
 
