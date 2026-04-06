@@ -2,6 +2,12 @@ import SignalModel from "ui5/model/signal/SignalModel";
 
 /**
  * Tests for destroy edge cases: double destroy, operations after destroy.
+ *
+ * UI5 lifecycle: after destroy(), ManagedObject sets bDestroyed=true and
+ * clears internal state (data, aggregations, bindings). Post-destroy
+ * operations are not expected to succeed — the object is dead. These tests
+ * verify that post-destroy operations degrade gracefully (no unrecoverable
+ * crash) and that the destroyed state is observable.
  */
 QUnit.module("Destroy Edge Cases", () => {
   QUnit.test("double destroy on model does not throw", (assert) => {
@@ -54,53 +60,53 @@ QUnit.module("Destroy Edge Cases", () => {
     model.destroy();
   });
 
-  QUnit.test("getProperty after destroy does not crash", (assert) => {
+  QUnit.test("getProperty after destroy returns undefined", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.destroy();
 
-    // After destroy, registry is cleared and model may be in a broken state.
-    // Either returning a value or throwing is acceptable -- verify no unrecoverable crash.
-    try {
-      model.getProperty("/name");
-      assert.ok(true, "getProperty did not throw after destroy");
-    } catch {
-      assert.ok(true, "getProperty threw after destroy (acceptable)");
-    }
+    // After destroy, ManagedObject clears oData. getProperty returns
+    // undefined because the model's internal data is no longer accessible.
+    const value = model.getProperty("/name");
+    assert.strictEqual(value, undefined, "getProperty returns undefined after destroy");
   });
 
-  QUnit.test("bindProperty after destroy does not crash", (assert) => {
+  QUnit.test("bindProperty after destroy does not throw", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.destroy();
 
+    // bindProperty delegates to the UI5 base class. After destroy the
+    // model is in an invalid state but binding creation must not crash.
     try {
       model.bindProperty("/name");
-      assert.ok(true, "bindProperty succeeded after destroy");
-    } catch {
-      assert.ok(true, "bindProperty threw after destroy (acceptable)");
+      assert.ok(true, "bindProperty did not throw after destroy");
+    } catch (e) {
+      assert.ok(false, "bindProperty threw after destroy: " + (e as Error).message);
     }
   });
 
-  QUnit.test("bindList after destroy does not crash", (assert) => {
+  QUnit.test("bindList after destroy does not throw", (assert) => {
     const model = new SignalModel({ items: [1, 2] });
     model.destroy();
 
     try {
       model.bindList("/items");
-      assert.ok(true, "bindList succeeded after destroy");
-    } catch {
-      assert.ok(true, "bindList threw after destroy (acceptable)");
+      assert.ok(true, "bindList did not throw after destroy");
+    } catch (e) {
+      assert.ok(false, "bindList threw after destroy: " + (e as Error).message);
     }
   });
 
-  QUnit.test("setData after destroy does not crash", (assert) => {
+  QUnit.test("setData after destroy does not throw", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.destroy();
 
+    // After destroy, setData should not cause an unrecoverable crash.
+    // The model is dead — we only verify crash-safety, not functionality.
     try {
       model.setData({ name: "Bob" });
-      assert.ok(true, "setData succeeded after destroy");
-    } catch {
-      assert.ok(true, "setData threw after destroy (acceptable)");
+      assert.ok(true, "setData did not throw after destroy");
+    } catch (e) {
+      assert.ok(false, "setData threw after destroy: " + (e as Error).message);
     }
   });
 });
