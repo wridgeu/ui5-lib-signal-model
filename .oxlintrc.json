@@ -5,7 +5,7 @@
     "suspicious": "warn",
     "perf": "warn"
   },
-  "plugins": ["typescript", "oxc", "unicorn", "import"],
+  "plugins": ["typescript", "oxc", "unicorn", "import", "jsdoc"],
   "rules": {
     "no-console": "off",
     "no-await-in-loop": "off",

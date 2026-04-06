@@ -26,6 +26,7 @@ interface FlushableBinding {
 let pendingUpdates = new Map<FlushableBinding, Signal.State<unknown> | Signal.Computed<unknown>>();
 let flushScheduled = false;
 
+/** @since 0.1.0 */
 export function scheduleFlush(
   binding: FlushableBinding,
   signal: Signal.State<unknown> | Signal.Computed<unknown>,
@@ -60,6 +61,7 @@ export function scheduleFlush(
   }
 }
 
+/** @since 0.1.0 */
 export function cancelFlush(binding: FlushableBinding): void {
   pendingUpdates.delete(binding);
 }
@@ -67,6 +69,8 @@ export function cancelFlush(binding: FlushableBinding): void {
 /**
  * Unwatch all sources on a watcher and return null for assignment.
  * Shared across all binding classes to avoid duplicating the teardown sequence.
+ *
+ * @since 0.1.0
  */
 export function teardownWatcher(watcher: Signal.subtle.Watcher | null): null {
   if (watcher) {

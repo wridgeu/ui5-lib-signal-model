@@ -32,6 +32,7 @@ function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal 
  * Property binding that subscribes to a signal for push-based change notification.
  *
  * @namespace ui5.model.signal
+ * @since 0.1.0
  */
 export default class SignalPropertyBinding extends ClientPropertyBinding {
   declare oModel: SignalModel;
@@ -39,6 +40,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
+  /** @since 0.1.0 */
   checkUpdate(forceUpdate?: boolean): void {
     const self = asInternal(this);
     if (self.bSuspended && !forceUpdate) {
@@ -57,6 +59,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
   }
 
+  /** @since 0.1.0 */
   setValue(value: unknown): void {
     const self = asInternal(this);
     if (self.bSuspended) {
@@ -77,6 +80,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
   }
 
+  /** @since 0.1.0 */
   subscribe(): void {
     this.unsubscribe();
 
@@ -95,6 +99,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     this.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
   }
 
+  /** @since 0.1.0 */
   unsubscribe(): void {
     if (this._resubscribeCb && this._subscribedPath) {
       this.oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
@@ -105,6 +110,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     this.watcher = teardownWatcher(this.watcher);
   }
 
+  /** @since 0.1.0 */
   override initialize(): this {
     if (!this.watcher) {
       this.subscribe();
@@ -113,6 +119,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     return this;
   }
 
+  /** @since 0.1.0 */
   setContext(context?: Context): void {
     const self = asInternal(this);
     if (self.oContext != context) {
@@ -135,6 +142,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
   }
 
+  /** @since 0.1.0 */
   override destroy(): void {
     this.unsubscribe();
     super.destroy();
