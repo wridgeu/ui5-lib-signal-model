@@ -281,3 +281,32 @@ QUnit.test("binding mode OneWay prevents write-back", (assert) => {
     }, 100);
   });
 });
+
+QUnit.test("binding mode OneTime reads initial value but does not update", (assert) => {
+  const done = assert.async();
+  sap.ui.require(["sap/ui/model/BindingMode"], (BindingMode: any) => {
+    const model = new SignalModel({ snapshot: "initial" });
+    model.setDefaultBindingMode(BindingMode.OneTime);
+
+    const text = new Text({ text: "{/snapshot}" });
+    text.setModel(model);
+    text.placeAt("qunit-fixture");
+
+    setTimeout(() => {
+      assert.strictEqual(text.getText(), "initial", "OneTime binding reads initial value");
+
+      model.setProperty("/snapshot", "updated");
+
+      setTimeout(() => {
+        assert.strictEqual(
+          text.getText(),
+          "initial",
+          "OneTime binding does NOT update after model change",
+        );
+        text.destroy();
+        model.destroy();
+        done();
+      }, 100);
+    }, 100);
+  });
+});
