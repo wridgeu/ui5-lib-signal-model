@@ -11,6 +11,7 @@
  *   npm run bench:stable -- --runs 4 --json stability.json
  *
  * @see {@link run-benchmark.mjs} Single-run benchmark CLI
+ * @see {@link ../packages/lib/test/benchmark/bench-stats.mjs} Shared statistics
  * @see {@link ../docs/superpowers/specs/2026-04-05-bench-stable-multi-run-design.md} Design spec
  */
 import { spawn } from "node:child_process";
@@ -20,6 +21,7 @@ import { join, dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
+import { ANSI, computeRatio } from "../packages/lib/test/benchmark/bench-stats.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -70,46 +72,11 @@ const iterations = values.iterations;
 const rounds = values.rounds;
 const jsonOutFile = values.json;
 
-// ── ANSI escape codes ────────────────────────────────────────────────
+// ── ANSI shortcuts ──────────────────────────────────────────────────
 
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const YELLOW = "\x1b[33m";
-const CYAN = "\x1b[36m";
+const { RESET, BOLD, DIM, GREEN, RED, YELLOW, CYAN } = ANSI;
 
-// ── Ratio & verdict logic ────────────────────────────────────────────
-
-/**
- * Compute the raw ratio and direction for a single run's scenario.
- *
- * Uses the same significance checks as bench.spec.mjs:
- * 1. Both medians < 1ms → equal (resolution floor)
- * 2. |diff| < pooled SD → equal (statistical insignificance)
- * 3. Signal median ≤ 0 → equal (division guard)
- * 4. Ratio below 10% threshold → equal
- *
- * @param {{ median: number, stddev: number }} signal
- * @param {{ median: number, stddev: number }} json
- * @returns {{ direction: "faster"|"slower"|"equal", ratio: number }}
- */
-function computeRatio(signal, json) {
-  const sm = signal.median;
-  const jm = json.median;
-
-  if (sm < 1 && jm < 1) return { direction: "equal", ratio: 1 };
-
-  const pooledSD = Math.sqrt(signal.stddev ** 2 + json.stddev ** 2);
-  if (Math.abs(jm - sm) < pooledSD) return { direction: "equal", ratio: 1 };
-  if (sm <= 0) return { direction: "equal", ratio: 1 };
-
-  const ratio = jm / sm;
-  if (ratio >= 1.1) return { direction: "faster", ratio };
-  if (ratio <= 0.9) return { direction: "slower", ratio: 1 / ratio };
-  return { direction: "equal", ratio: 1 };
-}
+// ── Formatting helpers ──────────────────────────────────────────────
 
 /**
  * Format a ratio cell for the merged table (no ANSI color).
@@ -217,16 +184,36 @@ for (let i = 1; i <= runs; i++) {
 
 // ── Merge and render ─────────────────────────────────────────────────
 
-const scenarioCount = allResults[0].results.length;
+// Build a name→index lookup from the first run's results. Subsequent runs
+// are matched by scenario name instead of array position, so reordering
+// or conditional scenarios across runs won't silently misalign data.
+const scenarioNames = allResults[0].results.map((r) => r.name);
+const scenarioCount = scenarioNames.length;
 
-// Build per-scenario data: ratios across all runs
+/** @type {Map<string, number>[]} Lookup maps for each run */
+const runLookups = allResults.map((run) => {
+  const map = new Map();
+  for (let i = 0; i < run.results.length; i++) {
+    map.set(run.results[i].name, i);
+  }
+  return map;
+});
+
 const scenarios = [];
 for (let s = 0; s < scenarioCount; s++) {
-  const name = allResults[0].results[s].name;
+  const name = scenarioNames[s];
   const category = allResults[0].results[s].category;
 
-  const ratios = allResults.map((run) => {
-    const r = run.results[s];
+  const ratios = allResults.map((run, runIdx) => {
+    const idx = runLookups[runIdx].get(name);
+    if (idx === undefined) {
+      console.error(
+        `${RED}Error: scenario "${name}" not found in run ${runIdx + 1}.${RESET}\n` +
+          `Run 1 has ${scenarioCount} scenarios, run ${runIdx + 1} has ${run.results.length}.`,
+      );
+      process.exit(1);
+    }
+    const r = run.results[idx];
     return computeRatio(r.signal, r.json);
   });
 
@@ -288,13 +275,16 @@ if (jsonOutFile) {
       rounds: Number(rounds),
       runs,
     },
-    scenarios: scenarios.map((sc, i) => ({
+    scenarios: scenarios.map((sc) => ({
       name: sc.name,
       category: sc.category,
-      runs: allResults.map((run) => ({
-        json: run.results[i].json,
-        signal: run.results[i].signal,
-      })),
+      runs: allResults.map((run, runIdx) => {
+        const idx = runLookups[runIdx].get(sc.name);
+        return {
+          json: run.results[idx].json,
+          signal: run.results[idx].signal,
+        };
+      }),
       verdict: sc.verdict.verdict,
       direction: sc.verdict.direction,
       medianRatio: sc.verdict.medianRatio,
