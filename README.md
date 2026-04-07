@@ -115,7 +115,7 @@ See the [benchmark documentation](packages/lib/test/benchmark/README.md) for the
 
 ```bash
 npm run bench                                    # CLI -- headless
-npm run bench -- --bindings 1000 --json out.json  # custom config
+npm run bench -- --bindings 1000 --json results.json  # custom config
 npm run bench:stable                              # multi-run stability
 ```
 
