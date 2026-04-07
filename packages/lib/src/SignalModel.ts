@@ -229,6 +229,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * Calls queued after this point are not included.
    * JSONModel-compatible API.
    *
+   * @returns Promise that resolves when pending imports finish
    * @since 0.1.0
    */
   dataLoaded(): Promise<void> {
@@ -249,6 +250,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /**
    * Serialize model data as a JSON string. JSONModel-compatible API.
    *
+   * @returns JSON stringified model data
    * @since 0.1.0
    */
   getJSON(): string {
@@ -306,7 +308,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @returns The model data
+   * @since 0.1.0
+   */
   getData(): T {
     return this.oData;
   }
@@ -523,14 +528,23 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return binding;
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @param path Binding path to check
+   * @param context Optional binding context for relative paths
+   * @returns Whether the value at the given path is an array
+   * @since 0.1.0
+   */
   isList(path: string, context?: Context): boolean {
     const absolutePath = asInternal(this).resolve(path, context);
     if (!absolutePath) return false;
     return Array.isArray(this._getObject(absolutePath));
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @param forceUpdate Whether to force bindings to re-evaluate
+   * @param asyncMode Whether to update asynchronously
+   * @since 0.1.0
+   */
   checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): void {
     // Signal-based bindings self-update via watchers, so routine polling
     // (forceUpdate=false) is unnecessary. However, the framework calls
@@ -594,12 +608,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return result;
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @param path Path of the computed signal to remove
+   * @since 0.1.0
+   */
   removeComputed(path: string): void {
     this.registry.removeComputed(path);
   }
 
-  /** @internal Used by binding classes -- not part of the public API. */
+  /** Used by binding classes, not part of the public API. @internal */
   _getObject(path: string, context?: object): unknown {
     // If context is a raw data object (not a Context instance), navigate into it directly.
     // This is needed for FilterProcessor/SorterProcessor which pass raw list items as context.
@@ -784,7 +801,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
   }
 
-  /** @internal Used by binding classes -- not part of the public API. */
+  /** Used by binding classes, not part of the public API. @internal */
   _onPathResubscribe(path: string, cb: () => void): void {
     let set = this._pathSubscribers.get(path);
     if (!set) {
@@ -794,7 +811,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     set.add(cb);
   }
 
-  /** @internal Used by binding classes -- not part of the public API. */
+  /** Used by binding classes, not part of the public API. @internal */
   _offPathResubscribe(path: string, cb: () => void): void {
     const set = this._pathSubscribers.get(path);
     if (set) {

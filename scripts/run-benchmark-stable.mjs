@@ -81,8 +81,8 @@ const { RESET, BOLD, DIM, GREEN, RED, YELLOW, CYAN } = ANSI;
 /**
  * Format a ratio cell for the merged table (no ANSI color).
  *
- * @param {{ direction: string, ratio: number }} r
- * @returns {string}
+ * @param {{ direction: string, ratio: number }} r Single-run ratio result
+ * @returns {string} Formatted ratio cell
  */
 function fmtCell(r) {
   if (r.direction === "equal") return "~equal";
@@ -97,8 +97,8 @@ function fmtCell(r) {
  * - If all non-equal runs agree → stable
  * - If faster and slower both appear → noise
  *
- * @param {{ direction: string, ratio: number }[]} ratios
- * @returns {{ verdict: "stable"|"noise", direction: "faster"|"slower"|"equal", medianRatio: number }}
+ * @param {{ direction: string, ratio: number }[]} ratios Per-run ratio results
+ * @returns {{ verdict: "stable"|"noise", direction: "faster"|"slower"|"equal", medianRatio: number }} Aggregated verdict
  */
 function computeVerdict(ratios) {
   const nonEqual = ratios.filter((r) => r.direction !== "equal");
@@ -125,8 +125,8 @@ function computeVerdict(ratios) {
 /**
  * Format the verdict column with ANSI color.
  *
- * @param {{ verdict: string, direction: string, medianRatio: number }} v
- * @returns {string}
+ * @param {{ verdict: string, direction: string, medianRatio: number }} v Verdict to format
+ * @returns {string} ANSI-colored verdict string
  */
 function fmtVerdict(v) {
   if (v.verdict === "noise") return YELLOW + "noise" + RESET;

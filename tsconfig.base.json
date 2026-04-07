@@ -4,8 +4,6 @@
     "module": "ES2022",
     "moduleResolution": "Bundler",
     "strict": true,
-    "strictNullChecks": true,
-    "noImplicitAny": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,

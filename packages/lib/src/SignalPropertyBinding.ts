@@ -40,7 +40,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
-  /** @since 0.1.0 */
+  /**
+   * @param forceUpdate - Whether to force a change event regardless of value comparison.
+   * @since 0.1.0
+   */
   checkUpdate(forceUpdate?: boolean): void {
     const self = asInternal(this);
     if (self.bSuspended && !forceUpdate) {
@@ -59,7 +62,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @param value - The new value to set on the bound property.
+   * @since 0.1.0
+   */
   setValue(value: unknown): void {
     const self = asInternal(this);
     if (self.bSuspended) {
@@ -110,7 +116,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     this.watcher = teardownWatcher(this.watcher);
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @returns The binding instance for chaining.
+   * @since 0.1.0
+   */
   override initialize(): this {
     if (!this.watcher) {
       this.subscribe();
@@ -119,7 +128,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     return this;
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @param context - The new binding context.
+   * @since 0.1.0
+   */
   setContext(context?: Context): void {
     const self = asInternal(this);
     if (self.oContext != context) {

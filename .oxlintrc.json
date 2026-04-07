@@ -20,7 +20,11 @@
     "typescript/no-explicit-any": "error",
     "typescript/no-non-null-assertion": "warn",
     "typescript/consistent-type-imports": "error",
-    "typescript/no-unsafe-type-assertion": "warn"
+    "typescript/no-unsafe-type-assertion": "warn",
+    "jsdoc/check-access": "warn",
+    "jsdoc/empty-tags": "warn",
+    "jsdoc/require-param-description": "warn",
+    "jsdoc/require-returns-description": "warn"
   },
   "overrides": [
     {

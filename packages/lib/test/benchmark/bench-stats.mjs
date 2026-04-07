@@ -65,7 +65,7 @@ export function filterOutliers(arr) {
  * standard error.
  *
  * @param {number[]} arr - Array of timing samples (milliseconds)
- * @returns {{ n: number, median: number, mean: number, stddev: number, min: number, max: number, p5: number, p95: number }}
+ * @returns {{ n: number, median: number, mean: number, stddev: number, min: number, max: number, p5: number, p95: number }} Descriptive statistics
  */
 export function stats(arr) {
   const clean = filterOutliers(arr);
@@ -106,9 +106,9 @@ export function stats(arr) {
  * When sample counts are unavailable (n is undefined or 0), falls back
  * to the raw pooled SD for backwards compatibility with older result files.
  *
- * @param {{ median: number, stddev: number, n?: number }} signal
- * @param {{ median: number, stddev: number, n?: number }} json
- * @returns {{ direction: "faster"|"slower"|"equal", ratio: number }}
+ * @param {{ median: number, stddev: number, n?: number }} signal SignalModel stats
+ * @param {{ median: number, stddev: number, n?: number }} json JSONModel stats
+ * @returns {{ direction: "faster"|"slower"|"equal", ratio: number }} Ratio with significance direction
  */
 export function computeRatio(signal, json) {
   const sm = signal.median;

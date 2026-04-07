@@ -47,8 +47,8 @@ function fmtMs(ms) {
  *
  * Delegates significance logic to {@link computeRatio} from bench-stats.mjs.
  *
- * @param {{ median: number, stddev: number, n?: number }} signal
- * @param {{ median: number, stddev: number, n?: number }} json
+ * @param {{ median: number, stddev: number, n?: number }} signal SignalModel stats
+ * @param {{ median: number, stddev: number, n?: number }} json JSONModel stats
  * @returns {string} ANSI-colored ratio string
  */
 function fmtRatio(signal, json) {

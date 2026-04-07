@@ -39,7 +39,10 @@ export default class SignalTreeBinding extends ClientTreeBinding {
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
-  /** @since 0.1.0 */
+  /**
+   * @param forceUpdate - Whether to force a change event regardless of data comparison.
+   * @since 0.1.0
+   */
   checkUpdate(forceUpdate?: boolean): void {
     const internal = asInternal(this);
     // No bSuspended guard: ClientTreeBinding/JSONTreeBinding do not support
@@ -87,7 +90,10 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     this.watcher = teardownWatcher(this.watcher);
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @returns The binding instance for chaining.
+   * @since 0.1.0
+   */
   override initialize(): this {
     if (!this.watcher) {
       this.subscribe();
@@ -97,7 +103,10 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     return this;
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @param context - The new binding context.
+   * @since 0.1.0
+   */
   setContext(context?: object): void {
     const internal = asInternal(this);
     if (internal.oContext !== context) {

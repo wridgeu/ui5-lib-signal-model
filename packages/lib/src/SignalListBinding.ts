@@ -90,7 +90,10 @@ export default class SignalListBinding extends ClientListBinding {
     }
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @param forceUpdate - Whether to force a change event regardless of suspension state.
+   * @since 0.1.0
+   */
   checkUpdate(forceUpdate?: boolean): void {
     const internal = asInternal(this);
     if (internal.bSuspended && !internal.bIgnoreSuspend && !forceUpdate) {
@@ -130,7 +133,10 @@ export default class SignalListBinding extends ClientListBinding {
     this.watcher = teardownWatcher(this.watcher);
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @returns The binding instance for chaining.
+   * @since 0.1.0
+   */
   override initialize(): this {
     this.update();
     if (!this.watcher) {
@@ -141,7 +147,10 @@ export default class SignalListBinding extends ClientListBinding {
     return this;
   }
 
-  /** @since 0.1.0 */
+  /**
+   * @param context - The new binding context.
+   * @since 0.1.0
+   */
   setContext(context?: object): void {
     const internal = asInternal(this);
     if (internal.oContext !== context) {

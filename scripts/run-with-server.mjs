@@ -15,6 +15,12 @@ import { platform } from "node:os";
 
 const args = process.argv.slice(2);
 
+/**
+ * Extract a named CLI argument value from process.argv.
+ *
+ * @param {string} name Flag name to look up (e.g. "--ready-url")
+ * @returns {string | undefined} The value following the flag, or undefined if not present
+ */
 function getArg(name) {
   const idx = args.indexOf(name);
   return idx !== -1 ? args[idx + 1] : undefined;
@@ -51,7 +57,7 @@ async function waitForServer(url, maxAttempts = 60) {
  *   create a process group. `process.kill(-pid)` sends SIGTERM to
  *   the entire group (npm + ui5 serve + any children).
  *
- * @param {import("node:child_process").ChildProcess} proc
+ * @param {import("node:child_process").ChildProcess} proc Process to kill
  */
 function killProcessTree(proc) {
   if (platform() === "win32") {
