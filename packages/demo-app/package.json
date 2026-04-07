@@ -5,7 +5,7 @@
   "author": "Marco Beier",
   "description": "Demo app for ui5-lib-signal-model library",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "type": "module",
   "scripts": {
