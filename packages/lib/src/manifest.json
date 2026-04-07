@@ -4,7 +4,7 @@
     "id": "ui5.model.signal",
     "type": "library",
     "applicationVersion": {
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     "title": "Signal-based reactive UI5 model",
     "description": "Drop-in replacement for JSONModel using TC39 Signals for push-based reactivity."

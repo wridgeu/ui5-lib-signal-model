@@ -1,0 +1,77 @@
+# Changelog
+
+## [0.1.1](https://github.com/wridgeu/ui5-lib-signal-model/compare/v0.1.0...v0.1.1) (2026-04-07)
+
+
+### Features
+
+* add bAsyncUpdate benchmark scenario, honest performance analysis ([b525cc5](https://github.com/wridgeu/ui5-lib-signal-model/commit/b525cc55f7e02b1526f3c7af19169f8eaa1b8ac7))
+* add setJSON/getJSON, guard loadData after destroy, expand test coverage ([7a42da7](https://github.com/wridgeu/ui5-lib-signal-model/commit/7a42da7563baf6126fa7c099b032156bdcfffc8d))
+* add SignalTreeBinding, nested binding tests, expression binding tests, tree demo page ([1004f95](https://github.com/wridgeu/ui5-lib-signal-model/commit/1004f95c0a1f22074f13ac446360098073d657e9))
+* add TypeScript path utility types and model options ([6ca4ddb](https://github.com/wridgeu/ui5-lib-signal-model/commit/6ca4ddb7ae165f43871edc9773bd8690d52dd52d))
+* automatic re-subscribe bridge for computed redefinition ([eda3722](https://github.com/wridgeu/ui5-lib-signal-model/commit/eda3722f0d28d78260ae43ae4f6b3ec187f9170f))
+* **bench:** add CLI benchmark runner with live terminal output ([dc49a72](https://github.com/wridgeu/ui5-lib-signal-model/commit/dc49a7267f848532c326be35ca9785962a5db1b4)), closes [#2](https://github.com/wridgeu/ui5-lib-signal-model/issues/2)
+* **bench:** add sparse async benchmark scenario ([18138fb](https://github.com/wridgeu/ui5-lib-signal-model/commit/18138fb2b54e20513750b21e7155b6da9efd2185))
+* computed sub-path traversal, unbindElement regression tests, benchmark updates ([d1f2fcc](https://github.com/wridgeu/ui5-lib-signal-model/commit/d1f2fcca1a47ac60d97c0a8e211f87792b394ad7)), closes [#8](https://github.com/wridgeu/ui5-lib-signal-model/issues/8)
+* implement SignalListBinding with filter and sort support ([45f1566](https://github.com/wridgeu/ui5-lib-signal-model/commit/45f1566b238d33637f9762a57fa04dd26043c6b4))
+* implement SignalModel core with setProperty, setData, and signal registry ([931827a](https://github.com/wridgeu/ui5-lib-signal-model/commit/931827ac52b36771286b893b2e9dce8fdce7356f))
+* implement SignalPropertyBinding with watcher-based push notifications ([760991f](https://github.com/wridgeu/ui5-lib-signal-model/commit/760991f535af6f10366d905fae9826ccc6555caa))
+* implement SignalRegistry with lazy signal creation and computed support ([142cf75](https://github.com/wridgeu/ui5-lib-signal-model/commit/142cf7570b74aad7ef41dd6ff5c8df13f8666cf9))
+* loadData, config modes, unified flush queue, parity tests ([1d7c65d](https://github.com/wridgeu/ui5-lib-signal-model/commit/1d7c65d2d5ab7a7769b91c9e6b7ce84cb427c6ef))
+* wire TypeScript generics into SignalModel for typed paths and values ([ab9dc2f](https://github.com/wridgeu/ui5-lib-signal-model/commit/ab9dc2f956de3ef37be84ee9981ec72ed072bedc))
+
+
+### Bug Fixes
+
+* add `loadData` overloads to deprecate no-op `_async` parameter ([f602fe3](https://github.com/wridgeu/ui5-lib-signal-model/commit/f602fe32afa5e8e5fe04aab6855b0a576511702e))
+* address code review findings — computed getProperty, strict mode, merge invalidation, demo desync ([ae43350](https://github.com/wridgeu/ui5-lib-signal-model/commit/ae43350b034046badb5488bb84b58cfe430a8760))
+* address review findings across library and benchmarks ([cfd270a](https://github.com/wridgeu/ui5-lib-signal-model/commit/cfd270a7573be3cf164bee473a270a809e561449))
+* align manifests with UI5 best practices — async routing, viewPath, library i18n flag ([985aaab](https://github.com/wridgeu/ui5-lib-signal-model/commit/985aaab2295ad77effe00b94042dca2cf6fffbe3))
+* **bench:** address review findings — validation, docs, edge cases ([3b002e7](https://github.com/wridgeu/ui5-lib-signal-model/commit/3b002e71cd0dfdb35d8a2c00a9f0ad66e2d8ce66))
+* **bench:** close unclosed JSON code block in benchmark README ([01ab270](https://github.com/wridgeu/ui5-lib-signal-model/commit/01ab270baa13899729a3f98b787626a53c047bb7))
+* benchmark handles sub-millisecond values, stricter ratio threshold ([844dd69](https://github.com/wridgeu/ui5-lib-signal-model/commit/844dd698913a39231a2554341238140ba9b1c00c))
+* benchmark ratio uses statistical significance, not naive threshold ([a1bddc9](https://github.com/wridgeu/ui5-lib-signal-model/commit/a1bddc9cc09456369606c5cac4eb99659c3d2d36))
+* benchmark scenario numbering and missing flush in benchComputedRedefine ([959a764](https://github.com/wridgeu/ui5-lib-signal-model/commit/959a764e3024ec5ab1a43ec7004298cd29d61f15))
+* binding parity gaps + dual-model parity test suite ([6697cc4](https://github.com/wridgeu/ui5-lib-signal-model/commit/6697cc4515ade27c8fa6a90b1a081ef44aa84fe1))
+* broken links, cross-reference format, image path depth ([b002911](https://github.com/wridgeu/ui5-lib-signal-model/commit/b002911da5db001e4f626d159456dcb0df921d71))
+* comprehensive review — fix bugs, add tests, new benchmark scenario ([c9d7651](https://github.com/wridgeu/ui5-lib-signal-model/commit/c9d76517b99941085418a1918e375c42925f95e5))
+* comprehensive review — fix bugs, add tests, new benchmark scenario ([994ed0f](https://github.com/wridgeu/ui5-lib-signal-model/commit/994ed0fd5a787dd820e454644345cbfb5ecc6175))
+* **docs:** clarify microtask vs setTimeout scheduling per code path ([d7458d8](https://github.com/wridgeu/ui5-lib-signal-model/commit/d7458d8fdec388f63b86d8bb4439639005e2e582))
+* **docs:** correct broken signal-polyfill PR link ([3864cab](https://github.com/wridgeu/ui5-lib-signal-model/commit/3864cab1e025c2a6a0e445be7caa699dde99ef65))
+* **docs:** correct inflated instrumentation percentages in investigation ([f60cf3a](https://github.com/wridgeu/ui5-lib-signal-model/commit/f60cf3a2abf1f9dc8b64be5f0b4c0348e525e210))
+* end-to-end review — dead code, loadData rewrite, test coverage ([257c416](https://github.com/wridgeu/ui5-lib-signal-model/commit/257c41694a0c1186bb0e0a9c3fa3d692d04fd24c))
+* include signal-polyfill type declaration in thirdparty vendor ([0c3a6ac](https://github.com/wridgeu/ui5-lib-signal-model/commit/0c3a6ac9db998c3a813b6ed97bb2d05e0c7baf68))
+* list and tree bindings fire initial change event on initialize ([5267bc4](https://github.com/wridgeu/ui5-lib-signal-model/commit/5267bc4bdcdab538f5ab923b0db03f90f985cfcc))
+* parity gaps with JSONModel found during review ([d9f28c6](https://github.com/wridgeu/ui5-lib-signal-model/commit/d9f28c6608f1027725b97df9fd82f1fb9580617f))
+* remove stray code fence and fix GitHub URLs in benchmark README ([ea46ef4](https://github.com/wridgeu/ui5-lib-signal-model/commit/ea46ef494fd3751f6d2cc0bab8820d4df6fd1b58))
+* rename malformed.json test fixture to .txt to avoid oxfmt parse error ([6528efd](https://github.com/wridgeu/ui5-lib-signal-model/commit/6528efd823b300f94998015388288c9451f7533d))
+* rename malformed.json test fixture to .txt to avoid oxfmt parse error ([6441da7](https://github.com/wridgeu/ui5-lib-signal-model/commit/6441da759e49c5901dd62340106ceac7e21e58b3))
+* resolve TypeScript type errors in SignalPropertyBinding for UI5 type stub gaps ([36f7c6f](https://github.com/wridgeu/ui5-lib-signal-model/commit/36f7c6f3497aaee71ad7af292b780d0057b7cd44))
+* review pass — computed immutability, docs, tests, config ([5e5c5f7](https://github.com/wridgeu/ui5-lib-signal-model/commit/5e5c5f7949e644785eb12f0a5824afe562fc1d97))
+* runtime test failures — eager subscribe, signalEquals for object mutation, raw context handling in getProperty, computed dep initialization ([7501b00](https://github.com/wridgeu/ui5-lib-signal-model/commit/7501b00450ba37119e288d03d07753f1c73c4b88))
+* sub-path bindings re-subscribe when parent computed is redefined ([13710f5](https://github.com/wridgeu/ui5-lib-signal-model/commit/13710f55104408d65ea98ffbcc92fbf956135ea4))
+* tree binding checkUpdate parity + suspend/resume test suite ([6559f02](https://github.com/wridgeu/ui5-lib-signal-model/commit/6559f028ed727a244f5bcfb48a9f4a175c01be1f))
+* tree binding suspend parity + add forceNoCache ([c0bdc75](https://github.com/wridgeu/ui5-lib-signal-model/commit/c0bdc75c67aeebfb1e73fd2baa2c5bb284a2afb7))
+* TypeScript strictness — widen generic constraint, fix demo type errors, exclude wdio from test tsconfig ([9761b76](https://github.com/wridgeu/ui5-lib-signal-model/commit/9761b76bc041f4141d573edc520329b9b5796ca2))
+* update SignalRegistry test to expect throw on duplicate computed ([2bde044](https://github.com/wridgeu/ui5-lib-signal-model/commit/2bde0443557ca9e19ca3d07dc6a1a541baaab403))
+* vendor signal-polyfill for UI5 module resolution, gitignore tsbuildinfo ([c74ba61](https://github.com/wridgeu/ui5-lib-signal-model/commit/c74ba6119c54a1e397e1cd33b1c25660bb4ea012))
+* watcher unwatch no-op, child invalidation, perf optimizations, benchmark ([129c1fc](https://github.com/wridgeu/ui5-lib-signal-model/commit/129c1fc623693331f41b427fb844bea45fbbbc2e))
+
+
+### Performance Improvements
+
+* add benchGridTableBindingReplace function and sap.ui.table module loading ([7600765](https://github.com/wridgeu/ui5-lib-signal-model/commit/7600765956cd2ba792a9c8986dc2a74c05902a87))
+* add computed grid table scenario, bump default rounds to 20 ([b9083ff](https://github.com/wridgeu/ui5-lib-signal-model/commit/b9083ff76f36e3b80661aaafabd2a5f6c69a42fd))
+* add computed redefine + sub-path benchmark scenario ([dcabf9a](https://github.com/wridgeu/ui5-lib-signal-model/commit/dcabf9a10398355c65ece0f39c3d9a75f77f3637))
+* add deep-path setProperty overhead scenario (no computeds) ([8dd50e2](https://github.com/wridgeu/ui5-lib-signal-model/commit/8dd50e2f1df63dfaf3f05e6f2c348e6be1b2369c))
+* defer signal notifications when bAsyncUpdate is true ([6120663](https://github.com/wridgeu/ui5-lib-signal-model/commit/61206636299b456928d7ee9741b746aa6f61b6b5))
+* incremental path build in _findComputedAncestor ([23cb1ed](https://github.com/wridgeu/ui5-lib-signal-model/commit/23cb1edb69800ced28645d78f35fbc6e8f02e586))
+* lastIndexOf pattern in getSignal parent lookup ([5a812f0](https://github.com/wridgeu/ui5-lib-signal-model/commit/5a812f08e437b3c5161a48cdc021bfdf887fbdf3))
+* microtask batching, fresh benchmark screenshots, honest async analysis ([ac08bf6](https://github.com/wridgeu/ui5-lib-signal-model/commit/ac08bf626a61a75c6270425ba2f6d062d8d49191))
+* replace Map with array+flag for microtask batching ([ebe611c](https://github.com/wridgeu/ui5-lib-signal-model/commit/ebe611c41859853266620d443ddce56e49dd46a1))
+* shared watcher with getPending/watch bulk re-arm ([afa2159](https://github.com/wridgeu/ui5-lib-signal-model/commit/afa215901822d784deb879d4cfd07c982f3c9224))
+* skip computed checks in _getObject when no computeds exist ([0666a17](https://github.com/wridgeu/ui5-lib-signal-model/commit/0666a17940653bb85f95ef2b8ad1e7564bb76f3c))
+* update results table with 22-scenario run at 2000 bindings ([d49c2f8](https://github.com/wridgeu/ui5-lib-signal-model/commit/d49c2f8b0a1a06aea07430b648342417dece0594))
+* update results table with 23-scenario run at 2000 bindings, 20 rounds ([0ccf2f5](https://github.com/wridgeu/ui5-lib-signal-model/commit/0ccf2f51eb709be465a379e3e343e95d5cae8385))
+* wire grid table as scenario 9, renumber subsequent scenarios ([a687dae](https://github.com/wridgeu/ui5-lib-signal-model/commit/a687daee8e6e8d6f85e8f7569c5e7ff9748c66a3))
+* zero-allocation path traversal in _getObject raw-context branch ([731bdb3](https://github.com/wridgeu/ui5-lib-signal-model/commit/731bdb312a66091f16fbefed450f82f941d22650))
