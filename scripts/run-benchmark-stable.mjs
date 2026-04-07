@@ -12,7 +12,7 @@
  *
  * @see {@link run-benchmark.mjs} Single-run benchmark CLI
  * @see {@link ../packages/lib/test/benchmark/bench-stats.mjs} Shared statistics
- * @see {@link ../docs/superpowers/specs/2026-04-05-bench-stable-multi-run-design.md} Design spec
+ * @see {@link ../docs/specs/2026-04-05-bench-stable-multi-run-design.md} Design spec
  */
 import { spawn } from "node:child_process";
 import { readFile, writeFile, unlink } from "node:fs/promises";

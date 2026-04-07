@@ -3,7 +3,7 @@
  * Aligns with UI5 TypedJSONModel conventions.
  */
 type PropertiesOf<T> = {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  // oxlint-disable-next-line typescript/no-unsafe-function-type
   [Key in keyof T]: T[Key] extends Function ? never : T[Key] extends symbol ? never : Key;
 }[keyof T];
 

@@ -264,6 +264,6 @@ Expression binding, computed signals, getProperty, setProperty (no bindings), se
 
 ## Background
 
-- [openui5 issue 2600](https://github.com/SAP/openui5/issues/2600) - documents the `checkUpdate` O(N) bottleneck
-- [openui5 issue 4351](https://github.com/SAP/openui5/issues/4351) - related DOM accumulation problem in large apps
+- [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600) - documents the `checkUpdate` O(N) bottleneck
+- [openui5 issue 4351](https://github.com/UI5/openui5/issues/4351) - related DOM accumulation problem in large apps
 - SAP commit `cb6c7f7a` - added `checkPerformanceOfUpdate` warning at 100,000 cumulative binding checks
