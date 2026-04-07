@@ -56,12 +56,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    *
    * Uses `fetch()` internally. Fires `requestSent`, `requestCompleted`,
    * and `requestFailed` events matching the JSONModel contract.
-   * Calls are chained sequentially -- multiple `loadData` calls execute
-   * in order, matching JSONModel's `pSequentialImportCompleted` behavior.
+   * Calls are chained sequentially, matching JSONModel's `pSequentialImportCompleted` behavior.
    *
    * @param url URL to load JSON from
    * @param parameters Query parameters (appended to URL for GET, sent as body for POST)
-   * @param _async Deprecated -- always async. Kept for JSONModel signature compatibility.
+   * @param _async Has no effect. Kept for JSONModel.loadData signature compatibility.
    * @param type HTTP method: "GET" (default) or "POST"
    * @param merge Whether to merge loaded data instead of replacing
    * @param cache Set to false to append a cache-busting timestamp
@@ -70,6 +69,31 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @returns Promise that resolves when data is loaded
    * @since 0.1.0
    */
+  loadData(
+    url: string,
+    parameters?: Record<string, string> | string,
+    _async?: undefined,
+    type?: string,
+    merge?: boolean,
+    cache?: boolean,
+    customHeaders?: Record<string, string>,
+    abortSignal?: AbortSignal,
+  ): Promise<void>;
+  /**
+   * @deprecated The `_async` parameter has no effect. SignalModel uses the Fetch API, which is
+   *   inherently asynchronous. The behavior matches JSONModel but requests are always async
+   *   regardless of this flag. Use the overload without `_async` instead.
+   */
+  loadData(
+    url: string,
+    parameters: Record<string, string> | string | undefined,
+    _async: boolean,
+    type?: string,
+    merge?: boolean,
+    cache?: boolean,
+    customHeaders?: Record<string, string>,
+    abortSignal?: AbortSignal,
+  ): Promise<void>;
   loadData(
     url: string,
     parameters?: Record<string, string> | string,
@@ -754,6 +778,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Update the base path signal (the object reference hasn't changed, but contents have)
     const effectivePath = basePath || "/";
     this.registry.set(effectivePath, target);
+    // basePath is "" for the root merge call -- skip parent invalidation since root has no parent.
     if (basePath) {
       this._invalidateParentSignals(basePath);
     }
