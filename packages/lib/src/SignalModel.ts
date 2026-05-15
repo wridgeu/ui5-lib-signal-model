@@ -8,11 +8,12 @@ import SignalTreeBinding from "./SignalTreeBinding";
 import type { SignalModelOptions, ModelPath, PathValue } from "./types";
 import type { Signal } from "signal-polyfill";
 
-// `resolve` exists on Model at runtime but is not in the public @openui5/types stubs
+// Runtime properties/methods on ClientModel not exposed by @openui5/types stubs.
 type ClientModelInternal = ClientModel & {
   resolve(path: string, oContext?: Context): string | undefined;
   checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): number;
   bDestroyed: boolean;
+  bCache: boolean;
 };
 
 function asInternal(self: ClientModel): ClientModelInternal {
@@ -110,8 +111,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const method = type || "GET";
     let fullURL = url;
     // Fall back to model-level cache setting (set via forceNoCache), matching JSONModel.
-    const effectiveCache =
-      cache === undefined ? (this as unknown as { bCache: boolean }).bCache : cache;
+    const effectiveCache = cache === undefined ? asInternal(this).bCache : cache;
     const info = "cache=" + effectiveCache + ";bMerge=" + merge;
     const infoObject = { cache: effectiveCache, merge };
 
@@ -244,7 +244,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @since 0.1.0
    */
   forceNoCache(noCache: boolean): void {
-    (this as unknown as { bCache: boolean }).bCache = !noCache;
+    asInternal(this).bCache = !noCache;
   }
 
   /**
