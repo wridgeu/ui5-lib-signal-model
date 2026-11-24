@@ -347,6 +347,14 @@ model.setProperty("/a/b/c", value)
 
 All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`, `bindTree`) behave identically regardless of configuration.
 
+### Known Differences from JSONModel
+
+A randomized test runs the same writes against both models and compares data and binding values after every step. These differences remain on purpose:
+
+- **Write below a primitive.** `setProperty("/name/x", 1)` with `name: "Al"` returns `false`. JSONModel throws a `TypeError`.
+- **`undefined` keys after a merge.** `setData(data, true)` merges in place and keeps keys that hold `undefined`. JSONModel rebuilds the data and drops them. `getProperty` returns `undefined` either way.
+- **Change events for objects.** A binding on an object or array fires a change event whenever something below it is written. JSONModel fires only when a deep comparison finds a difference.
+
 ### Merge Writes
 
 `mergeProperty` performs a **recursive merge** at a specific path. It updates only the properties you provide and leaves the rest untouched. Compare with `setProperty`, which **replaces** the entire value:
@@ -392,7 +400,9 @@ model.bindProperty("/path");
 model.bindList("/path");
 model.bindTree("/path", context, filters, { arrayNames: ["children"] }, sorters);
 
-// Load JSON from a URL (fires requestSent/requestCompleted/requestFailed events)
+// Load JSON from a URL (fires requestSent/requestCompleted/requestFailed events).
+// Like JSONModel, the returned promise rejects with { message, statusCode, statusText,
+// responseText } when the request fails.
 model.loadData(url, params?, async?, method?, merge?, cache?, headers?, abortSignal?);
 
 // Promise that resolves when all pending loadData calls complete

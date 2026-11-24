@@ -21,8 +21,8 @@ interface FlushableBinding {
  * Uses queueMicrotask (not setTimeout) deliberately: microtasks run before
  * the browser paints, so the first rendered frame always shows correct data.
  * JSONModel's bAsyncUpdate uses setTimeout, which can flash one stale frame
- * before the checkUpdate pass runs. See README "Microtask vs Macrotask
- * Scheduling" for the full rationale.
+ * before the checkUpdate pass runs. See "Microtask vs Macrotask
+ * Scheduling" in docs/architecture.md for the full rationale.
  */
 let pendingUpdates = new Map<FlushableBinding, Signal.State<unknown> | Signal.Computed<unknown>>();
 let flushScheduled = false;

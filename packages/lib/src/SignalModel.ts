@@ -9,18 +9,6 @@ import SignalTreeBinding from "./SignalTreeBinding";
 import type { SignalModelOptions, ModelPath, PathValue } from "./types";
 import type { Signal } from "signal-polyfill";
 
-/**
- * Deep-clone an object or array using structuredClone, falling back to UI5's
- * deepExtend when the value contains non-cloneable properties (e.g. functions).
- */
-function safeClone<V extends object>(value: V): V {
-  try {
-    return structuredClone(value);
-  } catch {
-    return deepExtend(Array.isArray(value) ? [] : {}, value) as V;
-  }
-}
-
 // Runtime properties/methods on ClientModel not exposed by @openui5/types stubs.
 type ClientModelInternal = ClientModel & {
   resolve(path: string, oContext?: Context): string | undefined;
@@ -30,6 +18,25 @@ type ClientModelInternal = ClientModel & {
   bDestroyed: boolean;
   bCache: boolean;
 };
+
+/** A `{}`-style object: what a merge descends into (not Date, class instances, arrays). */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const proto = Object.getPrototypeOf(value) as unknown;
+  return proto === Object.prototype || proto === null;
+}
+
+/** Number of segments in an absolute path below the root: "/a" is 1, "/a/b" is 2. */
+function depthOf(path: string): number {
+  let depth = 1;
+  for (let idx = path.indexOf("/", 1); idx !== -1; idx = path.indexOf("/", idx + 1)) depth++;
+  return depth;
+}
+
+/** Path of an array's `length`, for the array at `arrayPath`. */
+function lengthPath(arrayPath: string): string {
+  return arrayPath === "/" ? "/length" : `${arrayPath}/length`;
+}
 
 function asInternal(self: ClientModel): ClientModelInternal {
   return self as unknown as ClientModelInternal;
@@ -82,7 +89,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @param cache Set to false to append a cache-busting timestamp
    * @param customHeaders Additional HTTP headers
    * @param abortSignal AbortSignal to cancel the request (SignalModel extension)
-   * @returns Promise that resolves when data is loaded
+   * @returns Promise that resolves when data is loaded and, like JSONModel, rejects with
+   *   `{ message, statusCode, statusText, responseText }` when the request fails
    * @since 0.1.0
    */
   loadData(
@@ -141,10 +149,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       fullURL += (fullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
     }
 
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      ...customHeaders,
-    };
+    // Header names are case-insensitive: a custom "accept" replaces the default
+    const headers: Record<string, string> = { ...customHeaders };
+    if (!Object.keys(headers).some((name) => name.toLowerCase() === "accept")) {
+      headers.Accept = "application/json";
+    }
 
     // POST body: form-encoded to match JSONModel (jQuery.ajax processData default).
     // JSONModel sends object params as "key=val&key2=val2" with
@@ -225,7 +234,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           }
           const errorInfo = {
             message: error.message,
-            statusCode: String(error.statusCode ?? 0),
+            statusCode: error.statusCode ?? 0,
             statusText: error.statusText ?? error.message,
             responseText: error.responseText ?? "",
           };
@@ -240,6 +249,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             errorobject: errorInfo,
           });
           this.fireRequestFailed(errorInfo);
+          // Like JSONModel: the returned promise rejects with the error object
+          return Promise.reject(errorInfo);
         },
       ),
     );
@@ -410,7 +421,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     let parent = this._getObject(objectPath) as Record<string, unknown> | undefined;
 
-    if (!parent || typeof parent !== "object") {
+    // Like JSONModel, a function can hold properties; other primitives cannot
+    if (!parent || (typeof parent !== "object" && typeof parent !== "function")) {
       if (!this.autoCreatePaths) {
         return false;
       }
@@ -420,25 +432,33 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this.strictLeafCheck && !(propertyName in parent)) {
       return false;
     }
-    const oldValue = parent[propertyName];
     parent[propertyName] = value;
 
     if (this.registry.size > 0) {
-      const hasObjectTransition =
-        (typeof oldValue === "object" && oldValue !== null) ||
-        (typeof value === "object" && value !== null);
       if (asyncUpdate) {
         // Deferred mode: record dirty path and schedule a single batched sync.
         // Avoids synchronous watcher notifications during a batch of writes,
         // and syncs only the dirty paths instead of scanning the entire registry.
-        const prevFlag = this._pendingAsyncPaths.get(resolvedPath) ?? false;
-        this._pendingAsyncPaths.set(resolvedPath, prevFlag || hasObjectTransition);
+        this._pendingAsyncPaths.add(resolvedPath);
+        if (Array.isArray(parent)) {
+          this._pendingAsyncPaths.add(
+            propertyName === "length" ? objectPath : lengthPath(objectPath),
+          );
+        }
         this._scheduleBulkSync();
       } else {
         this.registry.set(resolvedPath, value);
         this._invalidateParentSignals(resolvedPath);
-        if (hasObjectTransition) {
-          this.registry.invalidateChildren(resolvedPath, (p: string) => this._getObject(p));
+        // Also for primitives: a binding may point below one (e.g. "/name/length")
+        this.registry.invalidateChildren(resolvedPath, this._readPath);
+        // An array write changes more than the written path: its length, or,
+        // when the length itself is written, which elements exist.
+        if (Array.isArray(parent)) {
+          if (propertyName === "length") {
+            this.registry.invalidateChildren(objectPath, this._readPath);
+          } else {
+            this.registry.set(lengthPath(objectPath), parent.length);
+          }
         }
       }
     }
@@ -447,7 +467,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   private _bulkSyncTimer: ReturnType<typeof setTimeout> | null = null;
-  private _pendingAsyncPaths = new Map<string, boolean>();
+  private _pendingAsyncPaths = new Set<string>();
+  private readonly _readPath = (path: string): unknown => this._getObject(path);
 
   /**
    * Schedule a single deferred sync of all dirty paths from `bAsyncUpdate=true` writes.
@@ -465,13 +486,17 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           return;
         }
         const dirty = this._pendingAsyncPaths;
-        this._pendingAsyncPaths = new Map();
+        this._pendingAsyncPaths = new Set();
         const invalidatedParents = new Set<string>();
 
-        for (const [path, hasObjectTransition] of dirty) {
+        for (const path of dirty) {
           const signal = this.registry.getState(path);
           if (signal) {
             signal.set(this._getObject(path));
+          }
+          this.registry.invalidateChildren(path, this._readPath);
+          if (this.registry.minDepth >= depthOf(path)) {
+            continue; // no signal above this path
           }
           // Deduplicated ancestor invalidation
           let idx = path.lastIndexOf("/");
@@ -493,9 +518,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             if (rootSignal) {
               rootSignal.set(this.oData);
             }
-          }
-          if (hasObjectTransition) {
-            this.registry.invalidateChildren(path, (p: string) => this._getObject(p));
           }
         }
       }, 0);
@@ -738,7 +760,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         const end = path.indexOf("/", start);
         const part = end === -1 ? path.substring(start) : path.substring(start, end);
         if (!part) break;
-        if (node === null || node === undefined) return node;
+        if (!node) return node;
         node = (node as Record<string, unknown>)[part];
         if (end === -1) break;
         start = end + 1;
@@ -778,7 +800,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
           node = this.registry.get(currentPath)!.get();
         } else {
-          if (node === null || node === undefined) {
+          if (!node) {
             return node;
           }
           node = (node as Record<string, unknown>)[part];
@@ -793,7 +815,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         const part =
           end === -1 ? resolvedPath.substring(start) : resolvedPath.substring(start, end);
         if (!part) break;
-        if (node === null || node === undefined) {
+        if (!node) {
           return node;
         }
         node = (node as Record<string, unknown>)[part];
@@ -847,6 +869,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   private _invalidateParentSignals(path: string): void {
+    if (this.registry.minDepth >= depthOf(path)) {
+      return;
+    }
     let idx = path.lastIndexOf("/");
     while (idx > 0) {
       const parentPath = path.substring(0, idx);
@@ -870,7 +895,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * and fires signals for changed paths. O(k) where k = payload keys,
    * instead of O(n) deep clone of the entire data tree.
    *
-   * Incoming object/array values are cloned via safeClone to prevent
+   * Incoming object/array values are cloned via deepExtend to prevent
    * the caller from holding references into the model's internal data.
    *
    * @returns `true` if any property within this subtree changed.
@@ -890,13 +915,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       const childPath = basePath ? `${basePath}/${key}` : `/${key}`;
       const oldValue = target[key];
       const newValue = source[key];
+      // Like JSONModel's deepExtend: an undefined value in the payload changes nothing
+      if (newValue === undefined) {
+        continue;
+      }
 
       if (
-        typeof oldValue === "object" &&
-        oldValue !== null &&
-        typeof newValue === "object" &&
-        newValue !== null &&
-        Array.isArray(oldValue) === Array.isArray(newValue)
+        (Array.isArray(oldValue) && Array.isArray(newValue)) ||
+        (isPlainObject(oldValue) && isPlainObject(newValue))
       ) {
         // Same container type (both arrays or both plain objects): recurse in-place.
         // Arrays are merged by index, matching deepExtend behavior.
@@ -911,19 +937,18 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
       } else if (!Object.is(oldValue, newValue)) {
         changed = true;
-        // Clone incoming objects/arrays to prevent external mutation
-        target[key] =
-          typeof newValue === "object" && newValue !== null ? safeClone(newValue) : newValue;
+        // Clone incoming arrays and plain objects to prevent external mutation, with the
+        // function JSONModel's merge uses: class instances inside stay the same instances.
+        if (Array.isArray(newValue)) {
+          target[key] = deepExtend([], newValue);
+        } else if (isPlainObject(newValue)) {
+          target[key] = deepExtend({}, newValue);
+        } else {
+          target[key] = newValue;
+        }
         if (hasSignals) {
           this.registry.set(childPath, target[key]);
-          // Type changed: invalidate child signals in either direction
-          // (object→primitive: children are gone, primitive→object: children are now valid)
-          if (
-            (typeof oldValue === "object" && oldValue !== null) ||
-            (typeof newValue === "object" && newValue !== null)
-          ) {
-            this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
-          }
+          this.registry.invalidateChildren(childPath, this._readPath);
         }
       }
     }
@@ -932,6 +957,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // Parent invalidation above the merge root is handled once by the top-level caller.
       const effectivePath = basePath || "/";
       this.registry.set(effectivePath, target);
+      if (Array.isArray(target)) {
+        this.registry.set(lengthPath(effectivePath), target.length);
+      }
     }
     return changed;
   }
