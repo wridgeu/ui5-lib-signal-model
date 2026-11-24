@@ -157,10 +157,14 @@ describe("Benchmark", function () {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(SEP);
     console.log(`\n${GREEN}Done${RESET} in ${elapsed}s \u2014 ${lastCount} scenarios`);
+    console.log(
+      `${DIM}Single run: "~equal" means no difference detected. ` +
+        `Use npm run bench:stable for confidence intervals.${RESET}`,
+    );
 
     // Persist results as JSON if requested via BENCH_JSON env var.
     if (jsonFile) {
-      const results = await browser.execute(() => window.__bench.results);
+      const { results, floorMs, environment } = await browser.execute(() => window.__bench);
       const output = {
         timestamp: new Date().toISOString(),
         config: {
@@ -168,6 +172,8 @@ describe("Benchmark", function () {
           iterations: Number(iterations),
           rounds: Number(rounds),
         },
+        environment,
+        floorMs,
         results,
       };
       await writeFile(jsonFile, JSON.stringify(output, null, 2));

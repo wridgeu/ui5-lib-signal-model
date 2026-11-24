@@ -1,13 +1,13 @@
 /**
- * Shared statistics and significance-testing utilities for the benchmark suite.
+ * Comparison statistics for the benchmark suite.
  *
  * Used by both {@link bench.spec.mjs} (terminal output) and
  * {@link ../../scripts/run-benchmark-stable.mjs} (multi-run stability).
  * Self-check: `node packages/lib/test/benchmark/bench-stats.mjs`.
  *
- * The browser-side {@link index.html} has its own copy of these functions
- * (it cannot import ES modules from Node). When changing logic here,
- * update the corresponding functions in index.html to stay in sync.
+ * The browser-side {@link index.html} has its own copy of the single-run
+ * rule in `fmtRatio` (it cannot import ES modules from Node). When changing
+ * {@link computeRatio}, update it there too.
  *
  * @module bench-stats
  */
@@ -24,116 +24,32 @@ export const ANSI = {
   CYAN: "\x1b[36m",
 };
 
-// ── Outlier filtering ───────────────────────────────────────────────
+// ── Single run ──────────────────────────────────────────────────────
 
 /**
- * Remove outliers using the IQR (Interquartile Range) method.
+ * Classify one run: is SignalModel faster, slower, or not distinguishable?
  *
- * Samples below Q1 - 1.5*IQR or above Q3 + 1.5*IQR are removed.
- * This is the standard Tukey fence approach used by Criterion, JMH,
- * and other mature benchmarking frameworks.
+ * A difference counts only if it exceeds 3 standard errors, with
+ *   SE = sqrt(σ_signal² / n_signal + σ_json² / n_json),
+ * and 10%. This is an indication for a single run, not a hypothesis test:
+ * "equal" means no difference was detected. {@link summarizeRuns} gives a
+ * confidence interval across runs.
  *
- * Returns the original array unchanged if it has fewer than 4 elements
- * (IQR is meaningless with too few samples).
- *
- * @param {number[]} arr - Raw sample timings
- * @returns {number[]} Filtered array with outliers removed
- */
-export function filterOutliers(arr) {
-  if (arr.length < 4) return arr;
-
-  const sorted = arr.toSorted((a, b) => a - b);
-  const q1 = sorted[Math.floor(sorted.length * 0.25)];
-  const q3 = sorted[Math.floor(sorted.length * 0.75)];
-  const iqr = q3 - q1;
-  const lower = q1 - 1.5 * iqr;
-  const upper = q3 + 1.5 * iqr;
-
-  const filtered = arr.filter((v) => v >= lower && v <= upper);
-  // If filtering would remove more than half the data, the distribution
-  // is likely bimodal — return unfiltered to avoid masking real behavior.
-  return filtered.length >= arr.length / 2 ? filtered : arr;
-}
-
-// ── Statistical summary ─────────────────────────────────────────────
-
-/**
- * Compute statistical summary of a timing array.
- *
- * Applies IQR outlier filtering first, then computes Bessel-corrected
- * (n-1) sample variance on the cleaned data. Includes the post-filter
- * sample count `n` so downstream significance tests can compute
- * standard error.
- *
- * @param {number[]} arr - Array of timing samples (milliseconds)
- * @returns {{ n: number, median: number, mean: number, stddev: number, min: number, max: number, p5: number, p95: number }} Descriptive statistics
- */
-export function stats(arr) {
-  const clean = filterOutliers(arr);
-  const n = clean.length;
-  const sorted = clean.toSorted((a, b) => a - b);
-  const mean = clean.reduce((s, v) => s + v, 0) / n;
-  const variance = n > 1 ? clean.reduce((s, v) => s + (v - mean) * (v - mean), 0) / (n - 1) : 0;
-
-  return {
-    n,
-    median: median(clean),
-    mean,
-    stddev: Math.sqrt(variance),
-    min: sorted[0],
-    max: sorted[n - 1],
-    p5: sorted[Math.floor(n * 0.05)],
-    p95: sorted[Math.ceil(n * 0.95) - 1],
-  };
-}
-
-// ── Significance testing ────────────────────────────────────────────
-
-/**
- * Compute the ratio and direction between SignalModel and JSONModel stats.
- *
- * Significance checks (in order):
- * 1. Difference below 3 standard errors → equal
- * 2. Signal median ≤ 0 → equal (division guard)
- * 3. Ratio below 10% threshold (1.10x) → equal
- *
- * The standard error is computed as:
- *   SE = sqrt(σ_signal² / n_signal + σ_json² / n_json)
- * 3 * SE (rather than 1.96) leaves headroom for the small sample counts
- * (~10 per model) and for running 22 comparisons per report. There is no
- * sub-millisecond cutoff: every sample spans at least 20 ms of repeated
- * operations, so small per-operation medians are well above timer resolution.
- *
- * When sample counts are unavailable (n is undefined or 0), falls back
- * to the raw pooled SD for backwards compatibility with older result files.
- *
- * @param {{ median: number, stddev: number, n?: number }} signal SignalModel stats
- * @param {{ median: number, stddev: number, n?: number }} json JSONModel stats
- * @returns {{ direction: "faster"|"slower"|"equal", ratio: number }} Ratio with significance direction
+ * @param {{ median: number, stddev: number, n: number }} signal SignalModel stats
+ * @param {{ median: number, stddev: number, n: number }} json JSONModel stats
+ * @returns {{ direction: "faster"|"slower"|"equal", ratio: number }} Ratio with direction
  */
 export function computeRatio(signal, json) {
-  const sm = signal.median;
-  const jm = json.median;
+  const threshold = 3 * Math.sqrt(signal.stddev ** 2 / signal.n + json.stddev ** 2 / json.n);
+  if (Math.abs(json.median - signal.median) < threshold) return { direction: "equal", ratio: 1 };
 
-  // Use standard error when sample counts are available, raw SD otherwise
-  const nSignal = signal.n || 0;
-  const nJson = json.n || 0;
-  const hasN = nSignal > 1 && nJson > 1;
-
-  const threshold = hasN
-    ? 3 * Math.sqrt(signal.stddev ** 2 / nSignal + json.stddev ** 2 / nJson)
-    : Math.sqrt(signal.stddev ** 2 + json.stddev ** 2);
-
-  if (Math.abs(jm - sm) < threshold) return { direction: "equal", ratio: 1 };
-  if (sm <= 0) return { direction: "equal", ratio: 1 };
-
-  const ratio = jm / sm;
+  const ratio = json.median / signal.median;
   if (ratio >= 1.1) return { direction: "faster", ratio };
   if (ratio <= 0.9) return { direction: "slower", ratio: 1 / ratio };
   return { direction: "equal", ratio: 1 };
 }
 
-// ── Multi-run aggregation ───────────────────────────────────────────
+// ── Multiple runs ───────────────────────────────────────────────────
 
 /**
  * Median of a list of numbers.
@@ -147,74 +63,97 @@ export function median(values) {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-/**
- * Compute the stability verdict across several runs of one scenario.
- *
- * Runs are aggregated as paired ratios: each run's JSONModel median divided
- * by its SignalModel median. Both models share a run's machine state, so the
- * per-run ratio cancels differences between runs that two separate per-model
- * medians would keep.
- *
- * - noise: significant `faster` and `slower` both appear
- * - stable faster/slower: more than half of the runs are significant in that direction
- * - marginal faster/slower: not significant in a majority of runs, but every
- *   run leans the same way and the median difference is at least 3%
- * - stable equal: everything else
- *
- * @param {{ direction: "faster"|"slower"|"equal", raw: number }[]} runs
- *   Per-run results; `raw` is jsonMedian / signalMedian
- * @returns {{ verdict: "stable"|"marginal"|"noise", direction: "faster"|"slower"|"equal", medianRatio: number }}
- *   Aggregated verdict; `medianRatio` is >= 1 in the reported direction (1 for equal)
- */
-export function computeVerdict(runs) {
-  const count = (direction) => runs.filter((r) => r.direction === direction).length;
-  const faster = count("faster");
-  const slower = count("slower");
-  const paired = median(runs.map((r) => r.raw));
-  const toward = (direction) => (direction === "faster" ? paired : 1 / paired);
+/** Two-sided 95% critical values of Student's t for 1..30 degrees of freedom. */
+const T95 = [
+  12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.16, 2.145,
+  2.131, 2.12, 2.11, 2.101, 2.093, 2.086, 2.08, 2.074, 2.069, 2.064, 2.06, 2.056, 2.052, 2.048,
+  2.045, 2.042,
+];
 
-  if (faster > 0 && slower > 0) {
-    return { verdict: "noise", direction: "equal", medianRatio: 1 };
-  }
-  for (const [direction, significant] of [
-    ["faster", faster],
-    ["slower", slower],
-  ]) {
-    if (significant * 2 > runs.length) {
-      return { verdict: "stable", direction, medianRatio: toward(direction) };
-    }
-    const allLean = runs.every((r) => (direction === "faster" ? r.raw > 1 : r.raw < 1));
-    if (allLean && toward(direction) >= 1.03) {
-      return { verdict: "marginal", direction, medianRatio: toward(direction) };
-    }
-  }
-  return { verdict: "stable", direction: "equal", medianRatio: 1 };
+/**
+ * Summarize one scenario across runs as a speed-up ratio with a 95%
+ * confidence interval.
+ *
+ * Input is one paired ratio per run (JSONModel median / SignalModel median;
+ * above 1 means SignalModel is faster). Both models share a run's machine
+ * state, so the ratio cancels differences between runs. Run-to-run variation
+ * is the largest source of variance, so the interval is built over runs: a
+ * t-interval on the log ratios, reported around their geometric mean.
+ *
+ * @param {number[]} ratios Per-run JSONModel/SignalModel ratios
+ * @returns {{ ratio: number, low: number|null, high: number|null, verdict: "faster"|"slower"|"unclear" }}
+ *   `verdict` is "faster"/"slower" when the whole interval lies on one side
+ *   of 1; `low`/`high` are null for a single run
+ */
+export function summarizeRuns(ratios) {
+  const n = ratios.length;
+  const logs = ratios.map(Math.log);
+  const mean = logs.reduce((sum, l) => sum + l, 0) / n;
+  const ratio = Math.exp(mean);
+  if (n < 2) return { ratio, low: null, high: null, verdict: "unclear" };
+
+  const sd = Math.sqrt(logs.reduce((sum, l) => sum + (l - mean) ** 2, 0) / (n - 1));
+  const half = ((T95[n - 2] ?? 1.96) * sd) / Math.sqrt(n);
+  const low = Math.exp(mean - half);
+  const high = Math.exp(mean + half);
+  return { ratio, low, high, verdict: low > 1 ? "faster" : high < 1 ? "slower" : "unclear" };
 }
 
-// ── Self-check (runs only when executed directly) ───────────────────
+/**
+ * Format a ratio: two significant digits from 10x up, two decimals below.
+ *
+ * @param {number} ratio Ratio to format
+ * @returns {string} e.g. `"49x"`, `"530x"`, `"1.04x"`
+ */
+export function fmtX(ratio) {
+  return (ratio >= 10 ? String(Number(ratio.toPrecision(2))) : ratio.toFixed(2)) + "x";
+}
 
-if (
-  process.argv[1] &&
-  import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/").split("/").pop())
-) {
-  const { deepStrictEqual: eq } = await import("node:assert");
-  const run = (direction, raw) => ({ direction, raw });
-  const v = (runs) => computeVerdict(runs);
-  eq(v([run("faster", 3), run("faster", 5), run("faster", 4), run("equal", 2)]).verdict, "stable");
-  eq(v([run("faster", 3), run("faster", 5), run("faster", 4)]).medianRatio, 4);
-  eq(v([run("faster", 2), run("slower", 0.5), run("equal", 1)]).verdict, "noise");
-  // one significant run out of four is not a stable result, and the runs do not all lean one way
-  eq(v([run("slower", 0.29), run("equal", 0.95), run("equal", 1.04), run("equal", 0.99)]), {
-    verdict: "stable",
-    direction: "equal",
-    medianRatio: 1,
-  });
-  // every run leans slower without reaching significance
-  eq(v([run("equal", 0.9), run("equal", 0.8), run("equal", 0.95), run("equal", 0.9)]), {
-    verdict: "marginal",
-    direction: "slower",
-    medianRatio: 1 / 0.9,
-  });
-  eq(v([run("equal", 1.01), run("equal", 1.02)]).verdict, "stable");
+/**
+ * Describe a {@link summarizeRuns} result in words.
+ *
+ * @param {{ ratio: number, low: number|null, high: number|null, verdict: string }} summary Result to describe
+ * @returns {string} e.g. `"49x faster (41x-56x)"`, `"marginally slower 1.04x (1.01x-1.07x)"`,
+ *   `"no clear difference (0.88x-1.02x)"`
+ */
+export function describe({ ratio, low, high, verdict }) {
+  if (low === null) return `${fmtX(ratio)} (1 run, no interval)`;
+  if (verdict === "unclear") return `no clear difference (${fmtX(low)}-${fmtX(high)})`;
+  // Express "slower" as how many times slower, so the number is above 1 either way.
+  const [r, lo, hi] = verdict === "faster" ? [ratio, low, high] : [1 / ratio, 1 / high, 1 / low];
+  const range = `(${fmtX(lo)}-${fmtX(hi)})`;
+  return r < 1.1 ? `marginally ${verdict} ${fmtX(r)} ${range}` : `${fmtX(r)} ${verdict} ${range}`;
+}
+
+// ── Self-check (`node bench-stats.mjs`) ─────────────────────────────
+
+if (import.meta.main) {
+  const { strictEqual: eq, ok } = await import("node:assert");
+  const stat = (med, stddev) => ({ median: med, stddev, n: 10 });
+
+  eq(computeRatio(stat(1, 0.1), stat(5, 0.1)).direction, "faster");
+  eq(computeRatio(stat(5, 0.1), stat(1, 0.1)).direction, "slower");
+  eq(computeRatio(stat(1, 4), stat(5, 4)).direction, "equal"); // within 3 SE
+  eq(computeRatio(stat(1, 0.001), stat(1.05, 0.001)).direction, "equal"); // below 10%
+
+  eq(median([3, 1, 2]), 2);
+  eq(median([4, 1, 2, 3]), 2.5);
+
+  const fast = summarizeRuns([40, 50, 45, 55]);
+  eq(fast.verdict, "faster");
+  ok(fast.low > 30 && fast.high < 70 && fast.low < fast.ratio && fast.ratio < fast.high);
+  eq(describe(fast).startsWith("47x faster ("), true);
+
+  eq(summarizeRuns([0.5, 0.52, 0.48, 0.5]).verdict, "slower");
+  eq(describe(summarizeRuns([0.96, 0.97, 0.95, 0.96])).startsWith("marginally slower 1.04x"), true);
+  // one outlier run among near-equal ones must not produce a verdict
+  eq(summarizeRuns([0.29, 0.95, 1.04, 0.99]).verdict, "unclear");
+  eq(describe(summarizeRuns([2])), "2.00x (1 run, no interval)");
+  // two runs: df = 1, so only a very consistent difference counts
+  eq(summarizeRuns([1.2, 1.5]).verdict, "unclear");
+
+  eq(fmtX(529.3), "530x");
+  eq(fmtX(48.9), "49x");
+  eq(fmtX(1.036), "1.04x");
   console.log("bench-stats self-check passed");
 }
