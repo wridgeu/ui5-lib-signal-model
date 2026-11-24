@@ -117,9 +117,8 @@
   <body>
     <h1>SignalModel vs JSONModel</h1>
     <p class="subtitle">
-      Objective performance comparison measuring update propagation, binding notification scaling,
-      and throughput. Follows benchmarking best practices: alternating A-B execution order, JIT
-      warmup, median of 10+ samples, and variance reporting.
+      Compares the time from a model write until the bound controls are re-rendered. Samples
+      alternate between both models; see Methodology and Limitations below the results.
     </p>
 
     <div class="config">
@@ -233,6 +232,8 @@
 
       /** sap/ui/core/Rendering, assigned once the modules are loaded. */
       var Rendering = null;
+      /** Consumes read results so the engine cannot drop the reads. */
+      var sink = 0;
       /** Source of unique values so every measured write is a real change. */
       var seq = 0;
       /** Minimum duration of one sample; keeps it far above performance.now() resolution. */
@@ -251,6 +252,7 @@
       async function timeOp(op, done) {
         done = done || alwaysDone;
         await macrotask(); // start from a non-timer task: no nested-timer clamp
+        Rendering.renderPendingUIUpdates("benchmark"); // also clears a pending render timer
         Rendering.suspend();
         try {
           var reps = 0;
@@ -272,6 +274,30 @@
         return true;
       }
 
+      /**
+       * Harness floor: one timeOp repetition with no model involved
+       * (control.setText + render pass + loop overhead). Every per-operation
+       * result includes roughly this much.
+       */
+      async function benchFloor() {
+        var container = document.getElementById("hidden-container");
+        var text = new sap.m.Text({ text: "floor" });
+        text.placeAt(container);
+        await flush();
+        var times = [];
+        for (var i = 0; i < 5; i++) {
+          times.push(
+            await timeOp(function () {
+              text.setText("floor-" + ++seq);
+            }),
+          );
+          await flush();
+        }
+        text.destroy();
+        container.innerHTML = "";
+        return stats(times).median;
+      }
+
       /** Generate sample data with N properties for binding targets. */
       function generateData(n) {
         var items = [];
@@ -282,52 +308,24 @@
       }
 
       /**
-       * Remove outliers using the IQR (Interquartile Range) method.
-       * Samples below Q1 - 1.5*IQR or above Q3 + 1.5*IQR are removed.
-       * Returns the original array if it has < 4 elements or if filtering
-       * would remove more than half the data (likely bimodal distribution).
-       *
-       * Keep in sync with bench-stats.mjs filterOutliers().
-       */
-      function filterOutliers(arr) {
-        if (arr.length < 4) return arr;
-        var sorted = arr.slice().sort(function (a, b) {
-          return a - b;
-        });
-        var q1 = sorted[Math.floor(sorted.length * 0.25)];
-        var q3 = sorted[Math.floor(sorted.length * 0.75)];
-        var iqr = q3 - q1;
-        var lower = q1 - 1.5 * iqr;
-        var upper = q3 + 1.5 * iqr;
-        var filtered = arr.filter(function (v) {
-          return v >= lower && v <= upper;
-        });
-        return filtered.length >= arr.length / 2 ? filtered : arr;
-      }
-
-      /**
-       * Statistical summary of an array of numbers.
-       * Uses Bessel-corrected (sample) variance.
-       * Returns sample count `n` for downstream standard-error calculations.
-       *
-       * Keep in sync with bench-stats.mjs stats().
+       * Statistical summary of an array of timings, on the raw samples (no
+       * outlier removal). Uses Bessel-corrected (sample) variance and keeps
+       * the samples so results can be re-analysed.
        */
       function stats(arr) {
-        var clean = filterOutliers(arr);
-        var n = clean.length;
-        var sorted = clean.slice().sort(function (a, b) {
+        var n = arr.length;
+        var sorted = arr.slice().sort(function (a, b) {
           return a - b;
         });
         var mid = Math.floor(n / 2);
         var med = n % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
         var mean =
-          clean.reduce(function (s, v) {
+          arr.reduce(function (s, v) {
             return s + v;
           }, 0) / n;
-        // Bessel's correction: divide by (n-1) for sample variance
         var variance =
           n > 1
-            ? clean.reduce(function (s, v) {
+            ? arr.reduce(function (s, v) {
                 return s + (v - mean) * (v - mean);
               }, 0) /
               (n - 1)
@@ -341,6 +339,7 @@
           max: sorted[n - 1],
           p5: sorted[Math.floor(n * 0.05)],
           p95: sorted[Math.ceil(n * 0.95) - 1],
+          samples: arr,
         };
       }
 
@@ -352,43 +351,27 @@
       /**
        * Format a ratio as "Nx faster", "Nx slower", or "~equal".
        *
-       * Guards against edge cases (zero medians) and requires the difference
-       * to exceed 3 standard errors plus a 10% minimum effect.
+       * Single-run indication only: requires the difference to exceed 3
+       * standard errors plus 10%. "~equal" means no difference was detected,
+       * not that the models are equivalent; `npm run bench:stable` reports a
+       * confidence interval across runs.
        *
        * Keep in sync with bench-stats.mjs computeRatio().
        */
       function fmtRatio(signalStats, jsonStats) {
         var sm = signalStats.median;
         var jm = jsonStats.median;
-
-        // 3 standard errors when sample counts are available (headroom for
-        // small samples and 22 comparisons); raw pooled SD otherwise.
-        var nSignal = signalStats.n || 0;
-        var nJson = jsonStats.n || 0;
-        var hasN = nSignal > 1 && nJson > 1;
-        var threshold = hasN
-          ? 3 *
-            Math.sqrt(
-              (signalStats.stddev * signalStats.stddev) / nSignal +
-                (jsonStats.stddev * jsonStats.stddev) / nJson,
-            )
-          : Math.sqrt(
-              signalStats.stddev * signalStats.stddev + jsonStats.stddev * jsonStats.stddev,
-            );
-
-        var diff = Math.abs(jm - sm);
-        if (diff < threshold) {
-          return '<span class="neutral">~equal</span>';
-        }
-
-        // Guard against division by zero
-        if (sm <= 0) return '<span class="neutral">~equal</span>';
-
-        // Ratio must exceed 10% to be reported (filters rendering noise)
+        var threshold =
+          3 *
+          Math.sqrt(
+            (signalStats.stddev * signalStats.stddev) / signalStats.n +
+              (jsonStats.stddev * jsonStats.stddev) / jsonStats.n,
+          );
         var ratio = jm / sm;
-        if (ratio >= 1.1) {
+        if (Math.abs(jm - sm) >= threshold && ratio >= 1.1) {
           return '<span class="faster">' + ratio.toFixed(2) + "x faster</span>";
-        } else if (ratio <= 0.9) {
+        }
+        if (Math.abs(jm - sm) >= threshold && ratio <= 0.9) {
           return '<span class="slower">' + (1 / ratio).toFixed(2) + "x slower</span>";
         }
         return '<span class="neutral">~equal</span>';
@@ -480,7 +463,7 @@
           times.push(
             await timeOp(function () {
               for (var j = 0; j < iterations; j++) {
-                model.getProperty("/items/" + j + "/value");
+                sink += model.getProperty("/items/" + j + "/value").length;
               }
             }),
           );
@@ -752,8 +735,8 @@
           var current;
           times.push(
             await timeOp(
-              function (rep) {
-                current = datasets[rep % 2];
+              function () {
+                current = datasets[++seq % 2];
                 model.setProperty("/rows", current);
               },
               function () {
@@ -854,8 +837,8 @@
           var current;
           times.push(
             await timeOp(
-              function (rep) {
-                current = datasets[rep % 2];
+              function () {
+                current = datasets[++seq % 2];
                 model.setProperty("/rows", current);
               },
               function () {
@@ -959,8 +942,8 @@
           var current;
           times.push(
             await timeOp(
-              function (rep) {
-                current = datasets[rep % 2];
+              function () {
+                current = datasets[++seq % 2];
                 model.setProperty("/rows", current);
               },
               function () {
@@ -1053,8 +1036,8 @@
           var current;
           times.push(
             await timeOp(
-              function (rep) {
-                current = datasets[rep % 2];
+              function () {
+                current = datasets[++seq % 2];
                 model.setProperty("/tree", current);
               },
               function () {
@@ -1130,7 +1113,7 @@
       }
 
       /**
-       * Computed signals (SignalModel only, uses getProperty for JSONModel)
+       * Computed signals
        *
        * Creates N computed signals, each depending on a source path.
        * Measures update propagation through the computed dependency chain.
@@ -1213,8 +1196,7 @@
        * controls to sub-paths (e.g., /computed0/name). Measures update
        * propagation through _getObject's computed traversal and getSignal's
        * parent-computed resolution.
-       * For JSONModel (no computed concept): a two-part composite binding with a
-       * formatter deriving the same value.
+       * For JSONModel (no computed concept): a formatter deriving the same value.
        */
       async function benchComputedSubPath(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
         var data = { items: [] };
@@ -1227,27 +1209,23 @@
         if (isSignal && model.createComputed) {
           // Create N computed signals, each returning an object from the items array
           for (var i = 0; i < n; i++) {
-            model.createComputed(
-              "/computed" + i,
-              ["/items/" + i + "/name", "/items/" + i + "/value"],
-              function (name, value) {
-                return { label: name + "=" + value };
-              },
-            );
+            model.createComputed("/computed" + i, ["/items/" + i + "/name"], function (name) {
+              return { label: "label:" + name };
+            });
           }
         }
 
         // Bind to sub-paths: /computed0/label (Signal) or derive the same value
-        // with a two-part composite binding + formatter (JSON)
+        // with a formatter on the source path (JSON)
         var controls = [];
         for (var j = 0; j < n; j++) {
           var text = new sap.m.Text({
             text: isSignal
               ? "{/computed" + j + "/label}"
               : {
-                  parts: ["/items/" + j + "/name", "/items/" + j + "/value"],
-                  formatter: function (name, value) {
-                    return name + "=" + value;
+                  path: "/items/" + j + "/name",
+                  formatter: function (name) {
+                    return "label:" + name;
                   },
                 },
           });
@@ -1277,7 +1255,7 @@
                 model.setProperty("/items/0/name", value);
               },
               function () {
-                return controls[0].getText() === value + "=0";
+                return controls[0].getText() === "label:" + value;
               },
             ),
           );
@@ -1513,8 +1491,8 @@
           var current;
           times.push(
             await timeOp(
-              function (rep) {
-                current = datasets[rep % 2];
+              function () {
+                current = datasets[++seq % 2];
                 model.setData(current);
               },
               function () {
@@ -1631,8 +1609,8 @@
           var current;
           times.push(
             await timeOp(
-              function (rep) {
-                current = payloads[rep % 2];
+              function () {
+                current = payloads[++seq % 2];
                 model.setData(current, true);
               },
               function () {
@@ -1834,17 +1812,17 @@
       }
 
       /**
-       * Real-world scenario: checkPerformanceOfUpdate threshold
+       * checkPerformanceOfUpdate threshold
        *
-       * Reproduces the exact conditions from SAP's checkPerformanceOfUpdate
-       * warning. Creates 3,449 bindings (the real-world count reported in
-       * openui5 issue 2600) and performs 29 consecutive synchronous
-       * setProperty calls — just enough to exceed SAP's 100,000 cumulative
-       * binding check threshold (29 × 3,449 = 100,021).
+       * 3,449 bindings and 29 consecutive synchronous setProperty calls: just
+       * past the 100,000 cumulative binding checks at which UI5 logs its
+       * performance warning (29 x 3,449 = 100,021). The binding count is taken
+       * from a report in openui5 issue 2600. That report was an ODataModel
+       * application seeing ~200 ms per call; this synthetic JSONModel +
+       * sap.m.Text setup does not reproduce that figure.
        *
        * JSONModel: each setProperty call triggers checkUpdate on all 3,449
        * bindings. After 29 calls: 100,021 cumulative binding checks.
-       * Real-world report: ~200ms per setProperty call at this scale.
        *
        * SignalModel: each setProperty triggers O(1) signal notification.
        * After 29 calls: 29 notifications total.
@@ -1855,13 +1833,13 @@
         warmupRounds,
         measuredRounds,
       ) {
-        var REAL_WORLD_BINDINGS = 3449;
+        var BINDINGS = 3449;
         var CALLS_TO_EXCEED_THRESHOLD = 29; // 29 × 3449 = 100,021
 
-        var data = generateData(REAL_WORLD_BINDINGS);
+        var data = generateData(BINDINGS);
         var model = new ModelClass(JSON.parse(JSON.stringify(data)));
         var container = document.getElementById("hidden-container");
-        var controls = createBindings(model, REAL_WORLD_BINDINGS, container);
+        var controls = createBindings(model, BINDINGS, container);
         await flush();
         await new Promise(function (r) {
           setTimeout(r, 50);
@@ -2007,17 +1985,19 @@
 
       /** Run all scenarios; failures are shown and exposed to the CLI runner instead of hanging it. */
       function runBenchmark() {
-        return runAllScenarios().catch(function (err) {
-          window.__bench = window.__bench || { results: [] };
-          window.__bench.error = String((err && err.stack) || err);
-          setStatus("Benchmark failed: " + err);
-        });
+        var btn = document.getElementById("runBtn");
+        btn.disabled = true;
+        return runAllScenarios()
+          .catch(function (err) {
+            window.__bench.error = String(err.stack || err);
+            setStatus("Benchmark failed: " + err);
+          })
+          .finally(function () {
+            btn.disabled = false;
+          });
       }
 
       async function runAllScenarios() {
-        var btn = document.getElementById("runBtn");
-        btn.disabled = true;
-
         var n = parseInt(document.getElementById("bindingCount").value, 10);
         var iters = parseInt(document.getElementById("iterations").value, 10);
         var measuredRounds = parseInt(document.getElementById("rounds").value, 10);
@@ -2037,7 +2017,7 @@
 
         setStatus("Loading UI5 modules...");
 
-        var mods = await new Promise(function (resolve) {
+        var mods = await new Promise(function (resolve, reject) {
           sap.ui.require(
             [
               "sap/ui/model/json/JSONModel",
@@ -2053,13 +2033,27 @@
               "sap/ui/table/Table",
               "sap/ui/table/Column",
               "sap/ui/core/Rendering",
+              "sap/ui/VersionInfo",
             ],
             function (JSONModel, SignalModel) {
-              Rendering = arguments[arguments.length - 1];
-              resolve({ JSONModel: JSONModel, SignalModel: SignalModel });
+              Rendering = arguments[arguments.length - 2];
+              resolve({
+                JSONModel: JSONModel,
+                SignalModel: SignalModel,
+                VersionInfo: arguments[arguments.length - 1],
+              });
             },
+            reject,
           );
         });
+
+        window.__bench.environment = {
+          userAgent: navigator.userAgent,
+          ui5: (await mods.VersionInfo.load({ library: "sap.ui.core" })).version,
+        };
+
+        setStatus("Measuring harness floor...");
+        window.__bench.floorMs = await benchFloor();
 
         var base = {
           JSONModel: mods.JSONModel,
@@ -2125,7 +2119,7 @@
           measuredRounds,
         );
         pushResult({
-          name: "Update all " + n + " bindings",
+          name: "Update all " + n + " bindings (sync)",
           detail: n + " setProperty calls, " + n + " bindings",
           category: "Property (sap.m.Text)",
           json: stats(r4.jsonTimes),
@@ -2140,7 +2134,7 @@
           measuredRounds,
         );
         pushResult({
-          name: "Update all " + n + " (async)",
+          name: "Update all " + n + " bindings (bAsyncUpdate)",
           detail: n + " setProperty(bAsync=true)",
           category: "Property (sap.m.Text)",
           json: stats(r5.jsonTimes),
@@ -2157,7 +2151,7 @@
           measuredRounds,
         );
         pushResult({
-          name: "Sparse async, 1 of " + n + " (async)",
+          name: "Sparse update, 1 of " + n + " (bAsyncUpdate)",
           detail: "1 setProperty(bAsync=true), " + n + " bindings",
           category: "Property (sap.m.Text)",
           json: stats(r5b.jsonTimes),
@@ -2452,9 +2446,9 @@
           signal: stats(r15.signalTimes),
         });
 
-        // --- Scenario 21: Real-world checkPerformanceOfUpdate threshold ---
+        // --- Scenario 21: checkPerformanceOfUpdate threshold ---
         setStatus(
-          "Running: real-world checkPerformanceOfUpdate threshold (3,449 bindings, 29 calls, alternating)...",
+          "Running: checkPerformanceOfUpdate threshold (3,449 bindings, 29 calls, alternating)...",
         );
         var r16 = await runAlternating(
           benchCheckPerformanceThreshold,
@@ -2462,7 +2456,7 @@
           measuredRounds,
         );
         pushResult({
-          name: "Real-world: checkPerformanceOfUpdate threshold",
+          name: "Warning threshold: 29 sync calls, 3449 bindings",
           detail: "3,449 bindings, 29 sync setProperty calls (100,021 binding checks)",
           category: "Property (sap.m.Text)",
           json: stats(r16.jsonTimes),
@@ -2487,7 +2481,6 @@
         window.__bench.done = true;
         renderResults(results, n, iters, measuredRounds);
         setStatus("");
-        btn.disabled = false;
       }
 
       function renderResults(results, n, iters, measuredRounds) {
@@ -2564,7 +2557,8 @@
           '<p style="font-size:0.85rem;color:#6a6d70;">Reference: <a href="https://github.com/UI5/openui5/issues/2600">openui5 issue 2600</a> documents this bottleneck. ';
         html +=
           "SAP added <code>checkPerformanceOfUpdate</code> (commit <code>cb6c7f7a</code>) which warns when cumulative binding checks exceed 100,000. ";
-        html += "Real-world report: 3,449 bindings = ~200ms per setProperty call.</p>";
+        html +=
+          "One report there: an ODataModel application with 3,449 bindings at ~200ms per setProperty call.</p>";
         html += "<table>";
         html +=
           "<tr><th>Scenario</th><th>JSONModel binding checks</th><th>SignalModel notifications</th><th>Exceeds SAP 100k threshold?</th></tr>";
@@ -2631,13 +2625,12 @@
         html +=
           "Tests <code>SignalTreeBinding</code> vs <code>ClientTreeBinding</code> with a real <code>sap.m.Tree</code> control. " +
           "Replaces hierarchical data (each root has 2 children) and measures full propagation.</li>";
-        html += "<li><strong>Real-world: checkPerformanceOfUpdate threshold</strong>: ";
+        html += "<li><strong>checkPerformanceOfUpdate threshold</strong>: ";
         html +=
-          "Reproduces the exact conditions from SAP's <code>checkPerformanceOfUpdate</code> warning. " +
-          "Uses 3,449 bindings (the real-world count reported for this bottleneck) and performs 29 consecutive synchronous <code>setProperty</code> calls — " +
-          "just enough to exceed SAP's 100,000 cumulative binding check threshold (29 &times; 3,449 = 100,021). " +
-          "The original report saw ~200ms per <code>setProperty</code> with heavier controls; this page uses plain <code>sap.m.Text</code>, so absolute numbers are lower. " +
-          "SignalModel's per-notification cost is constant regardless of total binding count.</li>";
+          "3,449 bindings and 29 consecutive synchronous <code>setProperty</code> calls, " +
+          "just past the 100,000 cumulative binding checks at which UI5 logs its warning (29 &times; 3,449 = 100,021). " +
+          "The binding count comes from an ODataModel report in issue 2600 (~200ms per call there); " +
+          "this synthetic JSONModel setup with <code>sap.m.Text</code> does not reproduce that figure.</li>";
         html += "<li><strong>setData replace</strong>: ";
         html +=
           "Both models must notify all bindings. SignalModel invalidates all signals; JSONModel runs checkUpdate on all bindings.</li>";
@@ -2660,7 +2653,12 @@
         html +=
           "<li><strong>Rendering included, its timer is not:</strong> UI5 schedules rendering with <code>setTimeout(0)</code>. The benchmark suspends that timer and runs the same render pass synchronously once the update has propagated, so samples contain the rendering work but not the timer wait.</li>";
         html +=
-          "<li><strong>Significance:</strong> a difference is reported only if it exceeds 3 standard errors and 10%; otherwise <em>~equal</em>.</li>";
+          "<li><strong>Reading the comparison column:</strong> a single run reports a difference only if it exceeds 3 standard errors and 10%. <em>~equal</em> means no difference was detected, not that the models are equivalent. " +
+          "<code>npm run bench:stable</code> repeats the run and reports the ratio with a 95% confidence interval.</li>";
+        html +=
+          "<li><strong>Harness floor:</strong> " +
+          fmt(window.__bench.floorMs) +
+          " ms per operation is spent on <code>setText</code>, the render pass and the timing loop with no model involved. Every result includes about this much.</li>";
         html +=
           "<li><strong>Equivalent work:</strong> computed-signal scenarios compare against a JSONModel formatter deriving the same value.</li>";
         html +=
@@ -2680,7 +2678,8 @@
         html +=
           "<li>SAP's recommendation: use <code>bAsyncUpdate=true</code> to batch sync <code>setProperty</code> calls. This reduces N calls from N separate <code>checkUpdate</code> passes to 1, but each pass still iterates all bindings - O(N) per batch instead of O(N<sup>2</sup>) total.</li>";
         html +=
-          "<li><strong>SignalModel eliminates the problem entirely:</strong> signals provide O(1) notification per changed path regardless of sync/async mode. No <code>checkUpdate</code> iteration occurs.</li>";
+          "<li>SignalModel notifies only the bindings of the changed paths, in sync and in <code>bAsyncUpdate</code> mode, so no pass over all bindings occurs. " +
+          "The UI5 maintainers note in the issue that most applications do not hit this bottleneck.</li>";
         html += "</ul>";
 
         html += "<h2>Limitations</h2>";
@@ -2689,6 +2688,8 @@
           "<li>Controls live in a display:none container: UI5's rendering (DOM patching) is measured, browser layout and paint are not.</li>";
         html +=
           "<li>The page loads the library from the dev server (transpiled on the fly), not the minified build.</li>";
+        html +=
+          "<li>Scenarios run in a fixed order and are only alternated within a scenario, so times of different scenarios are not directly comparable.</li>";
         html +=
           "<li>Garbage collection is not explicitly triggered between samples (requires Chrome --js-flags='--expose-gc'). GC pauses may affect individual samples, which is why median is used.</li>";
         html +=
@@ -2704,10 +2705,16 @@
       // ---------------------------------------------------------------
       (function () {
         var params = new URLSearchParams(window.location.search);
-        if (params.has("n")) document.getElementById("bindingCount").value = params.get("n");
-        if (params.has("iterations"))
-          document.getElementById("iterations").value = params.get("iterations");
-        if (params.has("rounds")) document.getElementById("rounds").value = params.get("rounds");
+        // CLI values need not be one of the predefined options
+        function select(id, param) {
+          if (!params.has(param)) return;
+          var el = document.getElementById(id);
+          el.add(new Option(params.get(param), params.get(param)));
+          el.value = params.get(param);
+        }
+        select("bindingCount", "n");
+        select("iterations", "iterations");
+        select("rounds", "rounds");
         if (params.has("autorun")) {
           var poll = setInterval(function () {
             if (typeof sap !== "undefined" && sap.ui && sap.ui.require) {

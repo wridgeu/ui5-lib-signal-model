@@ -16,16 +16,17 @@
  */
 import { spawn } from "node:child_process";
 import { readFile, writeFile, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cpus, release, tmpdir, totalmem, type } from "node:os";
 import { join, dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import {
   ANSI,
-  computeRatio,
-  computeVerdict,
+  describe,
+  fmtX,
   median,
+  summarizeRuns,
 } from "../packages/lib/test/benchmark/bench-stats.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -79,37 +80,7 @@ const jsonOutFile = values.json;
 
 // ── ANSI shortcuts ──────────────────────────────────────────────────
 
-const { RESET, BOLD, DIM, GREEN, RED, YELLOW, CYAN } = ANSI;
-
-// ── Formatting helpers ──────────────────────────────────────────────
-
-/**
- * Format a ratio cell for the merged table (no ANSI color).
- *
- * @param {{ direction: string, ratio: number }} r Single-run ratio result
- * @returns {string} Formatted ratio cell
- */
-function fmtCell(r) {
-  if (r.direction === "equal") return "~equal";
-  const label = r.ratio.toFixed(1) + "x";
-  return r.direction === "faster" ? label + " faster" : label + " slower";
-}
-
-/**
- * Format the verdict column with ANSI color.
- *
- * @param {{ verdict: string, direction: string, medianRatio: number }} v Verdict to format
- * @returns {string} ANSI-colored verdict string
- */
-function fmtVerdict(v) {
-  if (v.verdict === "noise") return YELLOW + "noise" + RESET;
-  if (v.direction === "equal") return DIM + "stable: ~equal" + RESET;
-  if (v.verdict === "marginal") {
-    return DIM + `marginally ${v.direction} (~${v.medianRatio.toFixed(2)}x)` + RESET;
-  }
-  const label = `stable: ~${v.medianRatio.toFixed(1)}x ${v.direction}`;
-  return (v.direction === "faster" ? GREEN : RED) + label + RESET;
-}
+const { RESET, BOLD, DIM, GREEN, RED, CYAN } = ANSI;
 
 // ── Run loop ─────────────────────────────────────────────────────────
 
@@ -147,10 +118,13 @@ async function runBenchmark(runIndex) {
     process.exit(1);
   }
 
-  const raw = await readFile(tmpFile, "utf-8");
-  const result = JSON.parse(raw);
+  // wdio can exit 0 without having run the spec (e.g. a failed driver download)
+  const raw = await readFile(tmpFile, "utf-8").catch(() => {
+    console.error(`\n${RED}Run ${runIndex} exited without writing results${RESET}`);
+    process.exit(1);
+  });
   await unlink(tmpFile);
-  return result;
+  return JSON.parse(raw);
 }
 
 const allResults = [];
@@ -175,73 +149,70 @@ const runLookups = allResults.map((run) => {
   return map;
 });
 
-const scenarios = [];
-for (let s = 0; s < scenarioCount; s++) {
-  const name = scenarioNames[s];
-  const category = allResults[0].results[s].category;
+const scenarios = scenarioNames
+  .map((name, s) => {
+    const runsForScenario = allResults.map((run, runIdx) => {
+      const idx = runLookups[runIdx].get(name);
+      if (idx === undefined) {
+        console.error(
+          `${RED}Error: scenario "${name}" not found in run ${runIdx + 1}.${RESET}\n` +
+            `Run 1 has ${scenarioCount} scenarios, run ${runIdx + 1} has ${run.results.length}.`,
+        );
+        process.exit(1);
+      }
+      return { json: run.results[idx].json, signal: run.results[idx].signal };
+    });
+    // Paired per run: both models share that run's machine state
+    const ratios = runsForScenario.map((r) => r.json.median / r.signal.median);
+    return {
+      name,
+      category: allResults[0].results[s].category,
+      runs: runsForScenario,
+      ratios,
+      jsonMedian: median(runsForScenario.map((r) => r.json.median)),
+      signalMedian: median(runsForScenario.map((r) => r.signal.median)),
+    };
+  })
+  .map((sc) => Object.assign(sc, summarizeRuns(sc.ratios)));
 
-  const ratios = allResults.map((run, runIdx) => {
-    const idx = runLookups[runIdx].get(name);
-    if (idx === undefined) {
-      console.error(
-        `${RED}Error: scenario "${name}" not found in run ${runIdx + 1}.${RESET}\n` +
-          `Run 1 has ${scenarioCount} scenarios, run ${runIdx + 1} has ${run.results.length}.`,
-      );
-      process.exit(1);
-    }
-    const r = run.results[idx];
-    return { ...computeRatio(r.signal, r.json), raw: r.json.median / r.signal.median };
-  });
-
-  const verdict = computeVerdict(ratios);
-  const runsForScenario = allResults.map((run, i) => run.results[runLookups[i].get(name)]);
-  scenarios.push({ name, category, ratios, verdict, runs: runsForScenario });
-}
-
-// Determine column widths
-const runColWidth = 12;
-const numCol = 3;
+const runColWidth = 7;
 const scenarioCol = 42;
-const verdictCol = 24;
-const totalWidth = numCol + 2 + scenarioCol + 2 + runs * (runColWidth + 2) + verdictCol;
-const SEP = "\u2500".repeat(totalWidth);
+const SEP = "\u2500".repeat(5 + scenarioCol + 2 + runs * (runColWidth + 2) + 44);
 
-// Header
 console.log(
   `\n${BOLD}SignalModel vs JSONModel${RESET}` +
     ` \u2014 ${bindings} bindings, ${runs} runs` +
-    ` (${iterations} iter, ${rounds} rounds)\n`,
+    ` (${iterations} iter, ${rounds} rounds)\n` +
+    `${DIM}Per-run cells: JSONModel time / SignalModel time (above 1 = SignalModel faster).` +
+    ` Result: geometric mean with 95% confidence interval across runs.${RESET}\n`,
 );
 
 const runHeaders = Array.from({ length: runs }, (_, i) => `Run ${i + 1}`.padStart(runColWidth));
 console.log(
-  ` ${DIM}#${RESET}  ${"Scenario".padEnd(scenarioCol)}` +
-    `  ${runHeaders.join("  ")}  ${"Verdict"}`,
+  ` ${DIM}#${RESET}  ${"Scenario".padEnd(scenarioCol)}  ${runHeaders.join("  ")}  Result`,
 );
 console.log(SEP);
 
-// Rows
-for (let s = 0; s < scenarioCount; s++) {
-  const sc = scenarios[s];
-  const num = String(s + 1).padStart(2);
-  const cells = sc.ratios.map((r) => fmtCell(r).padStart(runColWidth));
+const COLOR = { faster: GREEN, slower: RED, unclear: DIM };
+scenarios.forEach((sc, s) => {
+  const cells = sc.ratios.map((r) => fmtX(r).padStart(runColWidth));
   console.log(
-    `${CYAN}${num}${RESET}  ${sc.name.padEnd(scenarioCol)}` +
-      `  ${cells.join("  ")}  ${fmtVerdict(sc.verdict)}`,
+    `${CYAN}${String(s + 1).padStart(2)}${RESET}  ${sc.name.padEnd(scenarioCol)}` +
+      `  ${cells.join("  ")}  ${COLOR[sc.verdict]}${describe(sc)}${RESET}`,
   );
-}
+});
 
 console.log(SEP);
 
-// Summary
-const stableCount = scenarios.filter((s) => s.verdict.verdict === "stable").length;
-const marginalCount = scenarios.filter((s) => s.verdict.verdict === "marginal").length;
-const noiseCount = scenarios.filter((s) => s.verdict.verdict === "noise").length;
+const count = (verdict) => scenarios.filter((sc) => sc.verdict === verdict).length;
+const floorMs = median(allResults.map((run) => run.floorMs));
 console.log(
-  `
-${GREEN}${stableCount} stable${RESET}, ${DIM}${marginalCount} marginal${RESET}, ` +
-    `${noiseCount > 0 ? YELLOW : DIM}${noiseCount} noise${RESET} out of ${scenarioCount} scenarios
-`,
+  `\n${GREEN}${count("faster")} faster${RESET}, ${RED}${count("slower")} slower${RESET}, ` +
+    `${DIM}${count("unclear")} no clear difference${RESET} out of ${scenarioCount} scenarios`,
+);
+console.log(
+  `${DIM}Harness floor: ${(floorMs * 1000).toFixed(1)} \u00b5s per operation` +
+    ` (setText + render pass, no model); included in every time.${RESET}\n`,
 );
 
 // ── JSON output ──────────────────────────────────────────────────────
@@ -255,23 +226,15 @@ if (jsonOutFile) {
       rounds: Number(rounds),
       runs,
     },
-    scenarios: scenarios.map((sc) => ({
-      name: sc.name,
-      category: sc.category,
-      runs: allResults.map((run, runIdx) => {
-        const idx = runLookups[runIdx].get(sc.name);
-        return {
-          json: run.results[idx].json,
-          signal: run.results[idx].signal,
-        };
-      }),
-      // Per-model medians across runs, for reporting absolute times
-      jsonMedian: median(sc.runs.map((r) => r.json.median)),
-      signalMedian: median(sc.runs.map((r) => r.signal.median)),
-      verdict: sc.verdict.verdict,
-      direction: sc.verdict.direction,
-      medianRatio: sc.verdict.medianRatio,
-    })),
+    environment: {
+      ...allResults[0].environment,
+      cpu: cpus()[0].model.trim(),
+      memoryGb: Math.round(totalmem() / 2 ** 30),
+      os: `${type()} ${release()}`,
+      node: process.version,
+    },
+    floorMs,
+    scenarios,
   };
   await writeFile(jsonOutFile, JSON.stringify(output, null, 2));
   console.log(`Results saved to ${jsonOutFile}`);
