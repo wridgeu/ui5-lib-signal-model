@@ -1,5 +1,6 @@
 import ClientModel from "sap/ui/model/ClientModel";
 import Log from "sap/base/Log";
+import deepExtend from "sap/base/util/deepExtend";
 import type Context from "sap/ui/model/Context";
 import SignalRegistry from "./SignalRegistry";
 import SignalPropertyBinding from "./SignalPropertyBinding";
@@ -8,10 +9,24 @@ import SignalTreeBinding from "./SignalTreeBinding";
 import type { SignalModelOptions, ModelPath, PathValue } from "./types";
 import type { Signal } from "signal-polyfill";
 
+/**
+ * Deep-clone an object or array using structuredClone, falling back to UI5's
+ * deepExtend when the value contains non-cloneable properties (e.g. functions).
+ */
+function safeClone<V extends object>(value: V): V {
+  try {
+    return structuredClone(value);
+  } catch {
+    return deepExtend(Array.isArray(value) ? [] : {}, value) as V;
+  }
+}
+
 // Runtime properties/methods on ClientModel not exposed by @openui5/types stubs.
 type ClientModelInternal = ClientModel & {
   resolve(path: string, oContext?: Context): string | undefined;
   checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): number;
+  fireRequestSent(parameters: Record<string, unknown>): ClientModel;
+  fireRequestCompleted(parameters: Record<string, unknown>): ClientModel;
   bDestroyed: boolean;
   bCache: boolean;
 };
@@ -139,15 +154,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (method !== "GET" && parameters) {
       body =
         typeof parameters === "string" ? parameters : new URLSearchParams(parameters).toString();
-      if (!customHeaders?.["Content-Type"]) {
+      const hasContentType =
+        customHeaders !== undefined &&
+        Object.keys(customHeaders).some((k) => k.toLowerCase() === "content-type");
+      if (!hasContentType) {
         headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
       }
     }
 
-    this.fireRequestSent({
+    asInternal(this).fireRequestSent({
       url,
       type: method,
       async: true,
+      headers: customHeaders,
       info,
       infoObject,
     });
@@ -182,31 +201,39 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const returnPromise = this._importChain.then(() =>
       importPromise.then(
         (data: T) => {
+          if (asInternal(this).bDestroyed) {
+            return;
+          }
           if (merge) {
             this.setData(data as Partial<T>, true);
           } else {
             this.setData(data);
           }
-          this.fireRequestCompleted({
+          asInternal(this).fireRequestCompleted({
             url,
             type: method,
             async: true,
+            headers: customHeaders,
             info,
             infoObject,
             success: true,
           });
         },
         (error: Error & { statusCode?: number; statusText?: string; responseText?: string }) => {
+          if (asInternal(this).bDestroyed) {
+            return;
+          }
           const errorInfo = {
             message: error.message,
             statusCode: String(error.statusCode ?? 0),
             statusText: error.statusText ?? error.message,
             responseText: error.responseText ?? "",
           };
-          this.fireRequestCompleted({
+          asInternal(this).fireRequestCompleted({
             url,
             type: method,
             async: true,
+            headers: customHeaders,
             info,
             infoObject,
             success: false,
@@ -285,6 +312,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         srcText: e instanceof Error ? e.message : String(e),
         line: -1,
         linepos: -1,
+        filepos: -1,
       });
     }
   }
@@ -295,6 +323,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   setData(data: Partial<T>, merge: true): void;
   setData(data: T | Partial<T>, merge?: boolean): void {
     if (merge) {
+      if (!data || typeof data !== "object") {
+        return;
+      }
+      if (!this.oData || typeof this.oData !== "object") {
+        this.oData = (Array.isArray(data) ? [] : {}) as T;
+      }
       // In-place merge: walk the payload and apply changes directly to this.oData.
       // O(k) where k = payload size, instead of O(n) deep clone of all data.
       this._mergeInPlace(
@@ -304,7 +338,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       );
     } else {
       this.oData = data as T;
-      this.registry.invalidateAll((path: string) => this._getObject(path));
+      if (this.registry.size > 0) {
+        this.registry.invalidateAll((path: string) => this._getObject(path));
+      }
     }
   }
 
@@ -322,8 +358,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   getProperty(path: string, context?: object): unknown;
   getProperty(path: string, context?: object): unknown {
     // Only resolve computed check for proper Context objects (not raw data items from FilterProcessor)
-    if (!context || typeof (context as Context).getPath === "function") {
-      const resolvedPath = asInternal(this).resolve(path, context as Context | undefined);
+    if (
+      this.registry.hasComputeds &&
+      (!context || typeof (context as Context).getPath === "function")
+    ) {
+      const resolvedPath = this._resolvePath(path, context as Context | undefined);
       if (resolvedPath && this.registry.isComputed(resolvedPath)) {
         // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
         return this.registry.get(resolvedPath)!.get();
@@ -342,7 +381,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   setProperty(path: string, value: unknown, context?: Context, asyncUpdate?: boolean): boolean;
   setProperty(path: string, value: unknown, context?: Context, asyncUpdate?: boolean): boolean {
-    const resolvedPath = asInternal(this).resolve(path, context);
+    const resolvedPath = this._resolvePath(path, context);
     if (!resolvedPath) {
       return false;
     }
@@ -371,7 +410,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     let parent = this._getObject(objectPath) as Record<string, unknown> | undefined;
 
-    if (!parent) {
+    if (!parent || typeof parent !== "object") {
       if (!this.autoCreatePaths) {
         return false;
       }
@@ -381,41 +420,84 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this.strictLeafCheck && !(propertyName in parent)) {
       return false;
     }
+    const oldValue = parent[propertyName];
     parent[propertyName] = value;
 
     if (this.registry.size > 0) {
+      const hasObjectTransition =
+        (typeof oldValue === "object" && oldValue !== null) ||
+        (typeof value === "object" && value !== null);
       if (asyncUpdate) {
-        // Deferred mode: skip signal notification, schedule a bulk sync.
-        // This avoids 2000 synchronous notify callbacks during a batch
-        // of setProperty calls -- the signals are synced once afterward.
+        // Deferred mode: record dirty path and schedule a single batched sync.
+        // Avoids synchronous watcher notifications during a batch of writes,
+        // and syncs only the dirty paths instead of scanning the entire registry.
+        const prevFlag = this._pendingAsyncPaths.get(resolvedPath) ?? false;
+        this._pendingAsyncPaths.set(resolvedPath, prevFlag || hasObjectTransition);
         this._scheduleBulkSync();
       } else {
         this.registry.set(resolvedPath, value);
         this._invalidateParentSignals(resolvedPath);
-        this.registry.invalidateChildren(resolvedPath, (p: string) => this._getObject(p));
+        if (hasObjectTransition) {
+          this.registry.invalidateChildren(resolvedPath, (p: string) => this._getObject(p));
+        }
       }
     }
 
     return true;
   }
 
-  private _bulkSyncScheduled = false;
+  private _bulkSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private _pendingAsyncPaths = new Map<string, boolean>();
 
   /**
-   * Schedule a single deferred sync of all signals from the data tree.
+   * Schedule a single deferred sync of all dirty paths from `bAsyncUpdate=true` writes.
    *
-   * Used by the {@link setProperty} `bAsyncUpdate` path to avoid synchronous
-   * signal notifications during a batch of writes. Instead of firing N watcher
-   * notify callbacks (one per `setProperty` call), the data is written
-   * immediately and a single `setTimeout` syncs all signals afterward.
-   * This matches JSONModel's `bAsyncUpdate` batching strategy.
+   * Instead of scanning the entire registry (`invalidateAll`), only the paths written
+   * during the batch (plus their ancestor state signals, deduplicated) are synced.
+   * Sparse async writes stay O(1) while bulk async writes stay O(N).
    */
   private _scheduleBulkSync(): void {
-    if (!this._bulkSyncScheduled) {
-      this._bulkSyncScheduled = true;
-      setTimeout(() => {
-        this._bulkSyncScheduled = false;
-        this.registry.invalidateAll((path: string) => this._getObject(path));
+    if (this._bulkSyncTimer === null) {
+      this._bulkSyncTimer = setTimeout(() => {
+        this._bulkSyncTimer = null;
+        if (asInternal(this).bDestroyed || this._pendingAsyncPaths.size === 0) {
+          this._pendingAsyncPaths.clear();
+          return;
+        }
+        const dirty = this._pendingAsyncPaths;
+        this._pendingAsyncPaths = new Map();
+        const invalidatedParents = new Set<string>();
+
+        for (const [path, hasObjectTransition] of dirty) {
+          const signal = this.registry.getState(path);
+          if (signal) {
+            signal.set(this._getObject(path));
+          }
+          // Deduplicated ancestor invalidation
+          let idx = path.lastIndexOf("/");
+          while (idx > 0) {
+            const parentPath = path.substring(0, idx);
+            if (invalidatedParents.has(parentPath)) {
+              break;
+            }
+            invalidatedParents.add(parentPath);
+            const parentSignal = this.registry.getState(parentPath);
+            if (parentSignal) {
+              parentSignal.set(this._getObject(parentPath));
+            }
+            idx = path.lastIndexOf("/", idx - 1);
+          }
+          if (!invalidatedParents.has("/")) {
+            invalidatedParents.add("/");
+            const rootSignal = this.registry.getState("/");
+            if (rootSignal) {
+              rootSignal.set(this.oData);
+            }
+          }
+          if (hasObjectTransition) {
+            this.registry.invalidateChildren(path, (p: string) => this._getObject(p));
+          }
+        }
       }, 0);
     }
   }
@@ -455,12 +537,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const existing = this._getObject(resolvedPath);
     if (existing && typeof existing === "object" && typeof value === "object" && value !== null) {
       // In-place merge: walk the payload, compare, overwrite, and fire signals in one pass.
-      // _mergeInPlace already calls _invalidateParentSignals internally.
-      this._mergeInPlace(
+      const changed = this._mergeInPlace(
         existing as Record<string, unknown>,
         value as Record<string, unknown>,
         resolvedPath,
       );
+      if (changed && this.registry.size > 0) {
+        this._invalidateParentSignals(resolvedPath);
+      }
 
       return true;
     }
@@ -616,39 +700,62 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     this.registry.removeComputed(path);
   }
 
+  /** Used by binding classes to check whether a signal is registered directly at `path`. @internal */
+  _getExactSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown> | undefined {
+    return this.registry.get(path);
+  }
+
+  /**
+   * Fast path for resolving a path with optional context.
+   * Avoids calling ClientModel.prototype.resolve when the path is already an
+   * absolute path without a trailing slash (the common case).
+   */
+  private _resolvePath(path: string, context?: Context): string | undefined {
+    if (
+      !context &&
+      typeof path === "string" &&
+      path.length > 0 &&
+      path.charCodeAt(0) === 47 &&
+      (path.length === 1 || path.charCodeAt(path.length - 1) !== 47)
+    ) {
+      return path;
+    }
+    return asInternal(this).resolve(path, context);
+  }
+
   /** Used by binding classes, not part of the public API. @internal */
   _getObject(path: string, context?: object): unknown {
     // If context is a raw data object (not a Context instance), navigate into it directly.
     // This is needed for FilterProcessor/SorterProcessor which pass raw list items as context.
     if (context && typeof (context as Context).getPath !== "function") {
-      let node: unknown = context;
-      // Walk the path without allocating arrays. This branch is called
-      // per-row during FilterProcessor/SorterProcessor operations.
-      let start = 0;
+      if (!path) {
+        return context;
+      }
+      // Match JSONModel._getObject: absolute path starting with "/" resolves from this.oData
+      let node: unknown = path.charCodeAt(0) === 47 ? this.oData : context;
+      let start = path.charCodeAt(0) === 47 ? 1 : 0;
       while (start < path.length) {
-        if (path[start] === "/") {
-          start++;
-          continue;
-        }
         const end = path.indexOf("/", start);
         const part = end === -1 ? path.substring(start) : path.substring(start, end);
-        if (node === null || node === undefined) return undefined;
+        if (!part) break;
+        if (node === null || node === undefined) return node;
         node = (node as Record<string, unknown>)[part];
-        start = end === -1 ? path.length : end + 1;
+        if (end === -1) break;
+        start = end + 1;
       }
       return node;
     }
 
     let node: unknown = this.oData;
 
-    const resolvedPath = asInternal(this).resolve(path, context as Context | undefined);
+    const resolvedPath = this._resolvePath(path, context as Context | undefined);
     if (!resolvedPath) {
       return null;
     }
 
     // Computed signals live in the registry, not in oData.
     // Return the computed value so list/tree bindings can see it.
-    if (this.registry.isComputed(resolvedPath)) {
+    if (this.registry.hasComputeds && this.registry.isComputed(resolvedPath)) {
       // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
       return this.registry.get(resolvedPath)!.get();
     }
@@ -657,31 +764,41 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       return this.oData;
     }
 
-    const parts = resolvedPath.substring(1).split("/");
     if (this.registry.hasComputeds) {
       let currentPath = "";
-      for (const part of parts) {
+      let start = 1;
+      while (start < resolvedPath.length) {
+        const end = resolvedPath.indexOf("/", start);
+        const part =
+          end === -1 ? resolvedPath.substring(start) : resolvedPath.substring(start, end);
         if (!part) break;
         currentPath += "/" + part;
 
         if (this.registry.isComputed(currentPath)) {
           // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
           node = this.registry.get(currentPath)!.get();
-          continue;
+        } else {
+          if (node === null || node === undefined) {
+            return node;
+          }
+          node = (node as Record<string, unknown>)[part];
         }
-
-        if (node === null || node === undefined) {
-          return node;
-        }
-        node = (node as Record<string, unknown>)[part];
+        if (end === -1) break;
+        start = end + 1;
       }
     } else {
-      for (const part of parts) {
+      let start = 1;
+      while (start < resolvedPath.length) {
+        const end = resolvedPath.indexOf("/", start);
+        const part =
+          end === -1 ? resolvedPath.substring(start) : resolvedPath.substring(start, end);
         if (!part) break;
         if (node === null || node === undefined) {
           return node;
         }
         node = (node as Record<string, unknown>)[part];
+        if (end === -1) break;
+        start = end + 1;
       }
     }
     return node;
@@ -710,6 +827,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   private _createPath(path: string): Record<string, unknown> {
+    if (!this.oData || typeof this.oData !== "object") {
+      this.oData = {} as T;
+    }
     let node: Record<string, unknown> = this.oData as Record<string, unknown>;
     const parts = path.substring(1).split("/");
 
@@ -717,7 +837,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       if (part === "" || part === "__proto__" || part === "constructor" || part === "prototype") {
         continue;
       }
-      if (!(part in node) || node[part] === null || node[part] === undefined) {
+      const next = node[part];
+      if (!next || typeof next !== "object") {
         node[part] = {};
       }
       node = node[part] as Record<string, unknown>;
@@ -729,14 +850,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     let idx = path.lastIndexOf("/");
     while (idx > 0) {
       const parentPath = path.substring(0, idx);
-      if (this.registry.has(parentPath)) {
-        this.registry.set(parentPath, this._getObject(parentPath));
+      const signal = this.registry.getState(parentPath);
+      if (signal) {
+        signal.set(this._getObject(parentPath));
       }
       idx = path.lastIndexOf("/", idx - 1);
     }
     // Check root
-    if (this.registry.has("/")) {
-      this.registry.set("/", this._getObject("/"));
+    const rootSignal = this.registry.getState("/");
+    if (rootSignal) {
+      rootSignal.set(this.oData);
     }
   }
 
@@ -747,14 +870,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * and fires signals for changed paths. O(k) where k = payload keys,
    * instead of O(n) deep clone of the entire data tree.
    *
-   * Incoming object/array values are cloned via structuredClone to prevent
+   * Incoming object/array values are cloned via safeClone to prevent
    * the caller from holding references into the model's internal data.
+   *
+   * @returns `true` if any property within this subtree changed.
    */
   private _mergeInPlace(
     target: Record<string, unknown>,
     source: Record<string, unknown>,
     basePath: string,
-  ): void {
+  ): boolean {
+    let changed = false;
+    const hasSignals = this.registry.size > 0;
+
     for (const key of Object.keys(source)) {
       if (key === "__proto__" || key === "constructor" || key === "prototype") {
         continue;
@@ -772,33 +900,40 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       ) {
         // Same container type (both arrays or both plain objects): recurse in-place.
         // Arrays are merged by index, matching deepExtend behavior.
-        this._mergeInPlace(
-          oldValue as Record<string, unknown>,
-          newValue as Record<string, unknown>,
-          childPath,
-        );
-      } else if (oldValue !== newValue) {
+        if (
+          this._mergeInPlace(
+            oldValue as Record<string, unknown>,
+            newValue as Record<string, unknown>,
+            childPath,
+          )
+        ) {
+          changed = true;
+        }
+      } else if (!Object.is(oldValue, newValue)) {
+        changed = true;
         // Clone incoming objects/arrays to prevent external mutation
         target[key] =
-          typeof newValue === "object" && newValue !== null ? structuredClone(newValue) : newValue;
-        this.registry.set(childPath, target[key]);
-        // Type changed: invalidate child signals in either direction
-        // (object→primitive: children are gone, primitive→object: children are now valid)
-        if (
-          (typeof oldValue === "object" && oldValue !== null) ||
-          (typeof newValue === "object" && newValue !== null)
-        ) {
-          this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
+          typeof newValue === "object" && newValue !== null ? safeClone(newValue) : newValue;
+        if (hasSignals) {
+          this.registry.set(childPath, target[key]);
+          // Type changed: invalidate child signals in either direction
+          // (object→primitive: children are gone, primitive→object: children are now valid)
+          if (
+            (typeof oldValue === "object" && oldValue !== null) ||
+            (typeof newValue === "object" && newValue !== null)
+          ) {
+            this.registry.invalidateChildren(childPath, (path: string) => this._getObject(path));
+          }
         }
       }
     }
-    // Update the base path signal (the object reference hasn't changed, but contents have)
-    const effectivePath = basePath || "/";
-    this.registry.set(effectivePath, target);
-    // basePath is "" for the root merge call -- skip parent invalidation since root has no parent.
-    if (basePath) {
-      this._invalidateParentSignals(basePath);
+    if (changed && hasSignals) {
+      // Update the base path signal (the object reference hasn't changed, but contents have).
+      // Parent invalidation above the merge root is handled once by the top-level caller.
+      const effectivePath = basePath || "/";
+      this.registry.set(effectivePath, target);
     }
+    return changed;
   }
 
   /** Used by binding classes, not part of the public API. @internal */
@@ -848,6 +983,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   /** @since 0.1.0 */
   override destroy(): void {
+    // Cancel any pending async bulk sync timer
+    if (this._bulkSyncTimer !== null) {
+      clearTimeout(this._bulkSyncTimer);
+      this._bulkSyncTimer = null;
+    }
+    this._pendingAsyncPaths.clear();
     // Abort all in-flight loadData requests (matching JSONModel's XHR abort behavior)
     this._abortController?.abort();
     this._abortController = null;

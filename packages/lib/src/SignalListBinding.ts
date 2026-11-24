@@ -1,6 +1,8 @@
 import ClientListBinding from "sap/ui/model/ClientListBinding";
 import ChangeReason from "sap/ui/model/ChangeReason";
 import type Context from "sap/ui/model/Context";
+import deepEqual from "sap/base/util/deepEqual";
+import deepExtend from "sap/base/util/deepExtend";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
 import { scheduleFlush, cancelFlush, teardownWatcher } from "./FlushQueue";
@@ -12,6 +14,10 @@ type ListBindingInternal = ClientListBinding & {
   aIndices: (number | string)[];
   iLength: number;
   bUseExtendedChangeDetection: boolean;
+  aLastContexts: Context[] | undefined;
+  aLastContextData: string[] | undefined;
+  iLastStartIndex: number | undefined;
+  iLastLength: number | undefined;
   sPath: string;
   oContext: Context | undefined;
   bSuspended: boolean;
@@ -20,8 +26,22 @@ type ListBindingInternal = ClientListBinding & {
   applyFilter(): void;
   applySort(): void;
   _getLength(): number;
+  _getContexts(startIndex?: number, length?: number): Context[];
+  getContextData(context: Context): string;
   _fireChange(params: { reason: string }): void;
 };
+
+/**
+ * Deep-clone an array or object using structuredClone, falling back to UI5's
+ * deepExtend when the data contains non-cloneable values (e.g. functions).
+ */
+function safeDeepClone<T extends object>(value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return deepExtend(Array.isArray(value) ? [] : {}, value) as T;
+  }
+}
 
 /**
  * Casts to an internal type that includes UI5 runtime properties not exposed
@@ -50,12 +70,10 @@ export default class SignalListBinding extends ClientListBinding {
     const list = this.oModel._getObject(internal.sPath, internal.oContext);
     if (list) {
       if (Array.isArray(list)) {
-        internal.oList = internal.bUseExtendedChangeDetection
-          ? (structuredClone(list) as unknown[])
-          : list.slice();
+        internal.oList = internal.bUseExtendedChangeDetection ? safeDeepClone(list) : list.slice();
       } else {
         internal.oList = internal.bUseExtendedChangeDetection
-          ? (structuredClone(list) as Record<string, unknown>)
+          ? safeDeepClone(list as Record<string, unknown>)
           : Object.assign({}, list);
       }
       this.updateIndices();
@@ -99,8 +117,43 @@ export default class SignalListBinding extends ClientListBinding {
     if (internal.bSuspended && !internal.bIgnoreSuspend && !forceUpdate) {
       return;
     }
-    this.update();
-    internal._fireChange({ reason: ChangeReason.Change });
+
+    const list = (this.oModel._getObject(internal.sPath, internal.oContext) || []) as
+      | unknown[]
+      | Record<string, unknown>;
+
+    if (!internal.bUseExtendedChangeDetection) {
+      if (!deepEqual(internal.oList, list) || forceUpdate) {
+        this.update();
+        internal._fireChange({ reason: ChangeReason.Change });
+      }
+      return;
+    }
+
+    let changeDetected = (internal.oList as unknown[]).length !== (list as unknown[]).length;
+    if (!deepEqual(internal.oList, list)) {
+      this.update();
+    }
+
+    const contexts = internal._getContexts(internal.iLastStartIndex, internal.iLastLength);
+    if (internal.aLastContexts) {
+      if (internal.aLastContexts.length !== contexts.length) {
+        changeDetected = true;
+      } else if (internal.aLastContextData) {
+        for (let i = 0; i < internal.aLastContextData.length; i++) {
+          if (internal.getContextData(contexts[i]) !== internal.aLastContextData[i]) {
+            changeDetected = true;
+            break;
+          }
+        }
+      }
+    } else {
+      changeDetected = true;
+    }
+
+    if (changeDetected || forceUpdate) {
+      internal._fireChange({ reason: ChangeReason.Change });
+    }
   }
 
   /** @since 0.1.0 */
@@ -153,7 +206,7 @@ export default class SignalListBinding extends ClientListBinding {
    */
   setContext(context?: object): void {
     const internal = asInternal(this);
-    if (internal.oContext !== context) {
+    if (internal.oContext != context) {
       internal.oContext = context as Context;
       if (this.isRelative()) {
         this.update();

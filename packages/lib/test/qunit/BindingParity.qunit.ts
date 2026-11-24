@@ -708,5 +708,122 @@ QUnit.module(
       assert.ok(true, "forceNoCache completes without error");
       signal.destroy();
     });
+
+    // =========================================================================
+    // 14. Relative property binding context switch with identical value parity
+    // =========================================================================
+
+    QUnit.test(
+      "relative property binding setContext to different path with same value fires change (parity)",
+      (assert) => {
+        const data = {
+          items: [{ name: "Same" }, { name: "Same" }],
+        };
+        const json = new JSONModel(JSON.parse(JSON.stringify(data)));
+        const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(data)));
+
+        const jsonCtx0 = json.createBindingContext("/items/0")!;
+        const jsonCtx1 = json.createBindingContext("/items/1")!;
+        const signalCtx0 = signal.createBindingContext("/items/0")!;
+        const signalCtx1 = signal.createBindingContext("/items/1")!;
+
+        const jsonBinding = json.bindProperty("name", jsonCtx0);
+        const signalBinding = signal.bindProperty("name", signalCtx0);
+
+        let jsonChanges = 0;
+        let signalChanges = 0;
+        jsonBinding.attachChange(() => jsonChanges++);
+        signalBinding.attachChange(() => signalChanges++);
+
+        (jsonBinding as unknown as { setContext(c: object): void }).setContext(jsonCtx1);
+        signalBinding.setContext(signalCtx1);
+
+        assert.strictEqual(
+          signalChanges,
+          jsonChanges,
+          `change count matches JSONModel on context switch with identical value (both: ${jsonChanges})`,
+        );
+        assert.strictEqual(signalChanges, 1, "fired change event");
+
+        json.destroy();
+        signal.destroy();
+      },
+    );
+
+    // =========================================================================
+    // 15. List binding extended change detection parity
+    // =========================================================================
+
+    QUnit.test(
+      "list binding with extended change detection skips change when visible range unchanged (parity)",
+      (assert) => {
+        const done = assert.async();
+        const data = {
+          items: [{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }],
+        };
+        const json = new JSONModel(JSON.parse(JSON.stringify(data)));
+        const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(data)));
+
+        const jsonBinding = json.bindList("/items");
+        const signalBinding = signal.bindList("/items");
+
+        (
+          jsonBinding as unknown as { enableExtendedChangeDetection(): void }
+        ).enableExtendedChangeDetection();
+        (
+          signalBinding as unknown as { enableExtendedChangeDetection(): void }
+        ).enableExtendedChangeDetection();
+
+        // Only items 0..1 are in the visible window
+        jsonBinding.getContexts(0, 2);
+        signalBinding.getContexts(0, 2);
+
+        let jsonChanges = 0;
+        let signalChanges = 0;
+        jsonBinding.attachChange(() => jsonChanges++);
+        signalBinding.attachChange(() => signalChanges++);
+
+        // Modify item 3 (outside visible window 0..1)
+        json.setProperty("/items/3/name", "D-updated");
+        signal.setProperty("/items/3/name", "D-updated");
+
+        setTimeout(() => {
+          assert.strictEqual(
+            signalChanges,
+            jsonChanges,
+            `extended change detection matches JSONModel for out-of-window change (both: ${jsonChanges})`,
+          );
+          assert.strictEqual(signalChanges, 0, "no spurious change event for out-of-window item");
+
+          // Now modify item 0 (inside visible window 0..1)
+          json.setProperty("/items/0/name", "A-updated");
+          signal.setProperty("/items/0/name", "A-updated");
+
+          setTimeout(() => {
+            assert.strictEqual(
+              signalChanges,
+              jsonChanges,
+              `extended change detection matches JSONModel for in-window change (both: ${jsonChanges})`,
+            );
+            assert.strictEqual(signalChanges, 1, "fired change event for in-window item");
+            json.destroy();
+            signal.destroy();
+            done();
+          }, 50);
+        }, 50);
+      },
+    );
+
+    // =========================================================================
+    // 16. setProperty on primitive parent does not throw
+    // =========================================================================
+
+    QUnit.test("setProperty through primitive parent returns false safely", (assert) => {
+      const signal = new SignalModel<Record<string, unknown>>({ name: "Alice" });
+      const result = signal.setProperty("/name/sub", "value");
+      assert.strictEqual(result, false, "returns false instead of throwing TypeError");
+      assert.strictEqual(signal.getProperty("/name"), "Alice", "primitive unchanged");
+      signal.destroy();
+    });
   },
 );

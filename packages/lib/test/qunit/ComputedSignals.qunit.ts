@@ -846,4 +846,77 @@ QUnit.module("ComputedSignals", () => {
       done();
     }, 50);
   });
+
+  QUnit.test(
+    "chained computed over object-returning computed updates on in-place child mutation",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({
+        items: [{ name: "Alice" }],
+      });
+      // First computed returns the same object reference (items[0])
+      model.createComputed("/first", ["/items"], (items) => (items as { name: string }[])[0]);
+      // Second computed reads a property of that object
+      model.createComputed("/firstName", ["/first"], (first) => (first as { name: string }).name);
+
+      const binding = model.bindProperty("/firstName");
+      assert.strictEqual(binding.getValue(), "Alice", "initial chained computed value");
+
+      binding.attachChange(() => {
+        assert.strictEqual(
+          binding.getValue(),
+          "Bob",
+          "chained computed updated after in-place child mutation",
+        );
+        model.destroy();
+        done();
+      });
+
+      // Mutate child in-place: /items[0] reference stays identical
+      model.setProperty("/items/0/name", "Bob");
+    },
+  );
+
+  QUnit.test(
+    "throwing computed during flush does not break other bindings and recovers",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel({ x: 1, other: "init" });
+      model.createComputed("/risky", ["/x"], (x) => {
+        if ((x as number) === 0) {
+          throw new Error("division by zero");
+        }
+        return 100 / (x as number);
+      });
+
+      const riskyBinding = model.bindProperty("/risky");
+      const otherBinding = model.bindProperty("/other");
+      assert.strictEqual(riskyBinding.getValue(), 100, "initial risky value");
+
+      let otherUpdates = 0;
+      otherBinding.attachChange(() => otherUpdates++);
+
+      // Trigger error in /risky AND a valid update in /other in the same flush
+      model.setProperty("/x", 0);
+      model.setProperty("/other", "updated");
+
+      setTimeout(() => {
+        assert.strictEqual(
+          otherUpdates,
+          1,
+          "unrelated binding still updated despite throwing sibling",
+        );
+        assert.strictEqual(otherBinding.getValue(), "updated", "other binding has new value");
+
+        // Recover /x to a valid value -- watcher must still be armed
+        model.setProperty("/x", 2);
+
+        setTimeout(() => {
+          assert.strictEqual(riskyBinding.getValue(), 50, "risky binding recovered after error");
+          model.destroy();
+          done();
+        }, 50);
+      }, 50);
+    },
+  );
 });

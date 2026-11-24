@@ -7,6 +7,7 @@ import { Signal } from "signal-polyfill";
 interface FlushableBinding {
   watcher: Signal.subtle.Watcher | null;
   checkUpdate(forceUpdate?: boolean): void;
+  _checkUpdateFromSignal?(value: unknown): void;
 }
 
 /**
@@ -51,10 +52,30 @@ export function scheduleFlush(
         // cancelFlush() operates on the live pendingUpdates map, but after
         // the swap the binding is in the detached batch -- unreachable by cancel.
         if (!b.watcher) continue;
-        s.get();
-        b.watcher.watch();
+        let value: unknown;
+        let readFailed = false;
         try {
-          b.checkUpdate();
+          value = s.get();
+        } catch (e) {
+          readFailed = true;
+          Log.error(
+            "SignalModel: signal read failed during flush",
+            e as Error,
+            "ui5.model.signal.FlushQueue",
+          );
+        }
+        // Always re-arm watcher before checkUpdate (and even if s.get() threw)
+        // so the binding can recover on subsequent dependency changes.
+        if (b.watcher) {
+          b.watcher.watch();
+        }
+        if (readFailed) continue;
+        try {
+          if (b._checkUpdateFromSignal) {
+            b._checkUpdateFromSignal(value);
+          } else {
+            b.checkUpdate();
+          }
         } catch (e) {
           Log.error(
             "SignalModel: checkUpdate failed for binding",
