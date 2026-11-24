@@ -42,10 +42,10 @@ Options:
 ```
 SignalModel vs JSONModel -- 2000 bindings, 4 runs (500 iter, 20 rounds)
 
- #  Scenario                           Run 1    Run 2    Run 3    Run 4  Result
+ #  Scenario                                  Run 1    Run 2    Run 3    Run 4  Result
 ──────────────────────────────────────────────────────────────────────────────────────────────────
- 4  Update all 2000 bindings             49x      53x      56x      50x  52x faster (47x-57x)
- 5  Update all 2000 (async)            0.98x    0.95x    0.98x    0.74x  no clear difference (0.73x-1.13x)
+ 4  Update all 2000 bindings (sync)             49x      53x      56x      50x  52x faster (47x-57x)
+ 5  Update all 2000 bindings (bAsyncUpdate)   0.98x    0.95x    0.98x    0.74x  no clear difference (0.73x-1.13x)
 ```
 
 ### Per-Run Cell Value
@@ -80,10 +80,18 @@ Written when `--json <file>` is provided.
 {
   "timestamp": "2026-04-05T12:00:00.000Z",
   "config": { "bindings": 2000, "iterations": 500, "rounds": 20, "runs": 4 },
+  "environment": {
+    "userAgent": "Mozilla/5.0 ... HeadlessChrome/158.0.0.0 ...",
+    "ui5": "1.154.0",
+    "cpu": "12th Gen Intel(R) Core(TM) i7-12700K",
+    "memoryGb": 32,
+    "os": "Windows_NT 10.0.26300",
+    "node": "v26.10.0"
+  },
   "floorMs": 0.0092,
   "scenarios": [
     {
-      "name": "Update all 2000 bindings",
+      "name": "Update all 2000 bindings (sync)",
       "category": "Property (sap.m.Text)",
       "runs": [
         {
@@ -103,7 +111,11 @@ Written when `--json <file>` is provided.
 }
 ```
 
-Each entry in `runs` preserves the full statistical object from that run, including its raw samples. `jsonMedian` / `signalMedian` are each model's median across runs; `ratio`, `low`, `high`, `verdict` are the result column; `floorMs` is the median harness floor.
+Each entry in `runs` preserves the full statistical object from that run, including its raw samples. `jsonMedian` / `signalMedian` are each model's median across runs; `ratio`, `low`, `high`, `verdict` are the result column; `floorMs` is the median harness floor; `environment` is the first run's browser and UI5 version plus the machine the script ran on.
+
+## Published Results
+
+`scripts/render-benchmark-results.mjs` (`npm run bench:render`) reads `docs/benchmark-results.json`, a merged file as above, and regenerates `docs/benchmark-results.svg` and the marked results block in the benchmark README. It only formats: all numbers and wording come from the JSON and `describe`.
 
 ## File Changes
 
@@ -112,5 +124,6 @@ Each entry in `runs` preserves the full statistical object from that run, includ
 | `scripts/run-benchmark-stable.mjs`      | **New.** Stability script.                                                |
 | `package.json`                          | Add `"bench:stable": "node scripts/run-benchmark-stable.mjs"` to scripts. |
 | `packages/lib/test/benchmark/README.md` | Add section documenting `bench:stable` usage.                             |
+| `scripts/render-benchmark-results.mjs`  | **New.** Renders the published chart and table from the merged JSON.      |
 
 The single-run CLI passes `floorMs` and raw samples through in its JSON for this script to merge.

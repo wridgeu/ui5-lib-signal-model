@@ -2,8 +2,8 @@
  * Multi-run benchmark stability script.
  *
  * Runs the CLI benchmark N times, collects JSON results from each run,
- * and produces a merged ASCII table showing all N runs side-by-side
- * with per-scenario stability verdicts.
+ * and prints a merged table: the per-run ratios side by side and, per
+ * scenario, their geometric mean with a 95% confidence interval.
  *
  * @example
  *   npm run bench:stable
@@ -11,6 +11,7 @@
  *   npm run bench:stable -- --runs 4 --json stability.json
  *
  * @see {@link run-benchmark.mjs} Single-run benchmark CLI
+ * @see {@link render-benchmark-results.mjs} Renders the published chart and table from the JSON
  * @see {@link ../packages/lib/test/benchmark/bench-stats.mjs} Shared statistics
  * @see {@link ../docs/specs/2026-04-05-bench-stable-multi-run-design.md} Design spec
  */
@@ -134,49 +135,34 @@ for (let i = 1; i <= runs; i++) {
 
 // ── Merge and render ─────────────────────────────────────────────────
 
-// Build a name→index lookup from the first run's results. Subsequent runs
-// are matched by scenario name instead of array position, so reordering
-// or conditional scenarios across runs won't silently misalign data.
-const scenarioNames = allResults[0].results.map((r) => r.name);
-const scenarioCount = scenarioNames.length;
-
-/** @type {Map<string, number>[]} Lookup maps for each run */
-const runLookups = allResults.map((run) => {
-  const map = new Map();
-  for (let i = 0; i < run.results.length; i++) {
-    map.set(run.results[i].name, i);
-  }
-  return map;
-});
-
-const scenarios = scenarioNames
-  .map((name, s) => {
-    const runsForScenario = allResults.map((run, runIdx) => {
-      const idx = runLookups[runIdx].get(name);
-      if (idx === undefined) {
-        console.error(
-          `${RED}Error: scenario "${name}" not found in run ${runIdx + 1}.${RESET}\n` +
-            `Run 1 has ${scenarioCount} scenarios, run ${runIdx + 1} has ${run.results.length}.`,
-        );
-        process.exit(1);
-      }
-      return { json: run.results[idx].json, signal: run.results[idx].signal };
-    });
-    // Paired per run: both models share that run's machine state
-    const ratios = runsForScenario.map((r) => r.json.median / r.signal.median);
-    return {
+// Runs are matched by scenario name, not array position.
+const scenarios = allResults[0].results.map(({ name, category }) => {
+  const runsForScenario = allResults.map((run, runIdx) => {
+    const result = run.results.find((r) => r.name === name);
+    if (!result) {
+      console.error(`${RED}Error: scenario "${name}" not found in run ${runIdx + 1}.${RESET}`);
+      process.exit(1);
+    }
+    return { json: result.json, signal: result.signal };
+  });
+  // Paired per run: both models share that run's machine state
+  const ratios = runsForScenario.map((r) => r.json.median / r.signal.median);
+  return Object.assign(
+    {
       name,
-      category: allResults[0].results[s].category,
+      category,
       runs: runsForScenario,
       ratios,
       jsonMedian: median(runsForScenario.map((r) => r.json.median)),
       signalMedian: median(runsForScenario.map((r) => r.signal.median)),
-    };
-  })
-  .map((sc) => Object.assign(sc, summarizeRuns(sc.ratios)));
+    },
+    summarizeRuns(ratios),
+  );
+});
+const scenarioCount = scenarios.length;
 
 const runColWidth = 7;
-const scenarioCol = 42;
+const scenarioCol = Math.max(...scenarios.map((sc) => sc.name.length));
 const SEP = "\u2500".repeat(5 + scenarioCol + 2 + runs * (runColWidth + 2) + 44);
 
 console.log(

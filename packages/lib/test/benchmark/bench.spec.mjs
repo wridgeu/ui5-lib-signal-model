@@ -28,7 +28,7 @@ import { ANSI, computeRatio } from "./bench-stats.mjs";
 const { RESET, BOLD, DIM, GREEN, RED, CYAN } = ANSI;
 
 /** Horizontal rule for the results table. */
-const SEP = "\u2500".repeat(88);
+const SEP = "\u2500".repeat(92);
 
 // ── Formatting helpers ───────────────────────────────────────────────
 
@@ -47,8 +47,8 @@ function fmtMs(ms) {
  *
  * Delegates significance logic to {@link computeRatio} from bench-stats.mjs.
  *
- * @param {{ median: number, stddev: number, n?: number }} signal SignalModel stats
- * @param {{ median: number, stddev: number, n?: number }} json JSONModel stats
+ * @param {{ median: number, stddev: number, n: number }} signal SignalModel stats
+ * @param {{ median: number, stddev: number, n: number }} json JSONModel stats
  * @returns {string} ANSI-colored ratio string
  */
 function fmtRatio(signal, json) {
@@ -118,7 +118,7 @@ describe("Benchmark", function () {
               ` \u2014 ${b} bindings, ${it} iter, ${r} rounds\n`,
           );
           console.log(
-            ` ${DIM}#${RESET}  ${"Scenario".padEnd(45)}` +
+            ` ${DIM}#${RESET}  ${"Scenario".padEnd(49)}` +
               ` ${"JSONModel".padStart(12)} ${"SignalModel".padStart(12)}   vs JSON`,
           );
           console.log(SEP);
@@ -134,7 +134,7 @@ describe("Benchmark", function () {
             lastCount++;
             const num = String(lastCount).padStart(2);
             console.log(
-              `${CYAN}${num}${RESET}  ${r.name.padEnd(45)}` +
+              `${CYAN}${num}${RESET}  ${r.name.padEnd(49)}` +
                 ` ${fmtMs(r.json.median)} ${fmtMs(r.signal.median)}` +
                 `   ${fmtRatio(r.signal, r.json)}`,
             );

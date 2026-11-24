@@ -113,7 +113,7 @@ A self-contained benchmark suite compares SignalModel vs JSONModel across 22 sce
 
 ![SignalModel vs JSONModel Benchmark](docs/benchmark-results.svg)
 
-See the [benchmark documentation](packages/lib/test/benchmark/README.md) for the full 22-scenario breakdown, methodology, and analysis.
+See the [benchmark documentation](packages/lib/test/benchmark/README.md) for all 22 scenarios, the methodology, and what is and is not measured. The numbers come from one desktop machine; the raw data is in [docs/benchmark-results.json](docs/benchmark-results.json).
 
 ```bash
 npm run bench                                    # CLI -- headless

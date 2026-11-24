@@ -95,7 +95,7 @@ const rows = [
 const block = `${START}
 
 **Run:** ${config.runs} runs x ${config.rounds} rounds (${config.rounds / 2} samples per model and run), ${bindings} bindings, measured ${data.timestamp.slice(0, 10)}.
-**Environment:** OpenUI5 ${environment.ui5}, ${browser}, Node ${environment.node}, ${environment.cpu}, ${environment.memoryGb} GB RAM, ${environment.os}.
+**Environment:** OpenUI5 ${environment.ui5}, ${browser}, Node.js ${environment.node.slice(1)}, ${environment.cpu}, ${environment.memoryGb} GB RAM, ${environment.os}.
 **Harness floor:** ${fmtTime(floorMs)} per operation (\`setText\` + render pass, no model), included in every time below.
 
 ![SignalModel vs JSONModel Benchmark](../../../../docs/benchmark-results.svg)

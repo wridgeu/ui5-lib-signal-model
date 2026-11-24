@@ -367,11 +367,12 @@
             (signalStats.stddev * signalStats.stddev) / signalStats.n +
               (jsonStats.stddev * jsonStats.stddev) / jsonStats.n,
           );
+        if (Math.abs(jm - sm) < threshold) return '<span class="neutral">~equal</span>';
         var ratio = jm / sm;
-        if (Math.abs(jm - sm) >= threshold && ratio >= 1.1) {
+        if (ratio >= 1.1) {
           return '<span class="faster">' + ratio.toFixed(2) + "x faster</span>";
         }
-        if (Math.abs(jm - sm) >= threshold && ratio <= 0.9) {
+        if (ratio <= 0.9) {
           return '<span class="slower">' + (1 / ratio).toFixed(2) + "x slower</span>";
         }
         return '<span class="neutral">~equal</span>';
@@ -2028,6 +2029,8 @@
             [
               "sap/ui/model/json/JSONModel",
               "ui5/model/signal/SignalModel",
+              "sap/ui/core/Rendering",
+              "sap/ui/VersionInfo",
               "sap/m/Text",
               "sap/m/List",
               "sap/m/StandardListItem",
@@ -2038,16 +2041,10 @@
               "sap/m/StandardTreeItem",
               "sap/ui/table/Table",
               "sap/ui/table/Column",
-              "sap/ui/core/Rendering",
-              "sap/ui/VersionInfo",
             ],
-            function (JSONModel, SignalModel) {
-              Rendering = arguments[arguments.length - 2];
-              resolve({
-                JSONModel: JSONModel,
-                SignalModel: SignalModel,
-                VersionInfo: arguments[arguments.length - 1],
-              });
+            function (JSONModel, SignalModel, RenderingModule, VersionInfo) {
+              Rendering = RenderingModule;
+              resolve({ JSONModel: JSONModel, SignalModel: SignalModel, VersionInfo: VersionInfo });
             },
             reject,
           );
@@ -2598,18 +2595,18 @@
         html += "Read performance of " + iters + " reads, no bindings involved.</li>";
         html += "<li><strong>Single-path update with N bindings</strong>: ";
         html +=
-          "The key benchmark, directly measuring the problem from <a href='https://github.com/UI5/openui5/issues/2600'>openui5 issue 2600</a>. " +
+          "The key benchmark: the pattern discussed in <a href='https://github.com/UI5/openui5/issues/2600'>openui5 issue 2600</a>. " +
           "JSONModel's <code>checkUpdate</code> iterates ALL " +
           n +
           " bindings (O(n)), " +
           "SignalModel notifies only the changed binding via its signal watcher (O(1)). ";
-        html += "The advantage grows linearly with binding count.</li>";
+        html += "JSONModel's cost per write grows with the binding count.</li>";
         html += "<li><strong>Update all N bindings (sync)</strong>: ";
         html += "Consecutive synchronous <code>setProperty</code> calls (the default). ";
         html += "JSONModel does O(N) work per call = O(N<sup>2</sup>) total. ";
         html +=
           "SignalModel does O(1) per call = O(N) total. This is the worst case for JSONModel.</li>";
-        html += "<li><strong>Update all N bindings (async)</strong>: ";
+        html += "<li><strong>Update all N bindings (bAsyncUpdate)</strong>: ";
         html +=
           "Same workload but with <code>bAsyncUpdate=true</code>, SAP's recommended workaround. ";
         html +=
@@ -2625,7 +2622,6 @@
         html += "<li><strong>Table binding replace</strong>: ";
         html +=
           "Tests list binding with a <code>sap.m.Table</code> (3 columns per row). " +
-          "Tables are the most common heavy binding scenario in Fiori applications. " +
           "Each row creates multiple property bindings (one per cell), multiplying the binding count.</li>";
         html += "<li><strong>Tree binding replace</strong>: ";
         html +=

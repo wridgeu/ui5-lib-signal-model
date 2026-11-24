@@ -9,8 +9,19 @@ npm run start:bench                                        # browser -- opens be
 npm run bench                                              # CLI -- headless, streams to terminal
 npm run bench -- --bindings 1000 --iterations 500 --rounds 10
 npm run bench -- --bindings 2000 --json results.json       # save results as JSON
-npm run bench:stable                                       # CLI -- multi-run stability analysis
+npm run bench:stable                                       # CLI -- several runs, ratios with confidence intervals
+npm run bench:render                                       # regenerate the published chart and table
 ```
+
+| File                                   | Role                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| `index.html`                           | The benchmark: harness and all scenarios. Runs standalone in a browser. |
+| `bench.spec.mjs`, `wdio-bench.conf.ts` | Drive the page in headless Chrome and print results (`npm run bench`).  |
+| `bench-stats.mjs`                      | Comparison statistics, with a self-check (`node bench-stats.mjs`).      |
+| `scripts/run-benchmark-stable.mjs`     | Repeats the run and merges the results (`npm run bench:stable`).        |
+| `scripts/render-benchmark-results.mjs` | Renders the chart and results table from `docs/benchmark-results.json`. |
+
+None of these files are part of the published library package.
 
 ### Multi-run stability analysis
 
@@ -61,10 +72,11 @@ JSON output format:
 {
   "timestamp": "2026-04-03T...",
   "config": { "bindings": 1000, "iterations": 500, "rounds": 10 },
+  "environment": { "userAgent": "Mozilla/5.0 ... HeadlessChrome/158.0.0.0 ...", "ui5": "1.154.0" },
   "floorMs": 0.0092,
   "results": [
     {
-      "name": "Update all 1000 bindings",
+      "name": "Update all 1000 bindings (sync)",
       "category": "Property (sap.m.Text)",
       "json": {
         "n": 5,
@@ -85,34 +97,36 @@ JSON output format:
 
 All times are milliseconds per operation. `floorMs` is the harness floor (see [What Is Timed](#what-is-timed)).
 
+`npm run bench:stable -- --json <file>` writes a merged file instead: per scenario the full per-run statistics (`runs`), the per-run ratios (`ratios`), each model's median across runs (`jsonMedian`, `signalMedian`) and the result (`ratio`, `low`, `high`, `verdict`), plus `environment` extended with CPU, memory, OS and Node.js version. [docs/benchmark-results.json](../../../../docs/benchmark-results.json) is such a file.
+
 ## What It Tests
 
 22 scenarios across all binding types, model operations, and merge strategies:
 
-| #   | Binding Type                | Scenario                                | What It Measures                                                |
-| --- | --------------------------- | --------------------------------------- | --------------------------------------------------------------- |
-| 1   | Model API                   | setProperty throughput (no bindings)    | Raw per-call overhead of model layer                            |
-| 2   | Model API                   | getProperty throughput                  | Read performance                                                |
-| 3   | Property (`sap.m.Text`)     | Single-path update, N bindings          | O(1) vs O(N) notification, the key benchmark                    |
-| 4   | Property (`sap.m.Text`)     | Update all N bindings (sync)            | O(N) vs O(N^2) cumulative cost                                  |
-| 5   | Property (`sap.m.Text`)     | Update all N bindings (async)           | JSONModel `bAsyncUpdate=true` vs signals                        |
-| 6   | Property (`sap.m.Text`)     | Sparse async, 1 of N (async)            | Single path change with N bindings, async mode                  |
-| 7   | List (`sap.m.List`)         | List binding replace                    | Array replacement with `StandardListItem` template              |
-| 8   | List (`sap.m.Table`)        | Table binding replace                   | Row replacement with 3 `ColumnListItem` cells                   |
-| 9   | List (`sap.ui.table.Table`) | Grid table binding replace              | Virtualized row replacement, 3 columns, no row cap              |
-| 10  | Tree (`sap.m.Tree`)         | Tree binding replace                    | Hierarchical data replacement with `StandardTreeItem`           |
-| 11  | Expression (`sap.m.Text`)   | Expression binding                      | Composite `{= ${/path1} + ${/path2}}` re-evaluation             |
-| 12  | Computed (`sap.m.Text`)     | Computed signals                        | `createComputed` propagation vs. a JSONModel formatter          |
-| 13  | Computed (`sap.m.Text`)     | Computed (redefined)                    | `removeComputed` + `createComputed` re-subscribe cost           |
-| 14  | Computed (`sap.m.Text`)     | Computed sub-path                       | Sub-path of a computed object vs. a JSONModel formatter         |
-| 15  | Computed (`sap.m.Text`)     | Computed redefine + sub-path            | `_firePathResubscribe` prefix scan with sub-path bindings       |
-| 16  | Property (`sap.m.Text`)     | setData replace                         | Full data replacement propagation                               |
-| 17  | Property (`sap.m.Text`)     | setData merge (shallow)                 | Merge 5 items into N, small payload into large data             |
-| 18  | Property (`sap.m.Text`)     | setData merge (deep)                    | Merge all N items, full payload, worst case for merge           |
-| 19  | Property (`sap.m.Text`)     | setData merge (nested config)           | Merge 3 deep leaf paths into a 5-level config tree              |
-| 20  | Property (`sap.m.Text`)     | setData merge (large dataset, pinpoint) | Merge 3 items into 10x N, tests O(k) vs O(n) merge              |
-| 21  | Property (`sap.m.Text`)     | checkPerformanceOfUpdate threshold      | 3,449 bindings, 29 sync calls, just past UI5's 100k warning     |
-| 22  | Property (`sap.m.Text`)     | Deep-path setProperty (no computeds)    | 4-segment path `_findComputedAncestor` overhead, zero computeds |
+| #   | Binding Type                | Scenario                             | What It Measures                                                |
+| --- | --------------------------- | ------------------------------------ | --------------------------------------------------------------- |
+| 1   | Model API                   | setProperty throughput (no bindings) | Raw per-call overhead of model layer                            |
+| 2   | Model API                   | getProperty throughput               | Read performance                                                |
+| 3   | Property (`sap.m.Text`)     | Single-path update, N bindings       | O(1) vs O(N) notification, the key benchmark                    |
+| 4   | Property (`sap.m.Text`)     | Update all N bindings (sync)         | O(N) vs O(N^2) cumulative cost                                  |
+| 5   | Property (`sap.m.Text`)     | Update all N bindings (bAsyncUpdate) | JSONModel `bAsyncUpdate=true` vs signals                        |
+| 6   | Property (`sap.m.Text`)     | Sparse update, 1 of N (bAsyncUpdate) | Single path change with N bindings, async mode                  |
+| 7   | List (`sap.m.List`)         | List binding replace                 | Array replacement with `StandardListItem` template              |
+| 8   | List (`sap.m.Table`)        | Table binding replace                | Row replacement with 3 `ColumnListItem` cells                   |
+| 9   | List (`sap.ui.table.Table`) | Grid table binding replace           | Virtualized row replacement, 3 columns, no row cap              |
+| 10  | Tree (`sap.m.Tree`)         | Tree binding replace                 | Hierarchical data replacement with `StandardTreeItem`           |
+| 11  | Expression (`sap.m.Text`)   | Expression binding                   | Composite `{= ${/path1} + ${/path2}}` re-evaluation             |
+| 12  | Computed (`sap.m.Text`)     | Computed signals                     | `createComputed` propagation vs. a JSONModel formatter          |
+| 13  | Computed (`sap.m.Text`)     | Computed (redefined)                 | Propagation after `removeComputed` + `createComputed`           |
+| 14  | Computed (`sap.m.Text`)     | Computed sub-path                    | Sub-path of a computed object vs. a JSONModel formatter         |
+| 15  | Computed (`sap.m.Text`)     | Computed redefine + sub-path         | Propagation to sub-path bindings after a redefinition           |
+| 16  | Property (`sap.m.Text`)     | setData replace                      | Full data replacement propagation                               |
+| 17  | Property (`sap.m.Text`)     | setData merge (shallow)              | Merge 5 items into N, small payload into large data             |
+| 18  | Property (`sap.m.Text`)     | setData merge (deep)                 | Merge all N items, full payload, worst case for merge           |
+| 19  | Property (`sap.m.Text`)     | setData merge (nested config)        | Merge 3 deep leaf paths into a 5-level config tree              |
+| 20  | Property (`sap.m.Text`)     | setData merge (large, pinpoint)      | Merge 3 items into 10x N, tests O(k) vs O(n) merge              |
+| 21  | Property (`sap.m.Text`)     | Warning threshold: 29 sync calls     | 3,449 bindings, 29 sync calls, just past UI5's 100k warning     |
+| 22  | Property (`sap.m.Text`)     | Deep-path setProperty (no computeds) | 4-segment path `_findComputedAncestor` overhead, zero computeds |
 
 ### Merge Scenario Design
 
@@ -136,6 +150,7 @@ When "Run Benchmark" is clicked, `sap.ui.require` loads:
 - `sap/ui/model/json/JSONModel` (from the OpenUI5 framework)
 - `ui5/model/signal/SignalModel` (from the library, transpiled from TypeScript)
 - Control classes: `sap/m/Text`, `sap/m/List`, `sap/m/Table`, `sap/m/Tree`, `sap/ui/table/Table`, and their list items/columns
+- `sap/ui/core/Rendering` (to run the render pass inside the timed region, see [What Is Timed](#what-is-timed)) and `sap/ui/VersionInfo` (recorded in the results)
 
 ### Execution
 
@@ -155,7 +170,7 @@ The clock runs from the model call (`setProperty` / `setData`) until **the bound
 
 - **Repetition.** The operation is repeated until a sample spans at least 20 ms, and the mean time per operation is reported. This keeps every sample far above the 0.1 ms resolution of `performance.now()`, so microsecond-scale results are meaningful.
 - **No timers in the timed region.** Waiting uses microtask hops (SignalModel's default `queueMicrotask` flush), then `MessageChannel` tasks. A `setTimeout(0)` wait would add the browser's nested-timer clamp (4 ms in Chrome, up to ~15 ms on Windows) to every sample and bury the model cost underneath it. Only the `bAsyncUpdate` scenarios (5, 6) include a timer: the one both models schedule themselves.
-- **Rendering included, its timer is not.** UI5 schedules rendering with `setTimeout(0)`. The benchmark suspends that timer and runs the same render pass synchronously (`Rendering.renderPendingUIUpdates`) once the update has propagated, so samples contain the rendering work but not the timer wait.
+- **Rendering included, its timer is not.** UI5 schedules rendering with `setTimeout(0)`. The benchmark suspends that timer and runs the same render pass synchronously (`Rendering.renderPendingUIUpdates`) once the update has propagated, so samples contain the rendering work but not the timer wait. `sap/ui/core/Rendering` is a private UI5 module; a UI5 upgrade can break the benchmark (not the library), in which case it fails loudly instead of reporting wrong numbers.
 - **Equivalent work.** Computed-signal scenarios (12-15) compare against a JSONModel formatter that derives the same value, and both models write the same path. JSONModel has no counterpart to redefining a computed, so in 13 and 15 its side is the same workload as in 12.
 - **Harness floor.** Each run also times `control.setText()` plus the render pass with no model involved (`floorMs`). Every per-operation time includes about this much, so the smallest SignalModel times are mostly floor, and the ratios understate the difference in model cost alone.
 - **Real item counts.** List, table, and tree scenarios raise the model size limit, which otherwise caps aggregation bindings at 100 entries. Note that 500 rows without growing is above what `sap.m.List` / `sap.m.Table` are documented for (about 200).
@@ -188,7 +203,7 @@ npm run bench:render                                                   # regener
 <!-- bench:results:start (generated by `npm run bench:render`; do not edit) -->
 
 **Run:** 10 runs x 20 rounds (10 samples per model and run), 2,000 bindings, measured 2026-11-24.
-**Environment:** OpenUI5 1.154.0, headless Chrome 158, Node v26.10.0, 12th Gen Intel(R) Core(TM) i7-12700K, 32 GB RAM, Windows_NT 10.0.26300.
+**Environment:** OpenUI5 1.154.0, headless Chrome 158, Node.js 26.10.0, 12th Gen Intel(R) Core(TM) i7-12700K, 32 GB RAM, Windows_NT 10.0.26300.
 **Harness floor:** 17.1 µs per operation (`setText` + render pass, no model), included in every time below.
 
 ![SignalModel vs JSONModel Benchmark](../../../../docs/benchmark-results.svg)
