@@ -1,5 +1,6 @@
 export const config = {
   runner: "local",
+  autoXvfb: false,
   specs: [],
   capabilities: [
     {
