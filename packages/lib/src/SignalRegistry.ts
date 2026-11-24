@@ -37,6 +37,15 @@ export default class SignalRegistry {
   }
 
   /**
+   * @param path - Property path to retrieve a state signal for.
+   * @returns The state signal, or `undefined` if not registered.
+   * @since 0.1.0
+   */
+  getState(path: string): Signal.State<unknown> | undefined {
+    return this.signals.get(path);
+  }
+
+  /**
    * @param path - Property path to retrieve.
    * @returns The computed or state signal, or `undefined` if not registered.
    * @since 0.1.0
@@ -114,13 +123,16 @@ export default class SignalRegistry {
       );
     }
 
-    const computed = new Signal.Computed(() => {
-      const values = deps.map((dep) => {
-        const s = this.get(dep);
-        return s ? s.get() : undefined;
-      });
-      return fn(...values);
-    });
+    const computed = new Signal.Computed(
+      () => {
+        const values = deps.map((dep) => {
+          const s = this.get(dep);
+          return s ? s.get() : undefined;
+        });
+        return fn(...values);
+      },
+      { equals: signalEquals },
+    );
 
     // Eagerly evaluate so the dependency graph is established immediately.
     // Without this, a Watcher attached to an unevaluated computed cannot

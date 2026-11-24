@@ -39,6 +39,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   watcher: Signal.subtle.Watcher | null = null;
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
+  private _previousResolvedPath: string | undefined = undefined;
+  private _isDirectSignal = false;
 
   /**
    * @param forceUpdate - Whether to force a change event regardless of value comparison.
@@ -51,13 +53,43 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
 
     const value = self._getValue();
-    // For objects, always fire - the reference may be the same but contents may have changed
-    // (mutation through setProperty on child paths). For primitives, use strict equality.
-    const hasChanged = typeof value === "object" && value !== null ? true : self.oValue !== value;
-    if (hasChanged || forceUpdate) {
+    this._applyUpdate(self, value, forceUpdate);
+  }
+
+  /**
+   * Fast-path update invoked by FlushQueue with the already-read signal value.
+   * Avoids redundant getProperty/_getObject traversal when watching the exact bound path.
+   *
+   * @internal
+   */
+  _checkUpdateFromSignal(signalValue: unknown): void {
+    const self = asInternal(this);
+    if (self.bSuspended) {
+      return;
+    }
+
+    const value = this._isDirectSignal ? signalValue : self._getValue();
+    this._applyUpdate(self, value, false);
+  }
+
+  private _applyUpdate(
+    self: ClientPropertyBindingInternal,
+    value: unknown,
+    forceUpdate?: boolean,
+  ): void {
+    const hasChanged =
+      typeof value === "object" && value !== null ? true : !Object.is(self.oValue, value);
+    const isRelative = this.isRelative();
+    const currentResolvedPath = isRelative ? this.getResolvedPath() : undefined;
+    const pathChanged = isRelative && this._previousResolvedPath !== currentResolvedPath;
+
+    if (hasChanged || pathChanged || forceUpdate) {
       self.oValue = value;
       self.getDataState().setValue(self.oValue);
       self.checkDataState();
+      if (isRelative) {
+        this._previousResolvedPath = currentResolvedPath;
+      }
       self._fireChange({ reason: ChangeReason.Change });
     }
   }
@@ -91,9 +123,16 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     this.unsubscribe();
 
     const resolvedPath = this.getResolvedPath();
+    if (this.isRelative()) {
+      this._previousResolvedPath = resolvedPath;
+    }
     if (!resolvedPath) return;
 
     const signal = this.oModel.getSignal(resolvedPath);
+    const self = asInternal(this);
+    const propName = self.sPath.substring(self.sPath.lastIndexOf("/") + 1);
+    this._isDirectSignal =
+      propName !== "__name__" && this.oModel._getExactSignal(resolvedPath) === signal;
 
     this.watcher = new Signal.subtle.Watcher(() => {
       scheduleFlush(this, signal);
@@ -112,6 +151,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       this._resubscribeCb = null;
       this._subscribedPath = null;
     }
+    this._isDirectSignal = false;
     cancelFlush(this);
     this.watcher = teardownWatcher(this.watcher);
   }
