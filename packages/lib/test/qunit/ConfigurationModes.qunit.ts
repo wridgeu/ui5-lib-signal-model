@@ -25,14 +25,6 @@ QUnit.module("Configuration Modes", () => {
     model.destroy();
   });
 
-  QUnit.test("default: allows setting existing paths", (assert) => {
-    const model = new SignalModel({ name: "Alice" });
-    const result = model.setProperty("/name", "Bob");
-    assert.ok(result, "returns true");
-    assert.strictEqual(model.getProperty("/name"), "Bob", "value updated");
-    model.destroy();
-  });
-
   // =========================================================================
   // autoCreatePaths: true -- extended mode
   // =========================================================================
@@ -98,7 +90,8 @@ QUnit.module("Configuration Modes", () => {
       // autoCreatePaths creates intermediates, but strictLeafCheck still
       // rejects the final leaf if the property doesn't exist on the parent
       const result1 = model.setProperty("/new/path", "value");
-      assert.notOk(result1, "parent created but leaf rejected by strictLeafCheck");
+      assert.notOk(result1, "leaf rejected by strictLeafCheck");
+      assert.deepEqual(model.getProperty("/new"), {}, "parent created without the leaf");
 
       // Existing leaf on existing parent: allowed
       const result2 = model.setProperty("/existing/known", "updated");

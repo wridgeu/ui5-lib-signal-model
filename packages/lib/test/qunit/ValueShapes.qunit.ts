@@ -23,16 +23,16 @@ QUnit.module("Value Shapes", () => {
     const binding = signal.bindProperty("/name");
     assert.strictEqual(binding.getValue(), null, "binding reads null");
 
-    let changed = false;
+    let changed = 0;
     binding.attachChange(() => {
-      changed = true;
+      changed++;
     });
 
     // Setting null to a different value should fire
     signal.setProperty("/name", "Bob");
 
     setTimeout(() => {
-      assert.ok(changed, "binding fires when changing from null to value");
+      assert.strictEqual(changed, 1, "binding fires when changing from null to value");
       signal.destroy();
       json.destroy();
       done();
@@ -435,7 +435,7 @@ QUnit.module("Value Shapes", () => {
         // object was mutated between getProperty and setProperty, so it
         // always notifies. The UI renders correctly in both cases.
         assert.strictEqual(jsonCount, 0, "JSONModel does not fire (deepEqual suppresses)");
-        assert.ok(signalCount >= jsonCount, "SignalModel fires >= JSONModel (intentional)");
+        assert.strictEqual(signalCount, 1, "SignalModel fires once (intentional)");
 
         // Both return the same data
         assert.deepEqual(signalBinding.getValue(), jsonBinding.getValue(), "values match");

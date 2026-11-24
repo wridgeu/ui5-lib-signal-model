@@ -86,11 +86,17 @@ QUnit.module("loadData", () => {
     const done = assert.async();
     const model = new SignalModel({ name: "Alice" });
 
-    model.dataLoaded().then(() => {
-      assert.ok(true, "dataLoaded resolves immediately");
+    let resolved = 0;
+    void model.dataLoaded().then(() => {
+      resolved++;
+    });
+
+    // "Immediately" = within the microtask queue, before any timer or network task
+    setTimeout(() => {
+      assert.strictEqual(resolved, 1, "dataLoaded resolved before the next task");
       model.destroy();
       done();
-    });
+    }, 0);
   });
 
   // =========================================================================
@@ -100,14 +106,15 @@ QUnit.module("loadData", () => {
   QUnit.test("requestSent event fires before load", (assert) => {
     const done = assert.async();
     const model = new SignalModel<Record<string, unknown>>();
-    let sentFired = false;
+    let sent: Record<string, unknown> | undefined;
 
-    model.attachRequestSent(() => {
-      sentFired = true;
+    model.attachRequestSent((oEvent) => {
+      sent = oEvent.getParameters() as Record<string, unknown>;
     });
 
     model.attachRequestCompleted(() => {
-      assert.ok(sentFired, "requestSent fired before requestCompleted");
+      assert.strictEqual(sent?.url, SAMPLE_URL, "requestSent fired first, with the URL");
+      assert.strictEqual(sent?.type, "GET", "requestSent carries the HTTP method");
       model.destroy();
       done();
     });
@@ -137,8 +144,8 @@ QUnit.module("loadData", () => {
     const json = new JSONModel();
     const signal = new SignalModel<Record<string, unknown>>();
 
-    let jsonDone = false;
-    let signalDone = false;
+    let jsonDone = 0;
+    let signalDone = 0;
 
     function checkBoth(): void {
       if (jsonDone && signalDone) {
@@ -150,11 +157,11 @@ QUnit.module("loadData", () => {
     }
 
     json.attachRequestCompleted(() => {
-      jsonDone = true;
+      jsonDone++;
       checkBoth();
     });
     signal.attachRequestCompleted(() => {
-      signalDone = true;
+      signalDone++;
       checkBoth();
     });
 
@@ -168,8 +175,8 @@ QUnit.module("loadData", () => {
     const json = new JSONModel(JSON.parse(JSON.stringify(initial)));
     const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(initial)));
 
-    let jsonDone = false;
-    let signalDone = false;
+    let jsonDone = 0;
+    let signalDone = 0;
 
     function checkBoth(): void {
       if (jsonDone && signalDone) {
@@ -183,11 +190,11 @@ QUnit.module("loadData", () => {
     }
 
     json.attachRequestCompleted(() => {
-      jsonDone = true;
+      jsonDone++;
       checkBoth();
     });
     signal.attachRequestCompleted(() => {
-      signalDone = true;
+      signalDone++;
       checkBoth();
     });
 
@@ -324,7 +331,7 @@ QUnit.module("loadData", () => {
     model.attachRequestFailed((oEvent) => {
       const params = oEvent.getParameters();
       assert.ok(params.message, "error has message");
-      assert.ok(params.statusCode !== undefined, "error has statusCode");
+      assert.strictEqual(params.statusCode, "404", "statusCode is the HTTP status");
       assert.ok(params.statusText, "error has statusText");
       model.destroy();
       done();
@@ -417,23 +424,20 @@ QUnit.module("loadData", () => {
   // loadData after destroy
   // =========================================================================
 
-  QUnit.test("loadData after destroy does not set data", (assert) => {
-    const done = assert.async();
+  QUnit.test("loadData after destroy sends no request", (assert) => {
     const model = new SignalModel<Record<string, unknown>>({ name: "before" });
     model.destroy();
 
-    // loadData on a destroyed model -- should not update data or throw
-    try {
-      model.loadData(SAMPLE_URL);
-    } catch {
-      // may throw -- that's acceptable
-    }
+    const originalFetch = window.fetch;
+    let calls = 0;
+    window.fetch = (input, init) => {
+      calls++;
+      return originalFetch(input, init);
+    };
+    void model.loadData(SAMPLE_URL);
+    window.fetch = originalFetch;
 
-    setTimeout(() => {
-      // Data should still be the pre-destroy value (or empty if destroy cleared it)
-      assert.notStrictEqual(model.getProperty("/name"), "Alice", "loaded data was not applied");
-      done();
-    }, 200);
+    assert.strictEqual(calls, 0, "no request sent for a destroyed model");
   });
 
   // =========================================================================
@@ -518,5 +522,68 @@ QUnit.module("loadData", () => {
     };
 
     model.loadData(SAMPLE_URL, params);
+  });
+
+  // =========================================================================
+  // Cache-buster and destroy while loading (fetch stubbed to observe/control it)
+  // =========================================================================
+
+  QUnit.test("cache=false and forceNoCache append a cache-buster to the URL", (assert) => {
+    const done = assert.async();
+    const urls: string[] = [];
+    const originalFetch = window.fetch;
+    window.fetch = (input, init) => {
+      urls.push(String(input));
+      return originalFetch(input, init);
+    };
+    const model = new SignalModel<Record<string, unknown>>();
+    model.loadData(SAMPLE_URL);
+    model.loadData(SAMPLE_URL, undefined, true, "GET", false, false);
+    model.forceNoCache(true);
+    model.loadData(SAMPLE_URL);
+    window.fetch = originalFetch;
+
+    assert.strictEqual(urls[0], SAMPLE_URL, "cached by default: URL untouched");
+    assert.ok(/\?_=\d+$/.test(urls[1]), "cache=false appends a cache-buster: " + urls[1]);
+    assert.ok(/\?_=\d+$/.test(urls[2]), "forceNoCache(true) appends a cache-buster: " + urls[2]);
+
+    void model.dataLoaded().then(() => {
+      model.destroy();
+      done();
+    });
+  });
+
+  QUnit.test("a response that is ready before destroy is not applied after it", (assert) => {
+    const done = assert.async();
+    const originalFetch = window.fetch;
+    let calls = 0;
+    // The first request stays pending until it is aborted; the second resolves at once
+    // and then waits behind the first in the import chain.
+    window.fetch = (_input, init) =>
+      calls++ === 0
+        ? new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+          })
+        : Promise.resolve(new Response(JSON.stringify({ name: "late" })));
+    const model = new SignalModel<Record<string, unknown>>({ name: "before" });
+    // destroy() detaches event listeners, so observe the fire call itself
+    let failedFired = 0;
+    model.fireRequestFailed = () => {
+      failedFired++;
+      return model;
+    };
+    model.loadData(SAMPLE_URL);
+    model.loadData(SAMPLE_URL);
+    window.fetch = originalFetch;
+
+    setTimeout(() => {
+      model.destroy(); // aborts the first request, which releases the second
+      setTimeout(() => {
+        const data = model.getData() as Record<string, unknown> | undefined;
+        assert.notStrictEqual(data?.name, "late", "queued response was not applied");
+        assert.strictEqual(failedFired, 0, "aborted request fires no requestFailed after destroy");
+        done();
+      }, 50);
+    }, 50);
   });
 });

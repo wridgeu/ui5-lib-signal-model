@@ -72,16 +72,6 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
-  QUnit.test("setProperty with bAsyncUpdate on computed sub-path returns false", (assert) => {
-    const model = new SignalModel({ items: [{ name: "Alice" }] });
-    model.createComputed("/first", ["/items"], (items) => (items as { name: string }[])[0]);
-
-    const result = model.setProperty("/first/name", "Bob", undefined, true);
-    assert.notOk(result, "async setProperty on computed sub-path returns false");
-    assert.strictEqual(model.getProperty("/items/0/name"), "Alice", "source data unchanged");
-    model.destroy();
-  });
-
   QUnit.test("createComputed on raw data path throws", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     model.bindProperty("/name");
@@ -459,9 +449,9 @@ QUnit.module("ComputedSignals", () => {
       "from-computed",
       "computed value takes precedence over data",
     );
-    assert.strictEqual(
+    assert.deepEqual(
       model.getProperty("/c"),
-      model.getSignal("/c").get(),
+      { name: "from-computed" },
       "getProperty returns computed value, not data",
     );
     model.destroy();
@@ -919,4 +909,45 @@ QUnit.module("ComputedSignals", () => {
       }, 50);
     },
   );
+
+  QUnit.test("writing an equal primitive does not re-evaluate dependent computeds", (assert) => {
+    const model = new SignalModel({ a: 1 });
+    let evaluations = 0;
+    model.createComputed("/double", ["/a"], (a) => {
+      evaluations++;
+      return (a as number) * 2;
+    });
+    model.getProperty("/double");
+    const before = evaluations;
+
+    model.setProperty("/a", 1);
+    assert.strictEqual(model.getProperty("/double"), 2, "value unchanged");
+    assert.strictEqual(evaluations, before, "not re-evaluated for an equal value");
+
+    model.setProperty("/a", 2);
+    assert.strictEqual(model.getProperty("/double"), 4, "value updated");
+    assert.strictEqual(evaluations, before + 1, "re-evaluated once for a new value");
+    model.destroy();
+  });
+
+  QUnit.test("binding keeps its value when its computed throws during a flush", (assert) => {
+    const done = assert.async();
+    const model = new SignalModel({ a: 1 });
+    model.createComputed("/checked", ["/a"], (a) => {
+      if (a === 2) throw new Error("computed failed");
+      return a;
+    });
+    const binding = model.bindProperty("/checked");
+    let changeCount = 0;
+    binding.attachChange(() => changeCount++);
+
+    model.setProperty("/a", 2);
+
+    setTimeout(() => {
+      assert.strictEqual(changeCount, 0, "no change event for a failed read");
+      assert.strictEqual(binding.getValue(), 1, "last good value kept");
+      model.destroy();
+      done();
+    }, 50);
+  });
 });

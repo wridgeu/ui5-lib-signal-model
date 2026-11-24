@@ -131,15 +131,15 @@ QUnit.module("SignalListBinding", () => {
     });
     const binding = model.bindList("/items");
     binding.getContexts(0, 10);
-    let changed = false;
+    let changed = 0;
 
     binding.attachChange(() => {
-      changed = true;
+      changed++;
     });
     model.setProperty("/other", "newValue");
 
     setTimeout(() => {
-      assert.notOk(changed, "list binding not notified for unrelated change");
+      assert.strictEqual(changed, 0, "list binding not notified for unrelated change");
       model.destroy();
       done();
     }, 50);
@@ -188,7 +188,7 @@ QUnit.module("SignalListBinding", () => {
       assert.strictEqual(changeCount, 0, "no change while suspended");
       binding.resume();
       setTimeout(() => {
-        assert.ok(changeCount > 0, "change fired on resume");
+        assert.strictEqual(changeCount, 1, "change fired on resume");
         const contexts = binding.getContexts(0, 10);
         assert.strictEqual(contexts.length, 2, "list has 2 items after resume");
         model.destroy();
@@ -222,11 +222,19 @@ QUnit.module("SignalListBinding", () => {
     binding.setContext(ctx1!);
 
     setTimeout(() => {
-      assert.ok(changeCount > 0, "change fired after setContext");
+      assert.strictEqual(changeCount, 1, "change fired after setContext");
       contexts = binding.getContexts(0, 10);
       assert.strictEqual(contexts.length, 2, "dept 1 has 2 employees");
-      model.destroy();
-      done();
+
+      // The binding must now follow the new path, not only show its data once
+      changeCount = 0;
+      model.setProperty("/departments/1/employees", [{ name: "Dave" }]);
+      setTimeout(() => {
+        assert.strictEqual(changeCount, 1, "write to the new path notifies the binding");
+        assert.strictEqual(binding.getContexts(0, 10).length, 1, "new data is visible");
+        model.destroy();
+        done();
+      }, 50);
     }, 50);
   });
 
@@ -283,16 +291,16 @@ QUnit.module("SignalListBinding", () => {
     });
     const binding = model.bindList("/items");
     binding.getContexts(0, 10);
-    let changed = false;
+    let changed = 0;
 
     binding.attachChange(() => {
-      changed = true;
+      changed++;
     });
 
     model.setData({ items: [{ name: "A" }, { name: "B" }, { name: "C" }] });
 
     setTimeout(() => {
-      assert.ok(changed, "list binding notified by setData");
+      assert.strictEqual(changed, 1, "list binding notified by setData");
       const contexts = binding.getContexts(0, 10);
       assert.strictEqual(contexts.length, 3, "list updated to 3 items");
       model.destroy();
@@ -322,5 +330,20 @@ QUnit.module("SignalListBinding", () => {
     });
 
     model.setProperty("/items", null);
+  });
+
+  QUnit.test("checkUpdate without force does not fire for an unchanged list", (assert) => {
+    const model = new SignalModel({ items: [{ id: 1 }, { id: 2 }] });
+    const binding = model.bindList("/items");
+    binding.getContexts(0, 10);
+    let changeCount = 0;
+    binding.attachChange(() => changeCount++);
+
+    binding.checkUpdate();
+    assert.strictEqual(changeCount, 0, "no change event for an unchanged list");
+
+    binding.checkUpdate(true);
+    assert.strictEqual(changeCount, 1, "forced update fires");
+    model.destroy();
   });
 });

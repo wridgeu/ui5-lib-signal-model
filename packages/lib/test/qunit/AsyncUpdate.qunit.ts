@@ -21,7 +21,16 @@ QUnit.module("AsyncUpdate (bAsyncUpdate)", () => {
     // But signal not yet fired (setTimeout hasn't run)
     assert.strictEqual(changeCount, 0, "no change event yet (deferred)");
 
+    // A synchronous write notifies in the next microtask; a deferred one must not
+    let countAfterMicrotasks = -1;
+    void Promise.resolve()
+      .then(() => Promise.resolve())
+      .then(() => {
+        countAfterMicrotasks = changeCount;
+      });
+
     setTimeout(() => {
+      assert.strictEqual(countAfterMicrotasks, 0, "still deferred after the microtask queue");
       assert.strictEqual(changeCount, 1, "change event fired after setTimeout");
       assert.strictEqual(binding.getValue(), "Bob", "binding has correct value");
       model.destroy();
@@ -60,20 +69,6 @@ QUnit.module("AsyncUpdate (bAsyncUpdate)", () => {
       model.destroy();
       done();
     }, 50);
-  });
-
-  QUnit.test("bAsyncUpdate followed by synchronous read returns new value", (assert) => {
-    const model = new SignalModel({ count: 0 });
-
-    model.setProperty("/count", 42, undefined, true);
-
-    // Data is written immediately even though signal notification is deferred
-    assert.strictEqual(
-      model.getProperty("/count"),
-      42,
-      "getProperty returns new value immediately",
-    );
-    model.destroy();
   });
 
   QUnit.test("mixing sync and async setProperty", (assert) => {

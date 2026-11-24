@@ -15,21 +15,21 @@ QUnit.module("mergeProperty", () => {
     const model = new SignalModel({ customer: { name: "Alice", age: 28 } });
     const nameBinding = model.bindProperty("/customer/name");
     const ageBinding = model.bindProperty("/customer/age");
-    let nameChanged = false;
-    let ageChanged = false;
+    let nameChanged = 0;
+    let ageChanged = 0;
 
     nameBinding.attachChange(() => {
-      nameChanged = true;
+      nameChanged++;
     });
     ageBinding.attachChange(() => {
-      ageChanged = true;
+      ageChanged++;
     });
 
     model.mergeProperty("/customer", { age: 30 });
 
     setTimeout(() => {
-      assert.notOk(nameChanged, "name binding NOT notified");
-      assert.ok(ageChanged, "age binding notified");
+      assert.strictEqual(nameChanged, 0, "name binding NOT notified");
+      assert.strictEqual(ageChanged, 1, "age binding notified");
       model.destroy();
       done();
     }, 50);
@@ -39,15 +39,15 @@ QUnit.module("mergeProperty", () => {
     const done = assert.async();
     const model = new SignalModel({ customer: { name: "Alice", age: 28 } });
     const customerBinding = model.bindProperty("/customer");
-    let customerChanged = false;
+    let customerChanged = 0;
 
     customerBinding.attachChange(() => {
-      customerChanged = true;
+      customerChanged++;
     });
     model.mergeProperty("/customer", { age: 30 });
 
     setTimeout(() => {
-      assert.ok(customerChanged, "parent binding notified on merge");
+      assert.strictEqual(customerChanged, 1, "parent binding notified on merge");
       model.destroy();
       done();
     }, 50);
@@ -91,6 +91,14 @@ QUnit.module("mergeProperty", () => {
     assert.strictEqual(model.getProperty("/config/display/theme"), "dark", "theme preserved");
     assert.strictEqual(model.getProperty("/config/display/fontSize"), 16, "fontSize updated");
     assert.strictEqual(model.getProperty("/config/network/timeout"), 5000, "network preserved");
+    model.destroy();
+  });
+
+  QUnit.test("setData with merge ignores non-object payloads", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ name: "Alice" });
+    model.setData("abc" as never, true);
+    model.setData(null as never, true);
+    assert.deepEqual(model.getData(), { name: "Alice" }, "data unchanged");
     model.destroy();
   });
 });

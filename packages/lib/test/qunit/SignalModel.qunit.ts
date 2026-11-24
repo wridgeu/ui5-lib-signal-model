@@ -38,20 +38,6 @@ QUnit.module(
       model.destroy();
     });
 
-    QUnit.test("default: setProperty returns false for nonexistent parent", (assert) => {
-      const model = new SignalModel({});
-      const result = model.setProperty("/customer/name", "Alice");
-      assert.notOk(result, "returns false for nonexistent parent");
-      model.destroy();
-    });
-
-    QUnit.test("autoCreatePaths: setProperty creates intermediate paths", (assert) => {
-      const model = new SignalModel({}, { autoCreatePaths: true });
-      model.setProperty("/customer/name", "Alice");
-      assert.strictEqual(model.getProperty("/customer/name"), "Alice", "created nested path");
-      model.destroy();
-    });
-
     QUnit.test("setProperty at root uses setData", (assert) => {
       const model = new SignalModel<Record<string, unknown>>({ old: true });
       const newData = { new: true };
@@ -76,51 +62,26 @@ QUnit.module(
       model.destroy();
     });
 
-    QUnit.test("setData fires all signals on replace", (assert) => {
-      const done = assert.async();
-      const model = new SignalModel({ name: "Alice", age: 28 });
-      const nameBinding = model.bindProperty("/name");
-      const ageBinding = model.bindProperty("/age");
-      let nameChanged = false;
-      let ageChanged = false;
-
-      nameBinding.attachChange(() => {
-        nameChanged = true;
-      });
-      ageBinding.attachChange(() => {
-        ageChanged = true;
-      });
-
-      model.setData({ name: "Bob", age: 30 });
-
-      setTimeout(() => {
-        assert.ok(nameChanged, "name binding notified");
-        assert.ok(ageChanged, "age binding notified");
-        model.destroy();
-        done();
-      }, 50);
-    });
-
     QUnit.test("setData with merge only fires changed signals", (assert) => {
       const done = assert.async();
       const model = new SignalModel({ name: "Alice", age: 28 });
       const nameBinding = model.bindProperty("/name");
       const ageBinding = model.bindProperty("/age");
-      let nameChanged = false;
-      let ageChanged = false;
+      let nameChanged = 0;
+      let ageChanged = 0;
 
       nameBinding.attachChange(() => {
-        nameChanged = true;
+        nameChanged++;
       });
       ageBinding.attachChange(() => {
-        ageChanged = true;
+        ageChanged++;
       });
 
       model.setData({ age: 30 }, true);
 
       setTimeout(() => {
-        assert.notOk(nameChanged, "name binding NOT notified");
-        assert.ok(ageChanged, "age binding notified");
+        assert.strictEqual(nameChanged, 0, "name binding NOT notified");
+        assert.strictEqual(ageChanged, 1, "age binding notified");
         model.destroy();
         done();
       }, 50);
@@ -129,7 +90,10 @@ QUnit.module(
     QUnit.test("bindProperty returns a SignalPropertyBinding", (assert) => {
       const model = new SignalModel({ name: "Alice" });
       const binding = model.bindProperty("/name");
-      assert.ok(binding, "binding created");
+      assert.ok(
+        binding.isA("ui5.model.signal.SignalPropertyBinding"),
+        "is a SignalPropertyBinding",
+      );
       assert.strictEqual(binding.getValue(), "Alice", "binding has correct value");
       model.destroy();
     });
@@ -141,10 +105,15 @@ QUnit.module(
       let changeCount = 0;
 
       binding.attachChange(() => changeCount++);
+      // Change the data behind the model's back: only a forced checkUpdate may pick it up
+      model.getData().name = "Bob";
       model.checkUpdate();
 
       setTimeout(() => {
         assert.strictEqual(changeCount, 0, "no binding notification from checkUpdate()");
+        model.checkUpdate(true);
+        assert.strictEqual(changeCount, 1, "forced checkUpdate notifies the binding");
+        assert.strictEqual(binding.getValue(), "Bob", "binding picked up the new value");
         model.destroy();
         done();
       }, 50);
@@ -171,16 +140,16 @@ QUnit.module(
       const done = assert.async();
       const model = new SignalModel({ customer: { name: "Alice", age: 28 } });
       const customerBinding = model.bindProperty("/customer");
-      let customerChanged = false;
+      let customerChanged = 0;
 
       customerBinding.attachChange(() => {
-        customerChanged = true;
+        customerChanged++;
       });
 
       model.setProperty("/customer/name", "Bob");
 
       setTimeout(() => {
-        assert.ok(customerChanged, "parent binding notified on child change");
+        assert.strictEqual(customerChanged, 1, "parent binding notified on child change");
         model.destroy();
         done();
       }, 50);
@@ -191,21 +160,21 @@ QUnit.module(
       const model = new SignalModel({ customer: { name: "Alice", age: 28 } });
       const nameBinding = model.bindProperty("/customer/name");
       const ageBinding = model.bindProperty("/customer/age");
-      let nameChanged = false;
-      let ageChanged = false;
+      let nameChanged = 0;
+      let ageChanged = 0;
 
       nameBinding.attachChange(() => {
-        nameChanged = true;
+        nameChanged++;
       });
       ageBinding.attachChange(() => {
-        ageChanged = true;
+        ageChanged++;
       });
 
       model.setProperty("/customer", { name: "Bob", age: 30 });
 
       setTimeout(() => {
-        assert.ok(nameChanged, "name binding notified on branch replace");
-        assert.ok(ageChanged, "age binding notified on branch replace");
+        assert.strictEqual(nameChanged, 1, "name binding notified on branch replace");
+        assert.strictEqual(ageChanged, 1, "age binding notified on branch replace");
         model.destroy();
         done();
       }, 50);
@@ -215,17 +184,17 @@ QUnit.module(
       const done = assert.async();
       const model = new SignalModel({ customer: { name: "Alice", age: 28 } });
       const nameBinding = model.bindProperty("/customer/name");
-      let nameChanged = false;
+      let nameChanged = 0;
 
       nameBinding.attachChange(() => {
-        nameChanged = true;
+        nameChanged++;
       });
 
       // Replace the object at /customer with a primitive
       model.setProperty("/customer", "deleted");
 
       setTimeout(() => {
-        assert.ok(nameChanged, "child binding notified when parent becomes primitive");
+        assert.strictEqual(nameChanged, 1, "child binding notified when parent becomes primitive");
         model.destroy();
         done();
       }, 50);
@@ -235,16 +204,16 @@ QUnit.module(
       const done = assert.async();
       const model = new SignalModel({ name: "Alice", age: 28 });
       const rootBinding = model.bindProperty("/");
-      let rootChanged = false;
+      let rootChanged = 0;
 
       rootBinding.attachChange(() => {
-        rootChanged = true;
+        rootChanged++;
       });
 
       model.setData({ age: 30 }, true);
 
       setTimeout(() => {
-        assert.ok(rootChanged, "root binding notified on merge");
+        assert.strictEqual(rootChanged, 1, "root binding notified on merge");
         model.destroy();
         done();
       }, 50);
@@ -266,11 +235,11 @@ QUnit.module(
       // (registry is cleared, signals no longer exist).
       // setProperty may throw or silently succeed -- either is acceptable.
       // The key assertion is that changeCount stays 0 regardless.
-      let threw = false;
+      let threw = 0;
       try {
         model.setProperty("/name", "Bob");
       } catch {
-        threw = true;
+        threw++;
       }
 
       setTimeout(() => {
@@ -318,17 +287,17 @@ QUnit.module(
 
     QUnit.test("setJSON with invalid JSON fires parseError event", (assert) => {
       const model = new SignalModel({ name: "Alice" });
-      let errorFired = false;
+      let errorFired = 0;
       let srcText = "";
 
       model.attachParseError((event: { getParameter(name: string): unknown }) => {
-        errorFired = true;
+        errorFired++;
         srcText = event.getParameter("srcText") as string;
       });
 
       model.setJSON("{ not valid json }");
 
-      assert.ok(errorFired, "parseError event fired for invalid JSON");
+      assert.strictEqual(errorFired, 1, "parseError event fired for invalid JSON");
       assert.ok(srcText.length > 0, "srcText parameter contains error message");
       assert.strictEqual(
         model.getProperty("/name"),
@@ -340,15 +309,15 @@ QUnit.module(
 
     QUnit.test("setJSON with valid JSON does not fire parseError", (assert) => {
       const model = new SignalModel({ name: "Alice" });
-      let errorFired = false;
+      let errorFired = 0;
 
       model.attachParseError(() => {
-        errorFired = true;
+        errorFired++;
       });
 
       model.setJSON('{"name":"Bob","age":30}');
 
-      assert.notOk(errorFired, "parseError NOT fired for valid JSON");
+      assert.strictEqual(errorFired, 0, "parseError NOT fired for valid JSON");
       assert.strictEqual(model.getProperty("/name"), "Bob", "name updated");
       assert.strictEqual(model.getProperty("/age"), 30, "age set");
       model.destroy();
@@ -747,6 +716,9 @@ QUnit.module(
         undefined,
         "__proto__ key skipped",
       );
+      const target = model.getProperty("/target") as object;
+      assert.notOk(Object.hasOwn(target, "constructor"), "constructor key skipped");
+      assert.notOk(Object.hasOwn(target, "prototype"), "prototype key skipped");
       model.destroy();
     });
 

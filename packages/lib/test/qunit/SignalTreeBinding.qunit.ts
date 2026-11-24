@@ -228,11 +228,19 @@ QUnit.module("SignalTreeBinding", () => {
     binding.setContext(ctxB!);
 
     setTimeout(() => {
-      assert.ok(changeCount > 0, "change fired after setContext");
+      assert.strictEqual(changeCount, 1, "change fired after setContext");
       roots = binding.getRootContexts();
       assert.strictEqual(roots.length, 2, "section B has 2 roots");
-      model.destroy();
-      done();
+
+      // The binding must now follow the new path, not only show its data once
+      changeCount = 0;
+      model.setProperty("/sections/b/tree", [{ name: "B-Only", children: [] }]);
+      setTimeout(() => {
+        assert.strictEqual(changeCount, 1, "write to the new path notifies the binding");
+        assert.strictEqual(binding.getRootContexts().length, 1, "new data is visible");
+        model.destroy();
+        done();
+      }, 50);
     }, 50);
   });
 
@@ -270,16 +278,16 @@ QUnit.module("SignalTreeBinding", () => {
     });
     const binding = model.bindTree("/tree", undefined, [], { arrayNames: ["children"] }, []);
     binding.getRootContexts();
-    let changed = false;
+    let changed = 0;
 
     binding.attachChange(() => {
-      changed = true;
+      changed++;
     });
 
     model.setData({ tree: [{ name: "Root" }, { name: "New" }] });
 
     setTimeout(() => {
-      assert.ok(changed, "tree binding notified by setData");
+      assert.strictEqual(changed, 1, "tree binding notified by setData");
       const roots = binding.getRootContexts();
       assert.strictEqual(roots.length, 2, "tree updated to 2 roots");
       model.destroy();
