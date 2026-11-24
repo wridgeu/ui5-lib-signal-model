@@ -50,5 +50,10 @@
     "rimraf": "^6.1.4",
     "typescript": "~6.0.3",
     "wdio-qunit-service": "^2.0.2"
+  },
+  "overrides": {
+    "extract-zip": {
+      "yauzl": "^3.4.0"
+    }
   }
 }
