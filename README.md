@@ -2,7 +2,7 @@
   <a href="https://www.npmjs.com/package/ui5-lib-signal-model"><img src="https://img.shields.io/npm/v/ui5-lib-signal-model.svg" alt="npm"></a>
   <a href="https://npmx.dev/package/ui5-lib-signal-model"><img src="https://img.shields.io/npm/v/ui5-lib-signal-model?label=npmx.dev&color=0a0a0a" alt="npmx"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
-  <a href="https://openui5.org/"><img src="https://img.shields.io/badge/OpenUI5-1.144.0-green.svg" alt="UI5"></a>
+  <a href="https://openui5.org/"><img src="https://img.shields.io/badge/OpenUI5-1.120%2B-green.svg" alt="UI5"></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-blue.svg" alt="TypeScript"></a>
   <a href="https://github.com/wridgeu/ui5-lib-signal-model/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/wridgeu/ui5-lib-signal-model/ci.yml?branch=main&label=CI" alt="CI"></a>
 </p>
@@ -109,9 +109,11 @@ npm run clean  # remove dist and .ui5 caches
 
 ### Benchmark
 
-A self-contained benchmark page compares SignalModel vs JSONModel across 22 scenarios. With default synchronous `setProperty`, "Update all N bindings" shows ~17x improvement at 2000 bindings. The advantage scales super-linearly: JSONModel's cost is O(n²) while SignalModel's is O(n). For full data replacement and list/table/tree operations, both models perform equivalently because DOM rendering cost dominates.
+A self-contained benchmark suite compares SignalModel vs JSONModel across 22 scenarios on OpenUI5 1.154.0. With default synchronous `setProperty`, "Update all N bindings" is **~47x faster** at 2,000 bindings (25.35 ms vs 1,195.35 ms). JSONModel's cost is O(n²) while SignalModel's is O(n). Across all 22 scenarios, 9 are faster, 13 are ~equal, and 0 are slower.
 
-See the [benchmark documentation](packages/lib/test/benchmark/README.md) for the full analysis, methodology, and results.
+![SignalModel vs JSONModel Benchmark](docs/benchmark-results.svg)
+
+See the [benchmark documentation](packages/lib/test/benchmark/README.md) for the full 22-scenario breakdown, methodology, and analysis.
 
 ```bash
 npm run bench                                    # CLI -- headless
