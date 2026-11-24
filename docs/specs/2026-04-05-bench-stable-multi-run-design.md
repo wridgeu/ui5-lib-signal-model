@@ -53,12 +53,13 @@ SignalModel vs JSONModel -- 2000 bindings, 4 runs (500 iter, 20 rounds)
 
 Each run's ratio is computed from that run's JSON data using the same logic as the existing `fmtRatio` in `bench.spec.mjs`:
 
-1. Both medians < 1ms: `~equal` (resolution floor).
-2. `|jsonMedian - signalMedian| < pooledSD`: `~equal` (statistical insignificance).
-3. Signal median <= 0: `~equal` (division guard).
-4. `jsonMedian / signalMedian >= 1.1`: `{ratio}x faster`.
-5. `jsonMedian / signalMedian <= 0.9`: `{ratio}x slower`.
-6. Otherwise: `~equal`.
+1. `|jsonMedian - signalMedian| < 3 * standardError`: `~equal` (statistical insignificance).
+2. Signal median <= 0: `~equal` (division guard).
+3. `jsonMedian / signalMedian >= 1.1`: `{ratio}x faster`.
+4. `jsonMedian / signalMedian <= 0.9`: `{ratio}x slower`.
+5. Otherwise: `~equal`.
+
+There is no sub-millisecond cutoff: each sample repeats its operation for at least 20 ms, so per-operation medians far below 1 ms are still well above timer resolution.
 
 Cell display: `~equal`, `13.1x faster`, or `1.3x slower` (no ANSI color in cells, color only on the verdict column).
 
@@ -66,17 +67,17 @@ Cell display: `~equal`, `13.1x faster`, or `1.3x slower` (no ANSI color in cells
 
 Each run is classified into a direction: `faster`, `slower`, or `equal`.
 
-- `equal` is **neutral** -- ignored when determining consistency.
-- If all non-equal directions agree, or all runs are equal: **stable**.
 - If both `faster` and `slower` appear across runs: **noise**.
+- A direction is only claimed when **more than half** of the runs show it. A win or loss seen in a minority of runs (the rest `equal`) is reported as `stable: ~equal`, so a single lucky run cannot produce a "stable" win.
+- Otherwise: **stable**.
 
 ### Verdict Labels
 
 | Condition                          | Label                             | Color  |
 | ---------------------------------- | --------------------------------- | ------ |
-| All runs `equal`                   | `stable: ~equal`                  | dim    |
-| Non-equal runs all `faster`        | `stable: ~{median_ratio}x faster` | green  |
-| Non-equal runs all `slower`        | `stable: ~{median_ratio}x slower` | red    |
+| Half or more runs `equal`          | `stable: ~equal`                  | dim    |
+| Majority `faster`, none `slower`   | `stable: ~{median_ratio}x faster` | green  |
+| Majority `slower`, none `faster`   | `stable: ~{median_ratio}x slower` | red    |
 | Both `faster` and `slower` present | `noise`                           | yellow |
 
 The `{median_ratio}` is the median of the ratios from all non-equal runs, displayed with one decimal place.

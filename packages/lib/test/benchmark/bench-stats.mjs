@@ -94,14 +94,16 @@ export function stats(arr) {
  * Compute the ratio and direction between SignalModel and JSONModel stats.
  *
  * Significance checks (in order):
- * 1. Both medians < 1ms → equal (resolution floor of `performance.now()`)
- * 2. Difference below standard error at 95% confidence → equal
- * 3. Signal median ≤ 0 → equal (division guard)
- * 4. Ratio below 10% threshold (1.10x) → equal
+ * 1. Difference below 3 standard errors → equal
+ * 2. Signal median ≤ 0 → equal (division guard)
+ * 3. Ratio below 10% threshold (1.10x) → equal
  *
  * The standard error is computed as:
  *   SE = sqrt(σ_signal² / n_signal + σ_json² / n_json)
- * and the threshold uses 1.96 * SE (≈ 95% confidence z-score).
+ * 3 * SE (rather than 1.96) leaves headroom for the small sample counts
+ * (~10 per model) and for running 22 comparisons per report. There is no
+ * sub-millisecond cutoff: every sample spans at least 20 ms of repeated
+ * operations, so small per-operation medians are well above timer resolution.
  *
  * When sample counts are unavailable (n is undefined or 0), falls back
  * to the raw pooled SD for backwards compatibility with older result files.
@@ -114,15 +116,13 @@ export function computeRatio(signal, json) {
   const sm = signal.median;
   const jm = json.median;
 
-  if (sm < 1 && jm < 1) return { direction: "equal", ratio: 1 };
-
   // Use standard error when sample counts are available, raw SD otherwise
   const nSignal = signal.n || 0;
   const nJson = json.n || 0;
   const hasN = nSignal > 1 && nJson > 1;
 
   const threshold = hasN
-    ? 1.96 * Math.sqrt(signal.stddev ** 2 / nSignal + json.stddev ** 2 / nJson)
+    ? 3 * Math.sqrt(signal.stddev ** 2 / nSignal + json.stddev ** 2 / nJson)
     : Math.sqrt(signal.stddev ** 2 + json.stddev ** 2);
 
   if (Math.abs(jm - sm) < threshold) return { direction: "equal", ratio: 1 };

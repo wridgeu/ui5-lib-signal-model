@@ -109,7 +109,7 @@ npm run clean  # remove dist and .ui5 caches
 
 ### Benchmark
 
-A self-contained benchmark suite compares SignalModel vs JSONModel across 22 scenarios on OpenUI5 1.154.0. With default synchronous `setProperty`, "Update all N bindings" is **~47x faster** at 2,000 bindings (25.35 ms vs 1,195.35 ms). JSONModel's cost is O(n²) while SignalModel's is O(n). Across all 22 scenarios, 9 are faster, 13 are ~equal, and 0 are slower.
+A self-contained benchmark suite compares SignalModel vs JSONModel across 22 scenarios on OpenUI5 1.154.0. It measures propagation from the model call until the bound control holds the new value; DOM rendering, which is identical for both models, is excluded. With default synchronous `setProperty`, "Update all N bindings" takes ~3 ms instead of ~1.16 s at 2,000 bindings (**~376x faster**): JSONModel's cost is O(n²) while SignalModel's is O(n). A single-path update with 2,000 bindings takes ~3 µs instead of ~0.76 ms. Across all 22 scenarios, 15 are faster, 7 are ~equal (aggregation replace, `setData` replace, full `bAsyncUpdate` batches), and 0 are slower.
 
 ![SignalModel vs JSONModel Benchmark](docs/benchmark-results.svg)
 
