@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Keeps the SHA-pinned actions current so runner Node deprecations don't pile up.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"
