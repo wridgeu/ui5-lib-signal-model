@@ -2,7 +2,7 @@
   <a href="https://www.npmjs.com/package/ui5-lib-signal-model"><img src="https://img.shields.io/npm/v/ui5-lib-signal-model.svg" alt="npm"></a>
   <a href="https://npmx.dev/package/ui5-lib-signal-model"><img src="https://img.shields.io/npm/v/ui5-lib-signal-model?label=npmx.dev&color=0a0a0a" alt="npmx"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
-  <a href="https://openui5.org/"><img src="https://img.shields.io/badge/OpenUI5-1.120%2B-green.svg" alt="UI5"></a>
+  <a href="https://openui5.org/"><img src="https://img.shields.io/badge/OpenUI5-1.143%2B-green.svg" alt="UI5"></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-blue.svg" alt="TypeScript"></a>
   <a href="https://github.com/wridgeu/ui5-lib-signal-model/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/wridgeu/ui5-lib-signal-model/ci.yml?branch=main&label=CI" alt="CI"></a>
 </p>

@@ -101,6 +101,11 @@ Add the library dependency to your `manifest.json`:
 }
 ```
 
+### UI5 Version Compatibility
+
+- **Minimum supported version:** OpenUI5 / SAPUI5 **`1.143.0+`** (developed and verified against `1.154.0`).
+- **OpenUI5 / SAPUI5 `1.120 LTS` – `1.142`:** `SignalModel`, `SignalPropertyBinding`, `SignalListBinding`, `Lib.init({ apiVersion: 2 })`, and `Messaging` all work on `1.120+`. The **only** API requiring `1.143.0+` is `ClientTreeBinding.prototype.cloneData` (and `oTreeData` snapshotting in `ClientTreeBinding`'s constructor), which `SignalTreeBinding` delegates to directly without shipping a fallback shim. If you need to target `1.120 LTS` and use `bindTree()`, you can either avoid `SignalTreeBinding` or add a small `cloneData` (`structuredClone` + fallback symbol) and `oTreeData` snapshot shim in a subclass/fork.
+
 ## Usage
 
 ```typescript

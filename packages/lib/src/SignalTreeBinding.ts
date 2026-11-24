@@ -14,22 +14,9 @@ type TreeBindingInternal = ClientTreeBinding & {
   oTreeData: unknown;
   _mLengthsCache: Record<string, number>;
   applyFilter(): void;
-  cloneData?: (data: unknown) => unknown;
+  cloneData(data: unknown): unknown;
   _fireChange(params: { reason: string }): void;
 };
-
-const CANNOT_CLONE = Symbol("CannotCloneData");
-
-function cloneTreeData(internal: TreeBindingInternal, data: unknown): unknown {
-  if (typeof internal.cloneData === "function") {
-    return internal.cloneData(data);
-  }
-  try {
-    return structuredClone(data);
-  } catch {
-    return CANNOT_CLONE;
-  }
-}
 
 /**
  * Casts to an internal type that includes UI5 runtime properties not exposed
@@ -68,7 +55,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     internal.applyFilter();
     internal._mLengthsCache = {};
     if (forceUpdate || !deepEqual(internal.oTreeData, currentTreeData)) {
-      internal.oTreeData = cloneTreeData(internal, currentTreeData);
+      internal.oTreeData = internal.cloneData(currentTreeData);
       internal._fireChange({ reason: ChangeReason.Change });
     }
   }
@@ -79,14 +66,6 @@ export default class SignalTreeBinding extends ClientTreeBinding {
 
     const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;
-
-    const internal = asInternal(this);
-    if (typeof internal.cloneData !== "function" && internal.oTreeData === undefined) {
-      internal.oTreeData = cloneTreeData(
-        internal,
-        this.oModel._getObject(internal.sPath, internal.oContext),
-      );
-    }
 
     const signal = this.oModel.getSignal(resolvedPath);
 
@@ -135,7 +114,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
       if (this.isRelative()) {
         // Match ClientTreeBinding.setContext: snapshot tree data for the new context
         const treeData = this.oModel._getObject(internal.sPath, internal.oContext);
-        internal.oTreeData = cloneTreeData(internal, treeData);
+        internal.oTreeData = internal.cloneData(treeData);
         this.subscribe();
         internal._fireChange({ reason: ChangeReason.Context });
       }
