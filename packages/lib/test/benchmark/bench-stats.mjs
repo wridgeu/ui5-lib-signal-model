@@ -128,26 +128,32 @@ export function describe({ ratio, low, high, verdict }) {
 // ── Self-check (`node bench-stats.mjs`) ─────────────────────────────
 
 if (import.meta.main) {
-  const { strictEqual: eq, ok } = await import("node:assert");
+  const { deepStrictEqual: eq, ok } = await import("node:assert");
   const stat = (med, stddev) => ({ median: med, stddev, n: 10 });
+  const near = (actual, expected) =>
+    ok(Math.abs(actual - expected) < 1e-3, `${actual} != ${expected}`);
 
-  eq(computeRatio(stat(1, 0.1), stat(5, 0.1)).direction, "faster");
-  eq(computeRatio(stat(5, 0.1), stat(1, 0.1)).direction, "slower");
+  eq(computeRatio(stat(1, 0.1), stat(5, 0.1)), { direction: "faster", ratio: 5 });
+  eq(computeRatio(stat(5, 0.1), stat(1, 0.1)), { direction: "slower", ratio: 5 });
   eq(computeRatio(stat(1, 4), stat(5, 4)).direction, "equal"); // within 3 SE
-  eq(computeRatio(stat(1, 0.001), stat(1.05, 0.001)).direction, "equal"); // below 10%
+  eq(computeRatio(stat(1, 0.001), stat(1.05, 0.001)).direction, "equal"); // below 10% faster
+  eq(computeRatio(stat(1.05, 0.001), stat(1, 0.001)).direction, "equal"); // below 10% slower
 
   eq(median([3, 1, 2]), 2);
   eq(median([4, 1, 2, 3]), 2.5);
 
+  // Expected intervals computed independently: exp(mean ± t(0.975, 3) * sd / sqrt(4)) of the logs
   const fast = summarizeRuns([40, 50, 45, 55]);
   eq(fast.verdict, "faster");
-  ok(fast.low > 30 && fast.high < 70 && fast.low < fast.ratio && fast.ratio < fast.high);
-  eq(describe(fast).startsWith("47x faster ("), true);
+  near(fast.ratio, 47.168);
+  near(fast.low, 37.925);
+  near(fast.high, 58.665);
+  eq(describe(fast), "47x faster (38x-59x)");
 
-  eq(summarizeRuns([0.5, 0.52, 0.48, 0.5]).verdict, "slower");
-  eq(describe(summarizeRuns([0.96, 0.97, 0.95, 0.96])).startsWith("marginally slower 1.04x"), true);
+  eq(describe(summarizeRuns([0.5, 0.52, 0.48, 0.5])), "2.00x slower (1.90x-2.11x)");
+  eq(describe(summarizeRuns([0.96, 0.97, 0.95, 0.96])), "marginally slower 1.04x (1.03x-1.06x)");
   // one outlier run among near-equal ones must not produce a verdict
-  eq(summarizeRuns([0.29, 0.95, 1.04, 0.99]).verdict, "unclear");
+  eq(describe(summarizeRuns([0.29, 0.95, 1.04, 0.99])), "no clear difference (0.27x-1.95x)");
   eq(describe(summarizeRuns([2])), "2.00x (1 run, no interval)");
   // two runs: df = 1, so only a very consistent difference counts
   eq(summarizeRuns([1.2, 1.5]).verdict, "unclear");

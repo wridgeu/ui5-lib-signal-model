@@ -428,13 +428,19 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
+          var prefix;
           times.push(
-            await timeOp(function () {
-              var s = ++seq;
-              for (var j = 0; j < iterations; j++) {
-                model.setProperty("/items/" + j + "/value", "measured-" + s + "-" + j);
-              }
-            }),
+            await timeOp(
+              function () {
+                prefix = "measured-" + ++seq + "-";
+                for (var j = 0; j < iterations; j++) {
+                  model.setProperty("/items/" + j + "/value", prefix + j);
+                }
+              },
+              function () {
+                return model.getProperty("/items/0/value") === prefix + 0;
+              },
+            ),
           );
           await flush();
         }
