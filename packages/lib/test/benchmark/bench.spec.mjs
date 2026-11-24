@@ -36,10 +36,10 @@ const SEP = "\u2500".repeat(88);
  * Format a millisecond value as a right-aligned, fixed-width string.
  *
  * @param {number} ms - Duration in milliseconds
- * @returns {string} e.g. `"    12.34 ms"`
+ * @returns {string} e.g. `"    12.34 ms"`, or 4 decimals below 1 ms
  */
 function fmtMs(ms) {
-  return ms.toFixed(2).padStart(9) + " ms";
+  return ms.toFixed(ms < 1 ? 4 : 2).padStart(9) + " ms";
 }
 
 /**
@@ -90,6 +90,7 @@ describe("Benchmark", function () {
     const startTime = Date.now();
     let lastCount = 0;
     let headerPrinted = false;
+    let benchError = "";
 
     // Poll `window.__bench` for results and stream each one to the
     // terminal as it arrives. The benchmark page pushes results to
@@ -101,7 +102,13 @@ describe("Benchmark", function () {
           config: window.__bench.config,
           count: window.__bench.results.length,
           done: window.__bench.done,
+          error: window.__bench.error,
         }));
+
+        if (state.error) {
+          benchError = state.error;
+          return true;
+        }
 
         if (!headerPrinted && state.config) {
           headerPrinted = true;
@@ -144,6 +151,8 @@ describe("Benchmark", function () {
           `Completed ${lastCount} scenarios before timeout.`,
       },
     );
+
+    if (benchError) throw new Error(`Benchmark page failed: ${benchError}`);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(SEP);

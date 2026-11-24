@@ -93,9 +93,9 @@ function fmtCell(r) {
 /**
  * Compute the stability verdict across all runs for a scenario.
  *
- * - equal is neutral (ignored for direction consistency)
- * - If all non-equal runs agree → stable
  * - If faster and slower both appear → noise
+ * - A direction is only claimed when more than half of the runs show it;
+ *   a win seen in a minority of runs is reported as ~equal
  *
  * @param {{ direction: string, ratio: number }[]} ratios Per-run ratio results
  * @returns {{ verdict: "stable"|"noise", direction: "faster"|"slower"|"equal", medianRatio: number }} Aggregated verdict
@@ -112,6 +112,10 @@ function computeVerdict(ratios) {
 
   if (hasFaster && hasSlower) {
     return { verdict: "noise", direction: "equal", medianRatio: 1 };
+  }
+
+  if (nonEqual.length * 2 <= ratios.length) {
+    return { verdict: "stable", direction: "equal", medianRatio: 1 };
   }
 
   const direction = nonEqual[0].direction;

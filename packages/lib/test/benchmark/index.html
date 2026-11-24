@@ -170,7 +170,9 @@
       }
 
       /**
-       * Wait for all async notification to complete.
+       * Untimed settling between samples (never inside a timed region:
+       * nested setTimeout calls are clamped to >= 4 ms, see timeOp/settle).
+       * Wait for all async notification and rendering to complete.
        * SignalModel uses queueMicrotask (microtask queue);
        * JSONModel's bAsyncUpdate uses setTimeout (macrotask queue).
        * We drain microtasks first, then wait for a setTimeout(0) to catch any
@@ -191,6 +193,78 @@
             })
             .then(resolve);
         });
+      }
+
+      /** Yield to the next task without a timer (timers are clamped to >= 4 ms when nested). */
+      var macrotaskChannel = new MessageChannel();
+      var macrotaskResolve = null;
+      macrotaskChannel.port1.onmessage = function () {
+        var resolve = macrotaskResolve;
+        macrotaskResolve = null;
+        resolve();
+      };
+      function macrotask() {
+        return new Promise(function (resolve) {
+          macrotaskResolve = resolve;
+          macrotaskChannel.port2.postMessage(0);
+        });
+      }
+
+      /**
+       * Wait until `done()` reports that the update reached its target.
+       * Microtask hops first (SignalModel's default flush), then timer-free
+       * macrotask hops (both models' bAsyncUpdate setTimeout). Throws instead
+       * of silently timing a no-op when the update never arrives.
+       */
+      async function settle(done) {
+        var deadline = 0;
+        for (var hop = 0; !done(); hop++) {
+          if (hop < 10) {
+            await Promise.resolve();
+          } else {
+            if (!deadline) deadline = performance.now() + 10000;
+            if (performance.now() > deadline) {
+              throw new Error("Benchmark: update did not propagate within 10 s");
+            }
+            await macrotask();
+          }
+        }
+      }
+
+      /** sap/ui/core/Rendering, assigned once the modules are loaded. */
+      var Rendering = null;
+      /** Source of unique values so every measured write is a real change. */
+      var seq = 0;
+      /** Minimum duration of one sample; keeps it far above performance.now() resolution. */
+      var MIN_SAMPLE_MS = 20;
+
+      /**
+       * Time one operation: from calling `op()` until `done()` is true.
+       * Repeats the operation until the sample spans MIN_SAMPLE_MS and returns
+       * the mean time per operation in ms. Rendering is suspended while the
+       * clock runs (it is identical for both models and scheduled by a timer),
+       * so the result is model -> binding -> control property propagation.
+       */
+      async function timeOp(op, done) {
+        done = done || alwaysDone;
+        await macrotask(); // start from a non-timer task: no nested-timer clamp
+        Rendering.suspend();
+        try {
+          var reps = 0;
+          var elapsed = 0;
+          var start = performance.now();
+          do {
+            op(reps++);
+            await settle(done);
+            elapsed = performance.now() - start;
+          } while (elapsed < MIN_SAMPLE_MS);
+          return elapsed / reps;
+        } finally {
+          Rendering.resume("benchmark");
+        }
+      }
+      function alwaysDone() {
+        return true;
       }
 
       /** Generate sample data with N properties for binding targets. */
@@ -265,16 +339,16 @@
         };
       }
 
-      /** Format number with 2 decimal places. */
+      /** Format milliseconds: 2 decimals, 4 below 1 ms (sub-ms values are meaningful). */
       function fmt(n) {
-        return n.toFixed(2);
+        return n.toFixed(n < 1 ? 4 : 2);
       }
 
       /**
        * Format a ratio as "Nx faster", "Nx slower", or "~equal".
        *
-       * Guards against edge cases (zero/near-zero medians) and uses
-       * standard-error based significance testing at 95% confidence.
+       * Guards against edge cases (zero medians) and requires the difference
+       * to exceed 3 standard errors plus a 10% minimum effect.
        *
        * Keep in sync with bench-stats.mjs computeRatio().
        */
@@ -282,17 +356,13 @@
         var sm = signalStats.median;
         var jm = jsonStats.median;
 
-        // Below 1ms both values are at the resolution floor of performance.now()
-        // and cannot be meaningfully compared
-        if (sm < 1 && jm < 1) return '<span class="neutral">~equal</span>';
-
-        // Standard error at 95% confidence (z = 1.96) when sample counts
-        // are available; falls back to raw pooled SD for compatibility.
+        // 3 standard errors when sample counts are available (headroom for
+        // small samples and 22 comparisons); raw pooled SD otherwise.
         var nSignal = signalStats.n || 0;
         var nJson = jsonStats.n || 0;
         var hasN = nSignal > 1 && nJson > 1;
         var threshold = hasN
-          ? 1.96 *
+          ? 3 *
             Math.sqrt(
               (signalStats.stddev * signalStats.stddev) / nSignal +
                 (jsonStats.stddev * jsonStats.stddev) / nJson,
@@ -312,9 +382,9 @@
         // Ratio must exceed 10% to be reported (filters rendering noise)
         var ratio = jm / sm;
         if (ratio >= 1.1) {
-          return '<span class="faster">' + fmt(ratio) + "x faster</span>";
+          return '<span class="faster">' + ratio.toFixed(2) + "x faster</span>";
         } else if (ratio <= 0.9) {
-          return '<span class="slower">' + fmt(1 / ratio) + "x slower</span>";
+          return '<span class="slower">' + (1 / ratio).toFixed(2) + "x slower</span>";
         }
         return '<span class="neutral">~equal</span>';
       }
@@ -370,11 +440,14 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          for (var j = 0; j < iterations; j++) {
-            model.setProperty("/items/" + j + "/value", "measured-" + round + "-" + j);
-          }
-          times.push(performance.now() - start);
+          times.push(
+            await timeOp(function () {
+              var s = ++seq;
+              for (var j = 0; j < iterations; j++) {
+                model.setProperty("/items/" + j + "/value", "measured-" + s + "-" + j);
+              }
+            }),
+          );
           await flush();
         }
 
@@ -399,11 +472,13 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          for (var j = 0; j < iterations; j++) {
-            model.getProperty("/items/" + j + "/value");
-          }
-          times.push(performance.now() - start);
+          times.push(
+            await timeOp(function () {
+              for (var j = 0; j < iterations; j++) {
+                model.getProperty("/items/" + j + "/value");
+              }
+            }),
+          );
         }
 
         model.destroy();
@@ -436,10 +511,19 @@
         // Measure: change only /items/0/value
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          model.setProperty("/items/0/value", "measured-" + round);
+          var value;
+          times.push(
+            await timeOp(
+              function () {
+                value = "measured-" + ++seq;
+                model.setProperty("/items/0/value", value);
+              },
+              function () {
+                return controls[0].getText() === value;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -475,12 +559,24 @@
         // Measure: update every path
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          for (var j = 0; j < n; j++) {
-            model.setProperty("/items/" + j + "/value", "batch-" + round + "-" + j);
-          }
+          var prefix;
+          times.push(
+            await timeOp(
+              function () {
+                prefix = "batch-" + ++seq + "-";
+                for (var j = 0; j < n; j++) {
+                  model.setProperty("/items/" + j + "/value", prefix + j);
+                }
+              },
+              function () {
+                return (
+                  controls[0].getText() === prefix + 0 &&
+                  controls[n - 1].getText() === prefix + (n - 1)
+                );
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
           // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
@@ -498,9 +594,9 @@
        * Same as Scenario 4 but passes bAsyncUpdate=true to setProperty.
        * JSONModel: batches all checkUpdate calls into one setTimeout pass,
        *   reducing N*O(N) to 1*O(N). This is SAP's recommended workaround.
-       * SignalModel: defers signal notifications and syncs all signals
-       *   in a single setTimeout pass via registry.invalidateAll().
-       * Both models perform equivalently in this scenario.
+       * SignalModel: defers signal notifications and syncs the dirty paths
+       *   in a single setTimeout pass.
+       * The timed region includes each model's own setTimeout(0) hop.
        */
       async function benchUpdateAllBindingsAsync(ModelClass, n, warmupRounds, measuredRounds) {
         var data = generateData(n);
@@ -523,17 +619,24 @@
         // Measure: update every path with bAsyncUpdate=true
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          for (var j = 0; j < n; j++) {
-            model.setProperty(
-              "/items/" + j + "/value",
-              "async-" + round + "-" + j,
-              undefined,
-              true,
-            );
-          }
+          var prefix;
+          times.push(
+            await timeOp(
+              function () {
+                prefix = "async-" + ++seq + "-";
+                for (var j = 0; j < n; j++) {
+                  model.setProperty("/items/" + j + "/value", prefix + j, undefined, true);
+                }
+              },
+              function () {
+                return (
+                  controls[0].getText() === prefix + 0 &&
+                  controls[n - 1].getText() === prefix + (n - 1)
+                );
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -548,9 +651,9 @@
        * by a model with N bindings. With bAsyncUpdate=true:
        * JSONModel: schedules one setTimeout, then iterates ALL N bindings
        *   with deepEqual (O(N) — most comparisons find no change).
-       * SignalModel: defers notification, then syncs ALL signals via
-       *   invalidateAll (O(N) — most signal.set() calls find equal values
-       *   and skip notification via the equality check).
+       * SignalModel: defers notification, then syncs only the dirty path
+       *   and its ancestors in one setTimeout pass.
+       * The timed region includes each model's own setTimeout(0) hop.
        */
       async function benchSparseAsyncUpdate(ModelClass, n, warmupRounds, measuredRounds) {
         var data = generateData(n);
@@ -571,10 +674,19 @@
         // Measure: change only 1 path, N bindings exist
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          model.setProperty("/items/0/value", "sparse-" + round, undefined, true);
+          var value;
+          times.push(
+            await timeOp(
+              function () {
+                value = "sparse-" + ++seq;
+                model.setProperty("/items/0/value", value, undefined, true);
+              },
+              function () {
+                return controls[0].getText() === value;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -596,6 +708,8 @@
         var model = new ModelClass(JSON.parse(JSON.stringify(data)));
         var container = document.getElementById("hidden-container");
 
+        // Client models cap aggregation bindings at 100 entries by default
+        model.setSizeLimit(n);
         var list = new sap.m.List({
           items: {
             path: "/rows",
@@ -624,14 +738,25 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var newRows = [];
+          // Two prebuilt arrays, alternated, keep row construction out of the timed region
+          var datasets = [[], []];
           for (var k = 0; k < n; k++) {
-            newRows.push({ label: "measured-" + round + "-" + k });
+            datasets[0].push({ label: "measured-a-" + k });
+            datasets[1].push({ label: "measured-b-" + k });
           }
-          var start = performance.now();
-          model.setProperty("/rows", newRows);
+          var current;
+          times.push(
+            await timeOp(
+              function (rep) {
+                current = datasets[rep % 2];
+                model.setProperty("/rows", current);
+              },
+              function () {
+                return list.getItems()[n - 1].getTitle() === current[n - 1].label;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
           // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
@@ -663,6 +788,8 @@
         var model = new ModelClass(JSON.parse(JSON.stringify(data)));
         var container = document.getElementById("hidden-container");
 
+        // Client models cap aggregation bindings at 100 entries by default
+        model.setSizeLimit(n);
         var table = new sap.m.Table({
           columns: [
             new sap.m.Column({ header: new sap.m.Text({ text: "ID" }) }),
@@ -707,19 +834,31 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var newRows = [];
+          // Two prebuilt arrays, alternated, keep row construction out of the timed region
+          var datasets = [[], []];
           for (var k = 0; k < n; k++) {
-            newRows.push({
-              id: k,
-              name: "meas-" + round + "-" + k,
-              price: (k * 3).toFixed(2),
-              active: k % 3 === 0,
-            });
+            for (var d = 0; d < 2; d++) {
+              datasets[d].push({
+                id: k,
+                name: "meas-" + d + "-" + k,
+                price: (k * (3 + d)).toFixed(2),
+                active: k % 3 === 0,
+              });
+            }
           }
-          var start = performance.now();
-          model.setProperty("/rows", newRows);
+          var current;
+          times.push(
+            await timeOp(
+              function (rep) {
+                current = datasets[rep % 2];
+                model.setProperty("/rows", current);
+              },
+              function () {
+                return table.getItems()[n - 1].getCells()[1].getText() === current[n - 1].name;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
           // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
@@ -800,19 +939,31 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var newRows = [];
+          // Two prebuilt arrays, alternated, keep row construction out of the timed region
+          var datasets = [[], []];
           for (var k = 0; k < n; k++) {
-            newRows.push({
-              id: k,
-              name: "meas-" + round + "-" + k,
-              price: (k * 3).toFixed(2),
-              active: k % 3 === 0,
-            });
+            for (var d = 0; d < 2; d++) {
+              datasets[d].push({
+                id: k,
+                name: "meas-" + d + "-" + k,
+                price: (k * (3 + d)).toFixed(2),
+                active: k % 3 === 0,
+              });
+            }
           }
-          var start = performance.now();
-          model.setProperty("/rows", newRows);
+          var current;
+          times.push(
+            await timeOp(
+              function (rep) {
+                current = datasets[rep % 2];
+                model.setProperty("/rows", current);
+              },
+              function () {
+                return gridTable.getRows()[0].getCells()[1].getText() === current[0].name;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
           // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
@@ -847,6 +998,8 @@
         var model = new ModelClass(JSON.parse(JSON.stringify(data)));
         var container = document.getElementById("hidden-container");
 
+        // Client models cap aggregation bindings at 100 entries by default
+        model.setSizeLimit(n);
         var tree = new sap.m.Tree({
           items: {
             path: "/tree",
@@ -879,20 +1032,32 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var newNodes = [];
+          // Two prebuilt trees, alternated, keep node construction out of the timed region
+          var datasets = [[], []];
           for (var k = 0; k < n; k++) {
-            newNodes.push({
-              name: "meas-" + round + "-" + k,
-              children: [
-                { name: "mc-" + k + "-a", children: [] },
-                { name: "mc-" + k + "-b", children: [] },
-              ],
-            });
+            for (var d = 0; d < 2; d++) {
+              datasets[d].push({
+                name: "meas-" + d + "-" + k,
+                children: [
+                  { name: "mc-" + k + "-a", children: [] },
+                  { name: "mc-" + k + "-b", children: [] },
+                ],
+              });
+            }
           }
-          var start = performance.now();
-          model.setProperty("/tree", newNodes);
+          var current;
+          times.push(
+            await timeOp(
+              function (rep) {
+                current = datasets[rep % 2];
+                model.setProperty("/tree", current);
+              },
+              function () {
+                return tree.getItems()[n - 1].getTitle() === current[n - 1].name;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
           // Allow DOM to settle between rounds (outside timed region)
           await new Promise(function (r) {
             setTimeout(r, 10);
@@ -939,10 +1104,19 @@
         // Measure: change one path, expression bindings on that path re-evaluate
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          model.setProperty("/items/0/value", "expr-" + round);
+          var value;
+          times.push(
+            await timeOp(
+              function () {
+                value = "expr-" + ++seq;
+                model.setProperty("/items/0/value", value);
+              },
+              function () {
+                return controls[0].getText() === "0: " + value;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -955,8 +1129,8 @@
        *
        * Creates N computed signals, each depending on a source path.
        * Measures update propagation through the computed dependency chain.
-       * For JSONModel: creates N Text controls bound to paths (no computed concept),
-       * measures equivalent setProperty propagation for a fair baseline.
+       * For JSONModel (no computed concept): N Text controls deriving the same
+       * value with a formatter, the idiomatic equivalent.
        */
       async function benchComputedSignals(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
         var data = { values: [] };
@@ -975,11 +1149,20 @@
           }
         }
 
-        // Bind to the computed paths (SignalModel) or source paths (JSONModel)
+        // Bind to the computed paths (SignalModel) or derive the same value
+        // with a formatter on the source path (JSONModel)
         var controls = [];
         for (var j = 0; j < n; j++) {
-          var path = isSignal && model.createComputed ? "/computed" + j : "/values/" + j;
-          var text = new sap.m.Text({ text: "{" + path + "}" });
+          var text = new sap.m.Text({
+            text: isSignal
+              ? "{/computed" + j + "}"
+              : {
+                  path: "/values/" + j,
+                  formatter: function (v) {
+                    return "computed:" + v;
+                  },
+                },
+          });
           text.setModel(model);
           text.placeAt(container);
           controls.push(text);
@@ -998,10 +1181,19 @@
         // Measure: update source, computed re-evaluates
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          model.setProperty("/values/0", 2000 + round);
+          var value;
+          times.push(
+            await timeOp(
+              function () {
+                value = 2000 + ++seq;
+                model.setProperty("/values/0", value);
+              },
+              function () {
+                return controls[0].getText() === "computed:" + value;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1016,7 +1208,8 @@
        * controls to sub-paths (e.g., /computed0/name). Measures update
        * propagation through _getObject's computed traversal and getSignal's
        * parent-computed resolution.
-       * For JSONModel: binds directly to nested paths (no computed concept).
+       * For JSONModel (no computed concept): a two-part composite binding with a
+       * formatter deriving the same value.
        */
       async function benchComputedSubPath(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
         var data = { items: [] };
@@ -1039,12 +1232,20 @@
           }
         }
 
-        // Bind to sub-paths: /computed0/label (Signal) or /items/0/name (JSON)
+        // Bind to sub-paths: /computed0/label (Signal) or derive the same value
+        // with a two-part composite binding + formatter (JSON)
         var controls = [];
         for (var j = 0; j < n; j++) {
-          var path =
-            isSignal && model.createComputed ? "/computed" + j + "/label" : "/items/" + j + "/name";
-          var text = new sap.m.Text({ text: "{" + path + "}" });
+          var text = new sap.m.Text({
+            text: isSignal
+              ? "{/computed" + j + "/label}"
+              : {
+                  parts: ["/items/" + j + "/name", "/items/" + j + "/value"],
+                  formatter: function (name, value) {
+                    return name + "=" + value;
+                  },
+                },
+          });
           text.setModel(model);
           text.placeAt(container);
           controls.push(text);
@@ -1063,10 +1264,19 @@
         // Measure: update source, computed re-evaluates, sub-path binding updates
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          model.setProperty("/items/0/name", "round" + round);
+          var value;
+          times.push(
+            await timeOp(
+              function () {
+                value = "round" + ++seq;
+                model.setProperty("/items/0/name", value);
+              },
+              function () {
+                return controls[0].getText() === value + "=0";
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1080,7 +1290,8 @@
        * Creates N computeds bound to controls, then redefines each computed
        * with a different dependency via removeComputed + createComputed.
        * Measures that bindings still update after redefinition.
-       * SignalModel-only — JSONModel has no computed equivalent.
+       * JSONModel cannot redefine; its baseline is the end state (a formatter
+       * on the new dependency), updated through the same path.
        */
       async function benchComputedRedefine(ModelClass, isSignal, n, warmupRounds, measuredRounds) {
         var data = { values: [], alt: [] };
@@ -1100,11 +1311,20 @@
           }
         }
 
-        // Bind controls
+        // Bind controls. JSONModel cannot redefine anything, so its baseline is
+        // the end state: a formatter deriving the same value from /alt/i.
         var controls = [];
         for (var j = 0; j < n; j++) {
-          var path = isSignal && model.createComputed ? "/computed" + j : "/values/" + j;
-          var text = new sap.m.Text({ text: "{" + path + "}" });
+          var text = new sap.m.Text({
+            text: isSignal
+              ? "{/computed" + j + "}"
+              : {
+                  path: "/alt/" + j,
+                  formatter: function (v) {
+                    return "redefined:" + v;
+                  },
+                },
+          });
           text.setModel(model);
           text.placeAt(container);
           controls.push(text);
@@ -1130,17 +1350,26 @@
 
         // Warmup — update the NEW dependency
         for (var w = 0; w < warmupRounds; w++) {
-          model.setProperty(isSignal ? "/alt/0" : "/values/0", 5000 + w);
+          model.setProperty("/alt/0", 5000 + w);
           await flush();
         }
 
         // Measure: update new dependency source, redefined computed re-evaluates
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          model.setProperty(isSignal ? "/alt/0" : "/values/0", 6000 + round);
+          var value;
+          times.push(
+            await timeOp(
+              function () {
+                value = 6000 + ++seq;
+                model.setProperty("/alt/0", value);
+              },
+              function () {
+                return controls[0].getText() === "redefined:" + value;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1155,7 +1384,7 @@
        * of each, then redefines all computeds (removeComputed + createComputed)
        * and measures update propagation through the new dependencies.
        * Exercises _firePathResubscribe's prefix scan + Map snapshot.
-       * For JSONModel: plain nested path update (no computed concept).
+       * For JSONModel: the end state, a formatter on the new dependency.
        */
       async function benchComputedRedefineSubPath(
         ModelClass,
@@ -1180,14 +1409,20 @@
           }
         }
 
-        // Bind to sub-paths: /computed0/text (Signal) or /values/0/label (JSON)
+        // Bind to sub-paths: /computed0/text (Signal) or the end-state
+        // equivalent, a formatter on /alt/0/label (JSON)
         var controls = [];
         for (var j = 0; j < n; j++) {
-          var path =
-            isSignal && model.createComputed
-              ? "/computed" + j + "/text"
-              : "/values/" + j + "/label";
-          var text = new sap.m.Text({ text: "{" + path + "}" });
+          var text = new sap.m.Text({
+            text: isSignal
+              ? "{/computed" + j + "/text}"
+              : {
+                  path: "/alt/" + j + "/label",
+                  formatter: function (v) {
+                    return "redef:" + v;
+                  },
+                },
+          });
           text.setModel(model);
           text.placeAt(container);
           controls.push(text);
@@ -1214,17 +1449,26 @@
 
         // Warmup
         for (var w = 0; w < warmupRounds; w++) {
-          model.setProperty(isSignal ? "/alt/0/label" : "/values/0/label", "warm" + w);
+          model.setProperty("/alt/0/label", "warm" + w);
           await flush();
         }
 
         // Measure: update source, redefined computed re-evaluates, sub-path binding updates
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          model.setProperty(isSignal ? "/alt/0/label" : "/values/0/label", "m" + round);
+          var value;
+          times.push(
+            await timeOp(
+              function () {
+                value = "m" + ++seq;
+                model.setProperty("/alt/0/label", value);
+              },
+              function () {
+                return controls[0].getText() === "redef:" + value;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1255,14 +1499,28 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var newData = generateData(n);
+          // Two prebuilt data sets, alternated, keep construction out of the timed region
+          var datasets = [generateData(n), generateData(n)];
           for (var k = 0; k < n; k++) {
-            newData.items[k].value = "replaced-" + round + "-" + k;
+            datasets[0].items[k].value = "replaced-a-" + k;
+            datasets[1].items[k].value = "replaced-b-" + k;
           }
-          var start = performance.now();
-          model.setData(newData);
+          var current;
+          times.push(
+            await timeOp(
+              function (rep) {
+                current = datasets[rep % 2];
+                model.setData(current);
+              },
+              function () {
+                return (
+                  controls[0].getText() === current.items[0].value &&
+                  controls[n - 1].getText() === current.items[n - 1].value
+                );
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1302,15 +1560,24 @@
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
           // Shallow merge: update counter + first 5 items
-          var items = [];
-          for (var k = 0; k < Math.min(5, n); k++) {
-            items.push({ id: k, value: "shallow-" + round + "-" + k });
-          }
-          var payload = { counter: round, items: items };
-          var start = performance.now();
-          model.setData(payload, true);
+          var prefix;
+          times.push(
+            await timeOp(
+              function () {
+                var s = ++seq;
+                prefix = "shallow-" + s + "-";
+                var items = [];
+                for (var k = 0; k < Math.min(5, n); k++) {
+                  items.push({ id: k, value: prefix + k });
+                }
+                model.setData({ counter: s, items: items }, true);
+              },
+              function () {
+                return controls[0].getText() === prefix + 0;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1349,16 +1616,29 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          // Deep merge: update every item
-          var items = [];
+          // Deep merge: update every item. Two prebuilt payloads, alternated,
+          // keep payload construction out of the timed region.
+          var payloads = [{ items: [] }, { items: [] }];
           for (var j = 0; j < n; j++) {
-            items.push({ id: j, value: "deep-" + round + "-" + j });
+            payloads[0].items.push({ id: j, value: "deep-a-" + j });
+            payloads[1].items.push({ id: j, value: "deep-b-" + j });
           }
-          var payload = { items: items };
-          var start = performance.now();
-          model.setData(payload, true);
+          var current;
+          times.push(
+            await timeOp(
+              function (rep) {
+                current = payloads[rep % 2];
+                model.setData(current, true);
+              },
+              function () {
+                return (
+                  controls[0].getText() === current.items[0].value &&
+                  controls[n - 1].getText() === current.items[n - 1].value
+                );
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1404,6 +1684,11 @@
         var model = new ModelClass(JSON.parse(JSON.stringify(data)));
         var container = document.getElementById("hidden-container");
         var controls = createBindings(model, n, container);
+        // One control bound to a merged leaf, so propagation can be observed
+        var pageSize = new sap.m.Text({ text: "{/config/user/preferences/pageSize}" });
+        pageSize.setModel(model);
+        pageSize.placeAt(container);
+        controls.push(pageSize);
         await flush();
         await new Promise(function (r) {
           setTimeout(r, 50);
@@ -1426,19 +1711,30 @@
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
           // Merge payload: 3 leaf paths deep in the tree
-          var payload = {
-            config: {
-              app: {
-                display: { theme: round % 2 === 0 ? "sap_horizon" : "sap_horizon_dark" },
-                features: { notifications: { push: round % 2 === 0 } },
+          var size;
+          times.push(
+            await timeOp(
+              function (rep) {
+                size = 100 + ++seq;
+                model.setData(
+                  {
+                    config: {
+                      app: {
+                        display: { theme: rep % 2 === 0 ? "sap_horizon" : "sap_horizon_dark" },
+                        features: { notifications: { push: rep % 2 === 0 } },
+                      },
+                      user: { preferences: { pageSize: size } },
+                    },
+                  },
+                  true,
+                );
               },
-              user: { preferences: { pageSize: 25 + round } },
-            },
-          };
-          var start = performance.now();
-          model.setData(payload, true);
+              function () {
+                return pageSize.getText() === String(size);
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1503,17 +1799,28 @@
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
           // Pinpoint merge: only 3 items out of 10,000
-          var payload = {
-            items: [
-              { id: 0, name: "measured-" + round + "-0" },
-              { id: 1, name: "measured-" + round + "-1" },
-              { id: 2, name: "measured-" + round + "-2" },
-            ],
-          };
-          var start = performance.now();
-          model.setData(payload, true);
+          var prefix;
+          times.push(
+            await timeOp(
+              function () {
+                prefix = "measured-" + ++seq + "-";
+                model.setData(
+                  {
+                    items: [
+                      { id: 0, name: prefix + 0 },
+                      { id: 1, name: prefix + 1 },
+                      { id: 2, name: prefix + 2 },
+                    ],
+                  },
+                  true,
+                );
+              },
+              function () {
+                return controls[0].getText() === prefix + 0 && controls[2].getText() === prefix + 2;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1566,12 +1873,24 @@
         // Measure: 29 consecutive synchronous setProperty calls
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          for (var c = 0; c < CALLS_TO_EXCEED_THRESHOLD; c++) {
-            model.setProperty("/items/" + c + "/value", "measured-" + round + "-" + c);
-          }
+          var prefix;
+          times.push(
+            await timeOp(
+              function () {
+                prefix = "measured-" + ++seq + "-";
+                for (var c = 0; c < CALLS_TO_EXCEED_THRESHOLD; c++) {
+                  model.setProperty("/items/" + c + "/value", prefix + c);
+                }
+              },
+              function () {
+                var last = CALLS_TO_EXCEED_THRESHOLD - 1;
+                return (
+                  controls[0].getText() === prefix + 0 && controls[last].getText() === prefix + last
+                );
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1614,10 +1933,19 @@
 
         var times = [];
         for (var round = 0; round < measuredRounds; round++) {
-          var start = performance.now();
-          model.setProperty("/items/0/meta/value", "round" + round);
+          var value;
+          times.push(
+            await timeOp(
+              function () {
+                value = "round" + ++seq;
+                model.setProperty("/items/0/meta/value", value);
+              },
+              function () {
+                return controls[0].getText() === value;
+              },
+            ),
+          );
           await flush();
-          times.push(performance.now() - start);
         }
 
         destroyBindings(controls, container);
@@ -1672,7 +2000,16 @@
         return { jsonTimes: jsonTimes, signalTimes: signalTimes };
       }
 
-      async function runBenchmark() {
+      /** Run all scenarios; failures are shown and exposed to the CLI runner instead of hanging it. */
+      function runBenchmark() {
+        return runAllScenarios().catch(function (err) {
+          window.__bench = window.__bench || { results: [] };
+          window.__bench.error = String((err && err.stack) || err);
+          setStatus("Benchmark failed: " + err);
+        });
+      }
+
+      async function runAllScenarios() {
         var btn = document.getElementById("runBtn");
         btn.disabled = true;
 
@@ -1710,8 +2047,10 @@
               "sap/m/StandardTreeItem",
               "sap/ui/table/Table",
               "sap/ui/table/Column",
+              "sap/ui/core/Rendering",
             ],
             function (JSONModel, SignalModel) {
+              Rendering = arguments[arguments.length - 1];
               resolve({ JSONModel: JSONModel, SignalModel: SignalModel });
             },
           );
@@ -2149,7 +2488,9 @@
       function renderResults(results, n, iters, measuredRounds) {
         var samplesPerModel = Math.ceil(measuredRounds / 2);
         var html =
-          "<h2>Results (median of " + samplesPerModel + " samples per model, alternating)</h2>";
+          "<h2>Results (ms per operation, median of " +
+          samplesPerModel +
+          " samples per model, alternating)</h2>";
         html += "<table>";
         html += "<tr>";
         html += "<th>Binding Type</th>";
@@ -2245,12 +2586,11 @@
         html += "<ul>";
         html += "<li><strong>setProperty throughput (no bindings)</strong>: ";
         html +=
-          "Raw model-layer cost with zero active bindings. SignalModel has a small per-call overhead because it checks the signal registry and computed map on each call. " +
-          "This is a synthetic edge case: in any real application, bindings exist and the signal approach pays for this overhead many times over (see Update All scenario). " +
-          "The absolute difference is sub-millisecond for hundreds of operations.</li>";
+          "Raw model-layer cost of " +
+          iters +
+          " writes with zero active bindings. A synthetic edge case: in any real application bindings exist.</li>";
         html += "<li><strong>getProperty throughput</strong>: ";
-        html +=
-          "Read performance. SignalModel checks for computed signals; JSONModel reads directly.</li>";
+        html += "Read performance of " + iters + " reads, no bindings involved.</li>";
         html += "<li><strong>Single-path update with N bindings</strong>: ";
         html +=
           "The key benchmark, directly measuring the problem from <a href='https://github.com/UI5/openui5/issues/2600'>openui5 issue 2600</a>. " +
@@ -2271,11 +2611,12 @@
           "JSONModel batches all <code>checkUpdate</code> calls into one <code>setTimeout</code> pass: O(N) total instead of O(N<sup>2</sup>). ";
         html +=
           "SignalModel defers signal notifications when <code>bAsyncUpdate=true</code>: data is written immediately, " +
-          "and a single <code>setTimeout</code> syncs all signals afterward. Both models perform equivalently.</li>";
+          "and a single <code>setTimeout</code> syncs the dirty paths afterward. " +
+          "The measured time includes each model's own <code>setTimeout(0)</code> hop.</li>";
         html += "<li><strong>List binding replace</strong>: ";
         html +=
           "Tests <code>SignalListBinding</code> vs <code>JSONListBinding</code> with a real <code>sap.m.List</code> control. " +
-          "Replaces the bound array and measures full propagation including list re-rendering.</li>";
+          "Replaces the bound array and measures propagation until the list's items carry the new data (DOM rendering excluded).</li>";
         html += "<li><strong>Table binding replace</strong>: ";
         html +=
           "Tests list binding with a <code>sap.m.Table</code> (3 columns per row). " +
@@ -2290,7 +2631,8 @@
           "Reproduces the exact conditions from SAP's <code>checkPerformanceOfUpdate</code> warning. " +
           "Uses 3,449 bindings (the real-world count reported for this bottleneck) and performs 29 consecutive synchronous <code>setProperty</code> calls — " +
           "just enough to exceed SAP's 100,000 cumulative binding check threshold (29 &times; 3,449 = 100,021). " +
-          "JSONModel performs ~200ms per <code>setProperty</code> at this scale. SignalModel's per-notification cost is constant regardless of total binding count.</li>";
+          "The original report saw ~200ms per <code>setProperty</code> with heavier controls; this page uses plain <code>sap.m.Text</code>, so absolute numbers are lower. " +
+          "SignalModel's per-notification cost is constant regardless of total binding count.</li>";
         html += "<li><strong>setData replace</strong>: ";
         html +=
           "Both models must notify all bindings. SignalModel invalidates all signals; JSONModel runs checkUpdate on all bindings.</li>";
@@ -2303,13 +2645,23 @@
         html +=
           "<li><strong>Fresh model per sample:</strong> Each sample creates a new model and new bindings, preventing state accumulation.</li>";
         html +=
-          "<li><strong>Warmup:</strong> 3 warmup rounds per sample exercise the same code paths before measurement begins, stabilizing JIT compilation.</li>";
+          "<li><strong>Warmup:</strong> 3 warmup rounds per sample exercise the same code paths before measurement begins.</li>";
+        html +=
+          "<li><strong>What is timed:</strong> from the model call until the bound control holds the new value (checked on the control; a sample fails loudly if the update never arrives). " +
+          "The operation is repeated until a sample spans at least 20 ms and the mean time per operation is reported, keeping every sample far above <code>performance.now()</code> resolution.</li>";
+        html +=
+          "<li><strong>No timers in the timed region:</strong> waiting uses microtasks, then <code>MessageChannel</code> tasks. A <code>setTimeout(0)</code> wait would add the browser's nested-timer clamp (4 ms or more) to every sample and bury the model cost. " +
+          "Only the <code>bAsyncUpdate</code> scenarios include a timer, the one the models schedule themselves.</li>";
+        html +=
+          "<li><strong>Rendering excluded:</strong> <code>sap/ui/core/Rendering</code> is suspended while the clock runs. DOM rendering is identical for both models; the benchmark compares model, binding and control-property propagation.</li>";
+        html +=
+          "<li><strong>Significance:</strong> a difference is reported only if it exceeds 3 standard errors and 10%; otherwise <em>~equal</em>.</li>";
+        html +=
+          "<li><strong>Equivalent work:</strong> computed-signal scenarios compare against a JSONModel formatter deriving the same value.</li>";
         html +=
           "<li><strong>Statistical reporting:</strong> Median (robust to outliers), mean, standard deviation, min, max, P5, and P95 are all reported.</li>";
         html +=
-          "<li><strong>Flush protocol:</strong> After each operation, a Promise.then + setTimeout(0) + queueMicrotask chain ensures all async notification paths (microtask queue for SignalModel, promise/setTimeout for JSONModel) complete before timing stops.</li>";
-        html +=
-          "<li><strong>Hidden container:</strong> sap.m.Text controls are placed in a display:none container to isolate model performance from DOM rendering cost.</li>";
+          "<li><strong>Hidden container:</strong> controls are placed in a display:none container.</li>";
         html +=
           "<li><strong>Identical data:</strong> Both models receive structurally identical data (deep-copied via JSON.parse/stringify).</li>";
         html += "</ul>";
@@ -2329,7 +2681,9 @@
         html += "<h2>Limitations</h2>";
         html += "<ul>";
         html +=
-          "<li>Browser fingerprinting protections may reduce performance.now() precision (typically to ~0.1ms in modern browsers).</li>";
+          "<li>DOM rendering and layout are not measured. End-to-end frame times in an application are dominated by rendering and will differ less than these numbers.</li>";
+        html +=
+          "<li>The page loads the library from the dev server (transpiled on the fly), not the minified build.</li>";
         html +=
           "<li>Garbage collection is not explicitly triggered between samples (requires Chrome --js-flags='--expose-gc'). GC pauses may affect individual samples, which is why median is used.</li>";
         html +=
