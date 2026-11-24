@@ -198,6 +198,16 @@ When a `Signal.Computed` is created, its derivation function is fixed. To change
 
 SignalModel solves this with **automatic resubscription**. When `createComputed` is called, the model notifies every existing binding to that path (and to any sub-path below it). Each notified binding tears down its watcher on the old signal and subscribes to the new one -- transparently, in a single synchronous step.
 
+```mermaid
+flowchart LR
+  S1["State: /users"] --> C1["Computed: /currentUser"]
+  S2["State: /selectedId"] --> C1
+  C1 -->|"watched by"| B1["Binding: {/currentUser/name}"]
+  C1 -->|"watched by"| B2["Binding: {/currentUser/email}"]
+  Redef["removeComputed + createComputed('/currentUser')"] -.->|"_firePathResubscribe<br/>rewires watchers"| B1
+  Redef -.->|"_firePathResubscribe<br/>rewires watchers"| B2
+```
+
 This means you can redefine a computed at any time and all bindings will see the new derivation, even if it has entirely different dependencies:
 
 ```typescript
@@ -285,19 +295,18 @@ When a computed re-evaluates, the notification cost is O(N) where N is the numbe
 3. Each binding's `checkUpdate` re-reads its value and compares with the previous value
 4. Only bindings whose value actually changed trigger a DOM update (O(k) where k ≤ N)
 
-For primitive leaf values (strings, numbers -- typical for table cells), the comparison is a strict equality check (`===`) which is effectively free. The per-binding overhead is dominated by path resolution, not the comparison itself. For large tables, this overhead is measurable but does not affect rendering correctness.
+For primitive leaf values (strings, numbers -- typical for table cells), the comparison is `Object.is`, which is effectively free and handles `NaN` accurately. For direct property bindings, the flush queue passes the already-read signal value directly to `checkUpdate`, avoiding redundant path traversal.
 
 #### Dependency Granularity
 
-A computed that depends on a parent path (e.g., `/sourceRows`) re-evaluates when that path is **replaced** (`setProperty("/sourceRows", newArray)`). It does **not** re-evaluate when a sub-path is modified in-place (`setProperty("/sourceRows/3/name", "new")`), because the signal at `/sourceRows` (the array reference) did not change. To react to individual property changes within an array, use multiple computeds with specific dependencies, or bind directly to the source paths.
+A computed that depends on a parent path (e.g., `/sourceRows`) re-evaluates both when that path is replaced (`setProperty("/sourceRows", newArray)`) **and** when a child path is updated via `setProperty("/sourceRows/3/name", "new")`, because ancestor state signals are invalidated and both state and computed signals use `signalEquals` (which always notifies for non-null objects). If you want narrower invalidation for large arrays, split dependencies onto specific paths or bind directly to leaf paths.
 
 ```typescript
-// Re-evaluates when /sourceRows is replaced:
+// Re-evaluates when /sourceRows is replaced OR a child path is updated via setProperty:
 model.createComputed("/computed", ["/sourceRows"], (rows) => transform(rows));
 
-// Does NOT re-evaluate when /sourceRows/3/name changes in-place:
-model.setProperty("/sourceRows/3/name", "updated"); // computed is NOT notified
-model.setProperty("/sourceRows", [...newArray]); // computed IS notified
+model.setProperty("/sourceRows/3/name", "updated"); // invalidates /sourceRows -> computed re-evaluates
+model.setProperty("/sourceRows", [...newArray]); // invalidates /sourceRows -> computed re-evaluates
 ```
 
 ```typescript
@@ -421,30 +430,30 @@ model.destroy(); // aborts in-flight requests, clears all subscriptions
 
 ## Feature Comparison: SignalModel vs JSONModel
 
-| Feature                        | JSONModel                                                         | SignalModel                                                                      |
-| ------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified via signals              |
-| **Notification granularity**   | O(_n_) per `setProperty` call                                     | O(_k_) per `setProperty` call                                                    |
-| **Change detection**           | `deepEqual` comparison on every binding                           | Signal-based: strict equality for primitives, always-fire for objects            |
-| **Property binding**           | `{/path}` in XML views                                            | Identical                                                                        |
-| **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                        |
-| **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                                   |
-| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)                     |
-| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                                   |
-| **Declarative XML binding**    | Supported                                                         | Supported (full lifecycle: one-way, two-way, list, tree)                         |
-| **Named models**               | `{modelName>/path}`                                               | Identical                                                                        |
-| **Binding modes**              | OneWay, TwoWay, OneTime                                           | Same (inherits from ClientModel)                                                 |
-| **Nested bindings**            | Relative paths with context                                       | Same (relative and absolute)                                                     |
-| **setProperty / getProperty**  | Standard API                                                      | Same signatures, typed overloads with generics                                   |
-| **setData (replace)**          | Replaces data, notifies all bindings                              | Replaces data, fires all signals                                                 |
-| **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                                          |
-| **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals                           |
-| **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state                |
-| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying `Signal.State` or `Signal.Computed`      |
-| **Path auto-creation**         | Returns `false` for nonexistent parent paths                      | Same by default; `{ autoCreatePaths: true }` creates intermediates automatically |
-| **Leaf property guard**        | Not available                                                     | `{ strictLeafCheck: true }` rejects writes to nonexistent leaf properties        |
-| **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion                    |
-| **TC39 Signals alignment**     | N/A                                                               | Uses signal-polyfill; swap for native Signal when spec ships                     |
+| Feature                        | JSONModel                                                         | SignalModel                                                                                            |
+| ------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Update mechanism**           | Poll-based: `checkUpdate()` iterates all bindings on every change | Push-based: only bindings to changed paths are notified via signals                                    |
+| **Notification granularity**   | O(_n_) per `setProperty` call                                     | O(_k_) per `setProperty` call                                                                          |
+| **Change detection**           | `deepEqual` comparison on every binding                           | Signal-based: `Object.is` for primitives, always-fire for objects; extended change detection for lists |
+| **Property binding**           | `{/path}` in XML views                                            | Identical                                                                                              |
+| **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                                              |
+| **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                                                         |
+| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)                                           |
+| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                                                         |
+| **Declarative XML binding**    | Supported                                                         | Supported (full lifecycle: one-way, two-way, list, tree)                                               |
+| **Named models**               | `{modelName>/path}`                                               | Identical                                                                                              |
+| **Binding modes**              | OneWay, TwoWay, OneTime                                           | Same (inherits from ClientModel)                                                                       |
+| **Nested bindings**            | Relative paths with context                                       | Same (relative and absolute)                                                                           |
+| **setProperty / getProperty**  | Standard API                                                      | Same signatures, typed overloads with generics                                                         |
+| **setData (replace)**          | Replaces data, notifies all bindings                              | Replaces data, fires all signals                                                                       |
+| **setData (merge)**            | Merges data, notifies all bindings                                | Merges data, fires only changed signals                                                                |
+| **mergeProperty**              | Not available                                                     | Surgical merge at any path, fires only changed signals                                                 |
+| **Computed/derived values**    | Not available (use formatters)                                    | `createComputed("/path", deps, fn)` for model-layer derived state                                      |
+| **Programmatic signal access** | Not available                                                     | `getSignal("/path")` returns underlying `Signal.State` or `Signal.Computed`                            |
+| **Path auto-creation**         | Returns `false` for nonexistent parent paths                      | Same by default; `{ autoCreatePaths: true }` creates intermediates automatically                       |
+| **Leaf property guard**        | Not available                                                     | `{ strictLeafCheck: true }` rejects writes to nonexistent leaf properties                              |
+| **TypeScript generics**        | Via TypedJSONModel wrapper                                        | Built-in: `new SignalModel<T>(data)` with path autocompletion                                          |
+| **TC39 Signals alignment**     | N/A                                                               | Uses signal-polyfill; swap for native Signal when spec ships                                           |
 
 > **Algorithmic complexity legend:**
 >
