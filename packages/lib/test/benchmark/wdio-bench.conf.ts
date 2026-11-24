@@ -12,6 +12,7 @@
  */
 export const config = {
   runner: "local",
+  autoXvfb: false,
   specs: ["./*.spec.mjs"],
   capabilities: [
     {
