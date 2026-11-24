@@ -31,7 +31,7 @@ Restructure the repository for public consumption. Split the 530-line root READM
 > CAUTION box (experimental, not production-ready)
 
 ## Quick Start
-  - Requirements (Node 22, UI5 >= 1.144, signal-polyfill)
+  - Requirements (Node 24, UI5 >= 1.144, signal-polyfill)
   - npm install
   - manifest.json snippet
   - tsconfig.json snippet
@@ -236,7 +236,7 @@ The current `.gitignore` has `docs/plans/`. After cleanup:
 
 Runs on PRs targeting `main` and pushes to `main`. Manually dispatchable.
 
-Steps: checkout → setup-node 22 → npm ci → fmt:check → lint → typecheck → test:qunit
+Steps: checkout → setup-node (24 and 26) → npm ci → fmt:check → lint → typecheck → test:qunit
 
 Action SHAs (from issue #5, verify at implementation time):
 

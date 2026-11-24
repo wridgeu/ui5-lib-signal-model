@@ -72,7 +72,7 @@ scripts/        Benchmark runners and CI helpers
 
 ### Prerequisites
 
-- Node.js >= 22
+- Node.js >= 24
 
 ### Install and run
 
