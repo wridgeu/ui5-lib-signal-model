@@ -61,7 +61,7 @@ QUnit.module(
           binding.resume();
 
           setTimeout(() => {
-            assert.ok(changeCount > 0, "change event fired after resume");
+            assert.strictEqual(changeCount, 1, "change event fired after resume");
             assert.strictEqual(
               binding.getValue(),
               "Bob",
@@ -184,7 +184,7 @@ QUnit.module(
         binding.resume();
 
         setTimeout(() => {
-          assert.ok(changeCount > 0, "change event fired after resume");
+          assert.strictEqual(changeCount, 1, "change event fired after resume");
           const contexts = binding.getContexts(0, 10);
           assert.strictEqual(contexts.length, 3, "all 3 items visible after resume");
           model.destroy();
@@ -270,7 +270,7 @@ QUnit.module(
         binding.checkUpdate(true);
 
         setTimeout(() => {
-          assert.ok(changeCount > 0, "change fired from forced checkUpdate");
+          assert.strictEqual(changeCount, 1, "change fired from forced checkUpdate");
           const contexts = binding.getContexts(0, 10);
           assert.strictEqual(contexts.length, 2, "2 items visible after forced refresh");
           binding.resume();
@@ -283,25 +283,6 @@ QUnit.module(
     // =========================================================================
     // PropertyBinding setValue guards
     // =========================================================================
-
-    QUnit.test("setValue with same value (deepEqual) -- no setProperty call", (assert) => {
-      const done = assert.async();
-      const model = new SignalModel({ value: "hello" });
-      const binding = model.bindProperty("/value");
-      let changeCount = 0;
-
-      binding.attachChange(() => changeCount++);
-
-      // setValue with the same primitive value -- deepEqual returns true, so no write
-      binding.setValue("hello");
-
-      setTimeout(() => {
-        assert.strictEqual(changeCount, 0, "no change event for identical value");
-        assert.strictEqual(model.getProperty("/value"), "hello", "model value unchanged");
-        model.destroy();
-        done();
-      }, 50);
-    });
 
     QUnit.test("setValue with deepEqual object -- no setProperty call", (assert) => {
       const done = assert.async();

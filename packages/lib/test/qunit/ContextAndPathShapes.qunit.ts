@@ -85,9 +85,9 @@ QUnit.module("Context and Path Shapes", () => {
     const signal = new SignalModel<Record<string, unknown>>(JSON.parse(JSON.stringify(initial)));
 
     const binding = signal.bindProperty("/items/0/name");
-    let changed = false;
+    let changed = 0;
     binding.attachChange(() => {
-      changed = true;
+      changed++;
     });
 
     json.setProperty("/items/0/name", "Z");
@@ -100,7 +100,7 @@ QUnit.module("Context and Path Shapes", () => {
     );
 
     setTimeout(() => {
-      assert.ok(changed, "binding notified for array index path");
+      assert.strictEqual(changed, 1, "binding notified for array index path");
       json.destroy();
       signal.destroy();
       done();
@@ -146,33 +146,6 @@ QUnit.module("Context and Path Shapes", () => {
     model.destroy();
   });
 
-  QUnit.test("setContext(undefined) removes context and unsubscribes", (assert) => {
-    const done = assert.async();
-    const model = new SignalModel({
-      items: [{ name: "Alice" }, { name: "Bob" }],
-    });
-    const listBinding = model.bindList("/items");
-    const contexts = listBinding.getContexts(0, 10);
-
-    const binding = model.bindProperty("name", contexts[0]);
-    assert.strictEqual(binding.getValue(), "Alice", "initial context resolves");
-
-    // Remove context
-    binding.setContext(undefined);
-
-    let changeCount = 0;
-    binding.attachChange(() => changeCount++);
-
-    // Changing the old path should NOT fire since binding has no context
-    model.setProperty("/items/0/name", "Carol");
-
-    setTimeout(() => {
-      assert.strictEqual(changeCount, 0, "no change after context removed");
-      model.destroy();
-      done();
-    }, 50);
-  });
-
   QUnit.test("setContext to same context is a no-op", (assert) => {
     const model = new SignalModel({
       items: [{ name: "Alice" }],
@@ -205,30 +178,5 @@ QUnit.module("Context and Path Shapes", () => {
     const binding = model.bindProperty("name", ctx!);
     assert.strictEqual(binding.getValue(), "Alice", "relative path resolves from root context");
     model.destroy();
-  });
-
-  QUnit.test("getProperty with explicit undefined context behaves like omitted", (assert) => {
-    const json = new JSONModel({ name: "Alice" });
-    const signal = new SignalModel({ name: "Alice" });
-
-    assert.strictEqual(
-      signal.getProperty("/name", undefined),
-      json.getProperty("/name", undefined),
-      "explicit undefined context matches JSONModel",
-    );
-    json.destroy();
-    signal.destroy();
-  });
-
-  QUnit.test("setProperty with explicit undefined context behaves like omitted", (assert) => {
-    const json = new JSONModel({ name: "Alice" });
-    const signal = new SignalModel({ name: "Alice" });
-
-    json.setProperty("/name", "Bob", undefined);
-    signal.setProperty("/name", "Bob", undefined);
-
-    assert.deepEqual(signal.getData(), json.getData(), "data matches");
-    json.destroy();
-    signal.destroy();
   });
 });

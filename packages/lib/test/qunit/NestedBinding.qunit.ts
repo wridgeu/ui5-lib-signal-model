@@ -65,7 +65,7 @@ QUnit.module("NestedBinding", () => {
     model.destroy();
   });
 
-  QUnit.test("deeply nested property access through contexts", (assert) => {
+  QUnit.test("deeply nested property access via absolute paths", (assert) => {
     const model = new SignalModel({
       company: {
         departments: [
@@ -116,7 +116,7 @@ QUnit.module("NestedBinding", () => {
     model.setProperty("/departments/0/employees/0/name", "Carol");
   });
 
-  QUnit.test("modifying parent list notifies child bindings", (assert) => {
+  QUnit.test("replacing a list of nested objects notifies its list binding", (assert) => {
     const done = assert.async();
     const model = new SignalModel({
       items: [
@@ -126,10 +126,10 @@ QUnit.module("NestedBinding", () => {
     });
     const listBinding = model.bindList("/items");
     listBinding.getContexts(0, 10);
-    let changed = false;
+    let changed = 0;
 
     listBinding.attachChange(() => {
-      changed = true;
+      changed++;
     });
 
     model.setProperty("/items", [
@@ -139,7 +139,7 @@ QUnit.module("NestedBinding", () => {
     ]);
 
     setTimeout(() => {
-      assert.ok(changed, "list binding notified when parent array changes");
+      assert.strictEqual(changed, 1, "list binding notified when parent array changes");
       const contexts = listBinding.getContexts(0, 10);
       assert.strictEqual(contexts.length, 3, "3 items after update");
       model.destroy();
