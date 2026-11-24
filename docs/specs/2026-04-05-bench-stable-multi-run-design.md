@@ -67,20 +67,24 @@ Cell display: `~equal`, `13.1x faster`, or `1.3x slower` (no ANSI color in cells
 
 Each run is classified into a direction: `faster`, `slower`, or `equal`.
 
-- If both `faster` and `slower` appear across runs: **noise**.
-- A direction is only claimed when **more than half** of the runs show it. A win or loss seen in a minority of runs (the rest `equal`) is reported as `stable: ~equal`, so a single lucky run cannot produce a "stable" win.
-- Otherwise: **stable**.
+Runs are aggregated as **paired ratios**: each run's `jsonMedian / signalMedian`. Both models share a run's machine state, so the per-run ratio cancels differences between runs that two separate per-model medians would keep.
+
+- If both significant `faster` and `slower` appear across runs: **noise**.
+- **stable** faster/slower: more than half of the runs are significant in that direction, so a single lucky run cannot produce a "stable" win.
+- **marginal** faster/slower: not significant in a majority of runs, but every run leans the same way and the median paired ratio differs by at least 3%. This keeps a small, consistent difference from hiding behind `~equal`.
+- Otherwise: **stable** `~equal`.
 
 ### Verdict Labels
 
-| Condition                          | Label                             | Color  |
-| ---------------------------------- | --------------------------------- | ------ |
-| Half or more runs `equal`          | `stable: ~equal`                  | dim    |
-| Majority `faster`, none `slower`   | `stable: ~{median_ratio}x faster` | green  |
-| Majority `slower`, none `faster`   | `stable: ~{median_ratio}x slower` | red    |
-| Both `faster` and `slower` present | `noise`                           | yellow |
+| Condition                            | Label                              | Color  |
+| ------------------------------------ | ---------------------------------- | ------ |
+| No majority, runs lean both ways     | `stable: ~equal`                   | dim    |
+| No majority, every run leans one way | `marginally faster/slower (~{r}x)` | dim    |
+| Majority `faster`, none `slower`     | `stable: ~{median_ratio}x faster`  | green  |
+| Majority `slower`, none `faster`     | `stable: ~{median_ratio}x slower`  | red    |
+| Both `faster` and `slower` present   | `noise`                            | yellow |
 
-The `{median_ratio}` is the median of the ratios from all non-equal runs, displayed with one decimal place.
+The `{median_ratio}` is the median of the paired per-run ratios across all runs. The merged JSON also carries `jsonMedian` and `signalMedian`, each model's median across runs.
 
 ## Merged JSON Output
 

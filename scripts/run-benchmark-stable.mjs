@@ -21,7 +21,12 @@ import { join, dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
-import { ANSI, computeRatio } from "../packages/lib/test/benchmark/bench-stats.mjs";
+import {
+  ANSI,
+  computeRatio,
+  computeVerdict,
+  median,
+} from "../packages/lib/test/benchmark/bench-stats.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -91,42 +96,6 @@ function fmtCell(r) {
 }
 
 /**
- * Compute the stability verdict across all runs for a scenario.
- *
- * - If faster and slower both appear → noise
- * - A direction is only claimed when more than half of the runs show it;
- *   a win seen in a minority of runs is reported as ~equal
- *
- * @param {{ direction: string, ratio: number }[]} ratios Per-run ratio results
- * @returns {{ verdict: "stable"|"noise", direction: "faster"|"slower"|"equal", medianRatio: number }} Aggregated verdict
- */
-function computeVerdict(ratios) {
-  const nonEqual = ratios.filter((r) => r.direction !== "equal");
-
-  if (nonEqual.length === 0) {
-    return { verdict: "stable", direction: "equal", medianRatio: 1 };
-  }
-
-  const hasFaster = nonEqual.some((r) => r.direction === "faster");
-  const hasSlower = nonEqual.some((r) => r.direction === "slower");
-
-  if (hasFaster && hasSlower) {
-    return { verdict: "noise", direction: "equal", medianRatio: 1 };
-  }
-
-  if (nonEqual.length * 2 <= ratios.length) {
-    return { verdict: "stable", direction: "equal", medianRatio: 1 };
-  }
-
-  const direction = nonEqual[0].direction;
-  const sorted = nonEqual.map((r) => r.ratio).toSorted((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const medianRatio = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-
-  return { verdict: "stable", direction, medianRatio };
-}
-
-/**
  * Format the verdict column with ANSI color.
  *
  * @param {{ verdict: string, direction: string, medianRatio: number }} v Verdict to format
@@ -135,6 +104,9 @@ function computeVerdict(ratios) {
 function fmtVerdict(v) {
   if (v.verdict === "noise") return YELLOW + "noise" + RESET;
   if (v.direction === "equal") return DIM + "stable: ~equal" + RESET;
+  if (v.verdict === "marginal") {
+    return DIM + `marginally ${v.direction} (~${v.medianRatio.toFixed(2)}x)` + RESET;
+  }
   const label = `stable: ~${v.medianRatio.toFixed(1)}x ${v.direction}`;
   return (v.direction === "faster" ? GREEN : RED) + label + RESET;
 }
@@ -218,11 +190,12 @@ for (let s = 0; s < scenarioCount; s++) {
       process.exit(1);
     }
     const r = run.results[idx];
-    return computeRatio(r.signal, r.json);
+    return { ...computeRatio(r.signal, r.json), raw: r.json.median / r.signal.median };
   });
 
   const verdict = computeVerdict(ratios);
-  scenarios.push({ name, category, ratios, verdict });
+  const runsForScenario = allResults.map((run, i) => run.results[runLookups[i].get(name)]);
+  scenarios.push({ name, category, ratios, verdict, runs: runsForScenario });
 }
 
 // Determine column widths
@@ -262,10 +235,13 @@ console.log(SEP);
 
 // Summary
 const stableCount = scenarios.filter((s) => s.verdict.verdict === "stable").length;
+const marginalCount = scenarios.filter((s) => s.verdict.verdict === "marginal").length;
 const noiseCount = scenarios.filter((s) => s.verdict.verdict === "noise").length;
 console.log(
-  `\n${GREEN}${stableCount} stable${RESET}, ${noiseCount > 0 ? YELLOW : DIM}${noiseCount} noise${RESET}` +
-    ` out of ${scenarioCount} scenarios\n`,
+  `
+${GREEN}${stableCount} stable${RESET}, ${DIM}${marginalCount} marginal${RESET}, ` +
+    `${noiseCount > 0 ? YELLOW : DIM}${noiseCount} noise${RESET} out of ${scenarioCount} scenarios
+`,
 );
 
 // ── JSON output ──────────────────────────────────────────────────────
@@ -289,6 +265,9 @@ if (jsonOutFile) {
           signal: run.results[idx].signal,
         };
       }),
+      // Per-model medians across runs, for reporting absolute times
+      jsonMedian: median(sc.runs.map((r) => r.json.median)),
+      signalMedian: median(sc.runs.map((r) => r.signal.median)),
       verdict: sc.verdict.verdict,
       direction: sc.verdict.direction,
       medianRatio: sc.verdict.medianRatio,
