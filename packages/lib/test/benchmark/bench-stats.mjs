@@ -3,6 +3,7 @@
  *
  * Used by both {@link bench.spec.mjs} (terminal output) and
  * {@link ../../scripts/run-benchmark-stable.mjs} (multi-run stability).
+ * Self-check: `node packages/lib/test/benchmark/bench-stats.mjs`.
  *
  * The browser-side {@link index.html} has its own copy of these functions
  * (it cannot import ES modules from Node). When changing logic here,
@@ -71,14 +72,12 @@ export function stats(arr) {
   const clean = filterOutliers(arr);
   const n = clean.length;
   const sorted = clean.toSorted((a, b) => a - b);
-  const mid = Math.floor(n / 2);
-  const median = n % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   const mean = clean.reduce((s, v) => s + v, 0) / n;
   const variance = n > 1 ? clean.reduce((s, v) => s + (v - mean) * (v - mean), 0) / (n - 1) : 0;
 
   return {
     n,
-    median,
+    median: median(clean),
     mean,
     stddev: Math.sqrt(variance),
     min: sorted[0],
@@ -132,4 +131,90 @@ export function computeRatio(signal, json) {
   if (ratio >= 1.1) return { direction: "faster", ratio };
   if (ratio <= 0.9) return { direction: "slower", ratio: 1 / ratio };
   return { direction: "equal", ratio: 1 };
+}
+
+// ── Multi-run aggregation ───────────────────────────────────────────
+
+/**
+ * Median of a list of numbers.
+ *
+ * @param {number[]} values Numbers to aggregate
+ * @returns {number} Median value
+ */
+export function median(values) {
+  const sorted = values.toSorted((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Compute the stability verdict across several runs of one scenario.
+ *
+ * Runs are aggregated as paired ratios: each run's JSONModel median divided
+ * by its SignalModel median. Both models share a run's machine state, so the
+ * per-run ratio cancels differences between runs that two separate per-model
+ * medians would keep.
+ *
+ * - noise: significant `faster` and `slower` both appear
+ * - stable faster/slower: more than half of the runs are significant in that direction
+ * - marginal faster/slower: not significant in a majority of runs, but every
+ *   run leans the same way and the median difference is at least 3%
+ * - stable equal: everything else
+ *
+ * @param {{ direction: "faster"|"slower"|"equal", raw: number }[]} runs
+ *   Per-run results; `raw` is jsonMedian / signalMedian
+ * @returns {{ verdict: "stable"|"marginal"|"noise", direction: "faster"|"slower"|"equal", medianRatio: number }}
+ *   Aggregated verdict; `medianRatio` is >= 1 in the reported direction (1 for equal)
+ */
+export function computeVerdict(runs) {
+  const count = (direction) => runs.filter((r) => r.direction === direction).length;
+  const faster = count("faster");
+  const slower = count("slower");
+  const paired = median(runs.map((r) => r.raw));
+  const toward = (direction) => (direction === "faster" ? paired : 1 / paired);
+
+  if (faster > 0 && slower > 0) {
+    return { verdict: "noise", direction: "equal", medianRatio: 1 };
+  }
+  for (const [direction, significant] of [
+    ["faster", faster],
+    ["slower", slower],
+  ]) {
+    if (significant * 2 > runs.length) {
+      return { verdict: "stable", direction, medianRatio: toward(direction) };
+    }
+    const allLean = runs.every((r) => (direction === "faster" ? r.raw > 1 : r.raw < 1));
+    if (allLean && toward(direction) >= 1.03) {
+      return { verdict: "marginal", direction, medianRatio: toward(direction) };
+    }
+  }
+  return { verdict: "stable", direction: "equal", medianRatio: 1 };
+}
+
+// ── Self-check (runs only when executed directly) ───────────────────
+
+if (
+  process.argv[1] &&
+  import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/").split("/").pop())
+) {
+  const { deepStrictEqual: eq } = await import("node:assert");
+  const run = (direction, raw) => ({ direction, raw });
+  const v = (runs) => computeVerdict(runs);
+  eq(v([run("faster", 3), run("faster", 5), run("faster", 4), run("equal", 2)]).verdict, "stable");
+  eq(v([run("faster", 3), run("faster", 5), run("faster", 4)]).medianRatio, 4);
+  eq(v([run("faster", 2), run("slower", 0.5), run("equal", 1)]).verdict, "noise");
+  // one significant run out of four is not a stable result, and the runs do not all lean one way
+  eq(v([run("slower", 0.29), run("equal", 0.95), run("equal", 1.04), run("equal", 0.99)]), {
+    verdict: "stable",
+    direction: "equal",
+    medianRatio: 1,
+  });
+  // every run leans slower without reaching significance
+  eq(v([run("equal", 0.9), run("equal", 0.8), run("equal", 0.95), run("equal", 0.9)]), {
+    verdict: "marginal",
+    direction: "slower",
+    medianRatio: 1 / 0.9,
+  });
+  eq(v([run("equal", 1.01), run("equal", 1.02)]).verdict, "stable");
+  console.log("bench-stats self-check passed");
 }

@@ -239,11 +239,14 @@
       var MIN_SAMPLE_MS = 20;
 
       /**
-       * Time one operation: from calling `op()` until `done()` is true.
+       * Time one operation end to end: from calling `op()` until `done()` is
+       * true (the control holds the new value) and the DOM has been re-rendered.
        * Repeats the operation until the sample spans MIN_SAMPLE_MS and returns
-       * the mean time per operation in ms. Rendering is suspended while the
-       * clock runs (it is identical for both models and scheduled by a timer),
-       * so the result is model -> binding -> control property propagation.
+       * the mean time per operation in ms.
+       *
+       * UI5 schedules rendering with setTimeout(0), which would put the timer
+       * clamp back into every sample. Rendering is therefore suspended and run
+       * synchronously once the update has propagated: same work, no timer wait.
        */
       async function timeOp(op, done) {
         done = done || alwaysDone;
@@ -256,6 +259,8 @@
           do {
             op(reps++);
             await settle(done);
+            Rendering.renderPendingUIUpdates("benchmark"); // synchronous render pass
+            Rendering.suspend(); // the render pass lifts the suspension
             elapsed = performance.now() - start;
           } while (elapsed < MIN_SAMPLE_MS);
           return elapsed / reps;
@@ -2616,7 +2621,7 @@
         html += "<li><strong>List binding replace</strong>: ";
         html +=
           "Tests <code>SignalListBinding</code> vs <code>JSONListBinding</code> with a real <code>sap.m.List</code> control. " +
-          "Replaces the bound array and measures propagation until the list's items carry the new data (DOM rendering excluded).</li>";
+          "Replaces the bound array and measures propagation until the list's items carry the new data and are re-rendered.</li>";
         html += "<li><strong>Table binding replace</strong>: ";
         html +=
           "Tests list binding with a <code>sap.m.Table</code> (3 columns per row). " +
@@ -2647,13 +2652,13 @@
         html +=
           "<li><strong>Warmup:</strong> 3 warmup rounds per sample exercise the same code paths before measurement begins.</li>";
         html +=
-          "<li><strong>What is timed:</strong> from the model call until the bound control holds the new value (checked on the control; a sample fails loudly if the update never arrives). " +
+          "<li><strong>What is timed:</strong> from the model call until the bound control holds the new value (checked on the control; a sample fails loudly if the update never arrives) and its DOM has been re-rendered. " +
           "The operation is repeated until a sample spans at least 20 ms and the mean time per operation is reported, keeping every sample far above <code>performance.now()</code> resolution.</li>";
         html +=
           "<li><strong>No timers in the timed region:</strong> waiting uses microtasks, then <code>MessageChannel</code> tasks. A <code>setTimeout(0)</code> wait would add the browser's nested-timer clamp (4 ms or more) to every sample and bury the model cost. " +
           "Only the <code>bAsyncUpdate</code> scenarios include a timer, the one the models schedule themselves.</li>";
         html +=
-          "<li><strong>Rendering excluded:</strong> <code>sap/ui/core/Rendering</code> is suspended while the clock runs. DOM rendering is identical for both models; the benchmark compares model, binding and control-property propagation.</li>";
+          "<li><strong>Rendering included, its timer is not:</strong> UI5 schedules rendering with <code>setTimeout(0)</code>. The benchmark suspends that timer and runs the same render pass synchronously once the update has propagated, so samples contain the rendering work but not the timer wait.</li>";
         html +=
           "<li><strong>Significance:</strong> a difference is reported only if it exceeds 3 standard errors and 10%; otherwise <em>~equal</em>.</li>";
         html +=
@@ -2681,7 +2686,7 @@
         html += "<h2>Limitations</h2>";
         html += "<ul>";
         html +=
-          "<li>DOM rendering and layout are not measured. End-to-end frame times in an application are dominated by rendering and will differ less than these numbers.</li>";
+          "<li>Controls live in a display:none container: UI5's rendering (DOM patching) is measured, browser layout and paint are not.</li>";
         html +=
           "<li>The page loads the library from the dev server (transpiled on the fly), not the minified build.</li>";
         html +=
