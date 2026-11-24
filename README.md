@@ -109,11 +109,11 @@ npm run clean  # remove dist and .ui5 caches
 
 ### Benchmark
 
-A self-contained benchmark suite compares SignalModel vs JSONModel across 22 scenarios on OpenUI5 1.154.0. Each number is the time from a model write until UI5 has re-rendered the affected controls; browser layout and paint are not included. The largest difference is 2,000 consecutive synchronous `setProperty` calls on a model with 2,000 bindings: ~38 ms instead of ~1.9 s (**52x faster**, 95% CI 47x-58x), because JSONModel checks every binding on every call. With `bAsyncUpdate`, the mitigation UI5 recommends, JSONModel does the same work in ~34 ms and the two models cannot be separated. Across all 22 scenarios, SignalModel is faster in 16, marginally slower in 1 (`setData` replace, 1.05x) and not clearly different in 5 (aggregation replace, full `bAsyncUpdate` batches).
+A self-contained benchmark suite compares SignalModel vs JSONModel across 24 scenarios on OpenUI5 1.154.0. Each number is the time from a model write until UI5 has re-rendered the affected controls; browser layout and paint are not included. The largest difference is 2,000 consecutive synchronous `setProperty` calls on a model with 2,000 bindings: ~23 ms instead of ~1.3 s (**54x faster**, 95% CI 49x-60x), because JSONModel checks every binding on every call. With `bAsyncUpdate`, the mitigation UI5 recommends, JSONModel does the same work in ~24 ms and the two models cannot be separated. Across all 24 scenarios, SignalModel is faster in 16 and not clearly different in 8 (aggregation replace, `setData` replace, full merges, full `bAsyncUpdate` batches).
 
 ![SignalModel vs JSONModel Benchmark](docs/benchmark-results.svg)
 
-See the [benchmark documentation](packages/lib/test/benchmark/README.md) for all 22 scenarios, the methodology, and what is and is not measured. The numbers come from one desktop machine; the raw data is in [docs/benchmark-results.json](docs/benchmark-results.json).
+See the [benchmark documentation](packages/lib/test/benchmark/README.md) for all 24 scenarios, the methodology, and what is and is not measured. The numbers come from one desktop machine; the raw data is in [docs/benchmark-results.json](docs/benchmark-results.json).
 
 ```bash
 npm run bench                                    # CLI -- headless
