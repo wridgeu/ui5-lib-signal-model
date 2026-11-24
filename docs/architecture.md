@@ -9,7 +9,7 @@ flowchart TD
   Views["XML View Bindings<br/>{/customer/name}, {/orders}, {path: '/tree'}"]
   Bindings["SignalPropertyBinding / SignalListBinding / SignalTreeBinding<br/>Each watches its path signal via Signal.subtle.Watcher"]
   Queue["FlushQueue (shared)<br/>Deduplicates into Map and flushes once per microtask"]
-  Registry["SignalRegistry<br/>Lazy State signals + Computed signals (signalEquals)"]
+  Registry["SignalRegistry<br/>Lazy State signals + Computed signals (signalEquals)<br/>Index: path -> signals below it"]
   Model["SignalModel (extends ClientModel)<br/>oData = plain JS object (source of truth)"]
 
   Views -->|"bindProperty / bindList / bindTree"| Bindings
@@ -48,22 +48,35 @@ sequenceDiagram
 - **Map-based deduplication**: `Map<binding, signal>` ensures each binding appears at most once. Rapid-fire `setProperty` calls (e.g., updating 10 fields in a loop) produce exactly one `checkUpdate` per affected binding.
 - **Watcher re-arm and error isolation**: The TC39 Watcher fires at most once between `watch()` calls. The flush reads the current value (`signal.get()`, inside `try/catch` so a throwing computed cannot abort the batch), always re-arms the watcher (`watcher.watch()`), then updates the binding. For direct property bindings, the already-read value is passed straight to `_checkUpdateFromSignal`, avoiding a second path traversal.
 
-When `bAsyncUpdate=true` is passed to `setProperty`, synchronous signal notification is skipped. Dirty paths are recorded in a `Map` and synced once in a single `setTimeout` pass with deduplicated ancestor invalidation. See [Batching and `bAsyncUpdate`](#batching-and-basyncupdate).
+When `bAsyncUpdate=true` is passed to `setProperty`, synchronous signal notification is skipped. Dirty paths are recorded in a `Set` and synced once in a single `setTimeout` pass with deduplicated ancestor invalidation. See [Batching and `bAsyncUpdate`](#batching-and-basyncupdate).
 
-## O(1) Leaf Writes
+## Write Cost: Only the Signals a Write Can Affect
 
-In `setProperty`, `registry.invalidateChildren()` is only invoked when `oldValue` or `newValue` is a non-null object. For primitive-to-primitive leaf updates, no child signals can exist before or after the write, so scanning the signal registry is skipped completely. Combined with a zero-allocation `indexOf("/")` traversal in `_getObject` and a fast path for absolute paths, leaf `setProperty` runs in true O(1) time.
+A write to a path can change three groups of signals: the path itself, its ancestors (`/a` when `/a/b` is written), and everything below it (`/a/b/c`). `setProperty` updates exactly these and never scans the registry.
+
+- **The path itself:** one `Map` lookup.
+- **Ancestors:** one lookup per path segment. The registry tracks the depth of its shallowest signal; when no signal can exist above the written path, the walk is skipped.
+- **Signals below:** the registry keeps an index from each path to the state signals below it, filled when a signal is created. A write looks up its own path in that index and refreshes what it finds. Signals below a path exist even when the value is a primitive: a binding to `/name/length` shows the length of a string.
+- **Arrays:** writing an element also refreshes the array's `length` signal, because a write past the end grows the array. Writing `length` refreshes the elements.
+
+For a leaf with no signals below it, this is a constant number of lookups. Combined with a zero-allocation `indexOf("/")` traversal in `_getObject`, the cost of a write does not depend on how many bindings the model has.
 
 ```mermaid
 flowchart LR
   Write["setProperty(path, value)"] --> Update["Write parent[prop] = value"]
   Update --> Mode{"bAsyncUpdate?"}
-  Mode -->|"false (default)"| LeafCheck{"oldValue or value<br/>is non-null object?"}
-  LeafCheck -->|"No (primitive leaf)"| Fast["O(1): set(path) +<br/>invalidate ancestors only"]
-  LeafCheck -->|"Yes (object/array)"| Full["set(path) + ancestors +<br/>invalidateChildren(path)"]
+  Mode -->|"false (default)"| Self["set(path)"]
+  Self --> Up{"any signal<br/>above path?"}
+  Up -->|"Yes"| Anc["set each ancestor signal"]
+  Up -->|"No"| Below
+  Anc --> Below["index lookup: refresh<br/>signals below path"]
+  Below --> Arr{"parent is<br/>an array?"}
+  Arr -->|"Yes"| Len["refresh length<br/>(or elements, if length was written)"]
   Mode -->|"true"| Defer["Record in _pendingAsyncPaths<br/>schedule single setTimeout(0)"]
-  Defer --> Sync["Sync dirty paths +<br/>deduplicated ancestors"]
+  Defer --> Sync["Same steps once per dirty path,<br/>ancestors deduplicated"]
 ```
+
+Cost of the index: creating a signal adds one entry per ancestor path (about 0.3 µs per binding in a model-only measurement with 2000 bindings). Before the index existed, a write of an object or array value scanned every signal in the registry, which made "replace every row object" quadratic: 2000 row writes with 2000 bindings took about 100 ms and now take about 2 ms.
 
 ## In-Place Merge (Eliminating `deepExtend`)
 
@@ -85,26 +98,28 @@ SignalModel replaces this with an **in-place recursive merge** (`_mergeInPlace`)
 2. Compares old vs new values inline (`Object.is`)
 3. Overwrites changed values directly in `this.oData`
 4. Fires signals only for subtrees that actually changed, invalidating ancestors once at the merge root
-5. Uses `structuredClone()` (with a `deepExtend` fallback for non-cloneable values like functions) for incoming object/array values to prevent external mutation
+5. Clones incoming plain-object/array values with `deepExtend` to prevent external mutation
+
+The result matches `JSONModel.setData(data, true)`: payload keys whose value is `undefined` are skipped, and the merge descends only into arrays and plain objects. A `Date` or class instance in the payload replaces the existing value; class instances keep their identity and prototype.
 
 This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload size. The improvement is largest for shallow merges into large datasets, common in form-based Fiori apps that update a few fields at a time.
 
 ## `structuredClone` with `deepExtend` Fallback
 
-Where a pure deep clone is needed (not a merge), `structuredClone()` is used with a `try/catch` fallback to UI5's `deepExtend` when values contain non-cloneable properties (such as functions). This applies to `SignalListBinding.update()` for extended change detection and incoming objects in `_mergeInPlace()`.
+`SignalListBinding.update()` needs a deep copy of the list for extended change detection. It uses `structuredClone()` with a `try/catch` fallback to UI5's `deepExtend` when values contain non-cloneable properties (such as functions).
 
 ## Batching and `bAsyncUpdate`
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` flag that defers `checkUpdate` into a `setTimeout`, collapsing N synchronous `setProperty` calls into a single binding check pass. This is SAP's recommended workaround for the O(N²) problem documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-SignalModel supports this flag with targeted dirty-path tracking: when `bAsyncUpdate=true`, data is written immediately and the resolved path is recorded in `_pendingAsyncPaths`. A single `setTimeout` syncs only the dirty paths and their deduplicated ancestor signals (O(1) for sparse updates, O(N) for full-batch updates). Pending timers are cleared on `destroy()`. Without the flag (default), SignalModel uses its push-based microtask flush which provides O(1) per-path notification.
+SignalModel supports this flag with targeted dirty-path tracking: when `bAsyncUpdate=true`, data is written immediately and the resolved path is recorded in `_pendingAsyncPaths`. A single `setTimeout` syncs only the dirty paths, the signals below them and their deduplicated ancestor signals (O(1) for sparse updates, O(N) for full-batch updates). Pending timers are cleared on `destroy()`. Without the flag (default), SignalModel uses its push-based microtask flush which provides O(1) per-path notification.
 
 ## Microtask vs Macrotask Scheduling
 
 SignalModel has two scheduling paths depending on how `setProperty` is called:
 
 - **Default (no `bAsyncUpdate`):** signal changes fire synchronously, and the FlushQueue batches binding updates via `queueMicrotask`. Microtasks run before the browser paints, so the first frame always shows correct data. One paint, always consistent.
-- **`bAsyncUpdate=true`:** signal notifications are skipped entirely during the `setProperty` loop. A single `setTimeout` syncs all signals afterward. This uses the same macrotask scheduling as JSONModel's `bAsyncUpdate` -- the browser may render one stale frame before bindings update.
+- **`bAsyncUpdate=true`:** signal notifications are skipped entirely during the `setProperty` loop. A single `setTimeout` syncs the signals of the written paths afterward (see above). This uses the same macrotask scheduling as JSONModel's `bAsyncUpdate` -- the browser may render one stale frame before bindings update.
 
 The browser event loop processes work in this order:
 

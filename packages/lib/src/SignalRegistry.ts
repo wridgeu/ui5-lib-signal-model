@@ -20,6 +20,16 @@ function signalEquals(_a: unknown, _b: unknown): boolean {
 export default class SignalRegistry {
   private readonly signals = new Map<string, Signal.State<unknown>>();
   private readonly computeds = new Map<string, Signal.Computed<unknown>>();
+  /**
+   * State signals below each path, filled as signals are created. Lets a write
+   * reach its child signals directly instead of scanning the whole registry.
+   */
+  private readonly descendants = new Map<string, [string, Signal.State<unknown>][]>();
+  /**
+   * Depth of the shallowest state signal ("/" is 0, "/a" is 1, "/a/b" is 2). A write at
+   * this depth or above has no signal among its ancestors, so the ancestor walk is skipped.
+   */
+  minDepth = Infinity;
 
   /**
    * @param path - Property path to look up or create.
@@ -32,6 +42,20 @@ export default class SignalRegistry {
     if (!signal) {
       signal = new Signal.State(initialValue, { equals: signalEquals });
       this.signals.set(path, signal);
+      let depth = path === "/" ? 0 : 1;
+      for (let idx = path.lastIndexOf("/"); idx > 0; idx = path.lastIndexOf("/", idx - 1)) {
+        depth++;
+        const ancestor = path.substring(0, idx);
+        const below = this.descendants.get(ancestor);
+        if (below) {
+          below.push([path, signal]);
+        } else {
+          this.descendants.set(ancestor, [[path, signal]]);
+        }
+      }
+      if (depth < this.minDepth) {
+        this.minDepth = depth;
+      }
     }
     return signal;
   }
@@ -81,9 +105,13 @@ export default class SignalRegistry {
    * @since 0.1.0
    */
   invalidateChildren(parentPath: string, resolver: ValueResolver): void {
-    const prefix = parentPath.endsWith("/") ? parentPath : `${parentPath}/`;
-    for (const [path, signal] of this.signals) {
-      if (path.startsWith(prefix)) {
+    if (parentPath === "/") {
+      this.invalidateAll(resolver); // every signal is below the root; the index has no "/" entry
+      return;
+    }
+    const below = this.descendants.get(parentPath);
+    if (below) {
+      for (const [path, signal] of below) {
         signal.set(resolver(path));
       }
     }
@@ -181,5 +209,7 @@ export default class SignalRegistry {
   destroy(): void {
     this.signals.clear();
     this.computeds.clear();
+    this.descendants.clear();
+    this.minDepth = Infinity;
   }
 }

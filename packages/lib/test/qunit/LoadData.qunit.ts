@@ -331,7 +331,7 @@ QUnit.module("loadData", () => {
     model.attachRequestFailed((oEvent) => {
       const params = oEvent.getParameters();
       assert.ok(params.message, "error has message");
-      assert.strictEqual(params.statusCode, "404", "statusCode is the HTTP status");
+      assert.strictEqual(params.statusCode, 404, "statusCode is the HTTP status");
       assert.ok(params.statusText, "error has statusText");
       model.destroy();
       done();
@@ -585,5 +585,68 @@ QUnit.module("loadData", () => {
         done();
       }, 50);
     }, 50);
+  });
+
+  QUnit.test(
+    "loadData rejects with the error object on failure -- parity with JSONModel",
+    async (assert) => {
+      const outcome = async (model: JSONModel | SignalModel<Record<string, unknown>>) => {
+        let result: unknown = "resolved";
+        await model.loadData(BAD_URL)?.catch((error: unknown) => {
+          result = error;
+        });
+        model.destroy();
+        return result as { message: string; statusCode: number; statusText: string };
+      };
+
+      const json = await outcome(new JSONModel());
+      const signal = await outcome(new SignalModel<Record<string, unknown>>());
+
+      assert.strictEqual(
+        json.statusCode,
+        404,
+        "JSONModel rejects with the HTTP status as a number",
+      );
+      assert.strictEqual(signal.statusCode, json.statusCode, "same statusCode");
+      assert.strictEqual(signal.statusText, json.statusText, "same statusText");
+      assert.strictEqual(typeof signal.message, "string", "has a message");
+    },
+  );
+
+  QUnit.test("a failed load does not block the next one", async (assert) => {
+    let unhandled = 0;
+    const onUnhandled = (): void => {
+      unhandled++;
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    const model = new SignalModel<Record<string, unknown>>();
+    // Not awaited and without a catch: the model's import chain observes the rejection
+    void model.loadData(BAD_URL);
+    await model.loadData(SAMPLE_URL);
+    assert.strictEqual(model.getProperty("/name"), "Alice", "next load applied");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.removeEventListener("unhandledrejection", onUnhandled);
+    assert.strictEqual(unhandled, 0, "an ignored failed load is not an unhandled rejection");
+    model.destroy();
+  });
+
+  QUnit.test("a custom accept header in any case replaces the default", (assert) => {
+    const sent: (string | null)[] = [];
+    const originalFetch = window.fetch;
+    window.fetch = (_input, init) => {
+      sent.push(new Headers(init?.headers).get("accept"));
+      return Promise.resolve(new Response("{}"));
+    };
+    const model = new SignalModel<Record<string, unknown>>();
+    void model.loadData(SAMPLE_URL);
+    void model.loadData(SAMPLE_URL, undefined, true, "GET", false, true, { accept: "text/plain" });
+    window.fetch = originalFetch;
+
+    assert.deepEqual(
+      sent,
+      ["application/json", "text/plain"],
+      "default, then the custom value alone",
+    );
+    model.destroy();
   });
 });
