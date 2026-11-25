@@ -293,7 +293,7 @@ Without any bindings, 500 `setProperty` calls take ~0.10 ms (JSONModel) vs ~0.06
 
 **What is not measured:**
 
-Browser layout and paint, the `setTimeout(0)` before UI5's render pass, model and binding creation, memory, ODataModel, and the minified library build.
+Browser layout and paint, the `setTimeout(0)` before UI5's render pass, model and binding creation, memory (see [architecture](../../../../docs/architecture.md#memory)), ODataModel, and the minified library build.
 
 **What SignalModel offers over JSONModel with `bAsyncUpdate`:**
 

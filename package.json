@@ -25,6 +25,7 @@
     "bench": "node scripts/run-benchmark.mjs",
     "bench:stable": "node scripts/run-benchmark-stable.mjs",
     "bench:render": "node scripts/render-benchmark-results.mjs",
+    "bench:memory": "node scripts/measure-memory.mjs",
     "test": "npm run test:qunit",
     "test:qunit": "node ./scripts/run-with-server.mjs --ready-url http://localhost:8080 --server-script start:lib --test-script wdio:qunit",
     "commitlint": "commitlint --last",

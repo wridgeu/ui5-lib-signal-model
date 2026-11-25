@@ -79,7 +79,20 @@ flowchart LR
 
 Cost of the index: creating a signal adds one entry per ancestor path (about 0.3 µs per binding in a model-only measurement with 2000 bindings). Before the index existed, a write of an object or array value scanned every signal in the registry, which made "replace every row object" quadratic: 2000 row writes with 2000 bindings took about 100 ms and now take about 2 ms.
 
-Memory: the index stores each signal's path once per ancestor path. Measured in Node.js with 20,000 state signals, a signal costs about 145 bytes without the index. With it, a signal at `/items/0/name` costs about 315 bytes and one at `/a/b/c/d/items/0/meta/name` about 495 bytes. Top-level paths such as `/name` have no ancestor and cost nothing extra.
+## Memory
+
+Memory grows with the number of bound paths, not with the amount of data. The data is one plain object in both models, and SignalModel creates a signal only for a path that a binding or `getSignal` asks for. Measured in headless Chrome 158 with `npm run bench:memory` (heap after garbage collection, 20,000 property bindings each):
+
+| What                                                       | JSONModel | SignalModel |
+| ---------------------------------------------------------- | --------- | ----------- |
+| 20,000 rows of data (2.3 MB as JSON text), nothing bound   | 3.75 MB   | 3.75 MB     |
+| One property binding on a top-level path (`/k1`)           | ~0.5 kB   | ~1.4 kB     |
+| One property binding on `/items/1/name`                    | ~0.5 kB   | ~1.5 kB     |
+| One property binding on an 8-segment path                  | ~0.5 kB   | ~1.6 kB     |
+| A `sap.m.Text` property bound to `/items/1/name` (binding) | ~1.1 kB   | ~2.1 kB     |
+| One list binding over 20,000 rows, per row                 | ~80 B     | ~80 B       |
+
+So a property binding costs about 1 kB more than with JSONModel: the state signal, its watcher and the entries of the path index. The index is the part that grows with the path depth, about 0.1-0.2 kB of that. As a range: 1,000 bound paths are about 1.5 MB instead of 0.5 MB, 10,000 about 15 MB instead of 5 MB. A list binding costs the same in both models, and unbound data costs nothing extra, so 100,000 rows shown through a table with 20 visible rows need signals only for the cells of those rows. The numbers are from one machine and one Chrome version.
 
 ## In-Place Merge (Eliminating `deepExtend`)
 

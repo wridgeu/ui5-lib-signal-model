@@ -120,6 +120,7 @@ npm run bench                                    # CLI -- headless
 npm run bench -- --bindings 1000 --json results.json  # custom config
 npm run bench:stable                              # multi-run stability
 npm run bench:render                              # regenerate chart + table from docs/benchmark-results.json
+npm run bench:memory                              # heap per binding, both models (needs npm run start:lib)
 ```
 
 ### Commits
