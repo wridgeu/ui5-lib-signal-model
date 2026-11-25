@@ -193,6 +193,10 @@ model.removeComputed("/total");
 model.createComputed("/total", ["/price"], (p) => p);
 ```
 
+> **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters, the closest existing equivalent, are also fixed in code and never replaced at runtime.
+>
+> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative -- bindings are declared in XML and the developer never touches them directly. SignalModel's automatic resubscription mechanism (described below) ensures that `removeComputed` + `createComputed` works seamlessly regardless of how bindings were created.
+
 ### Computed Signals That Throw
 
 An error thrown by a computed's function is not turned into a value:
@@ -200,10 +204,6 @@ An error thrown by a computed's function is not turned into a value:
 - `getProperty`, `getObject` and a new binding on the path rethrow the error until a dependency changes and the function succeeds again. This is how `Signal.Computed` behaves, and how JSONModel behaves when a formatter throws.
 - A binding that already shows a value keeps it. The error is logged, and other bindings update as usual.
 - `createComputed` runs the function once. If that first run throws, `createComputed` throws and no computed is registered, so the function must handle the data the model holds at that moment (for example before `loadData` has finished).
-
-> **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters, the closest existing equivalent, are also fixed in code and never replaced at runtime.
->
-> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative -- bindings are declared in XML and the developer never touches them directly. SignalModel's automatic resubscription mechanism (described below) ensures that `removeComputed` + `createComputed` works seamlessly regardless of how bindings were created.
 
 ### Automatic Resubscription
 

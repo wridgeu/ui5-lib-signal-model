@@ -560,8 +560,7 @@ QUnit.module("JSONModel Parity", () => {
     assert.strictEqual(probe.parityProbeB, undefined, "Object.prototype cleaned up");
   });
 
-  // Each case found by the audit or the parity fuzz. A binding must show what JSONModel
-  // holds at its path after the write.
+  // A binding must show what JSONModel holds at its path after the write.
   type AnyModel = JSONModel | SignalModel<Record<string, unknown>>;
   const DERIVED_VALUE_CASES: {
     name: string;
