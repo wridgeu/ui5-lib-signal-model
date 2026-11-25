@@ -111,6 +111,8 @@ This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload s
 
 `SignalListBinding.update()` copies the list with the same functions as `JSONListBinding`: `slice()` for arrays, `extend` for objects, and `deepExtend` for extended change detection. An earlier version used `structuredClone()`. It was no faster (about 0.5 ms either way for 2,000 flat rows) and gave different results for keys holding `undefined` and for properties set on a `Map`, `Set` or `Date`.
 
+A non-detecting copy shares its row objects with the model, in both models. A write to a row is therefore not a change for the list binding, and a sorted list does not sort again. JSONModel's merge is the exception: it rebuilds the data, so the binding's rows are no longer the model's rows and the binding notices the difference. SignalModel merges in place, so the model tells its list bindings about a merge (`SignalListBinding._onMerge`): a `setData` merge reaches every list binding, a `mergeProperty` that changed something reaches the bindings at, above or one level below the merged path. A binding that was told updates on its next notification, as long as it still shares a row object with the model; rows that were replaced since are compared as usual. The cost is one loop over the list bindings per merge; property bindings are not involved.
+
 ## Batching and `bAsyncUpdate`
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` flag that defers `checkUpdate` into a `setTimeout`, collapsing N synchronous `setProperty` calls into a single binding check pass. This is SAP's recommended workaround for the O(N²) problem documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).

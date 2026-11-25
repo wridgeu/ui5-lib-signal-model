@@ -51,6 +51,8 @@ function asInternal(self: ClientModel): ClientModelInternal {
  */
 export default class SignalModel<T extends object = Record<string, unknown>> extends ClientModel {
   private registry: SignalRegistry;
+  /** The subscribed list bindings: a merge has to reach them. Used by SignalListBinding. @internal */
+  _listBindings = new Set<SignalListBinding>();
   private autoCreatePaths: boolean;
   private strictLeafCheck: boolean;
   private _pathSubscribers = new Map<string, Set<() => void>>();
@@ -342,6 +344,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       }
       // In-place merge: walk the payload and apply changes directly to this.oData.
       // O(k) where k = payload size, instead of O(n) deep clone of all data.
+      for (const binding of this._listBindings) binding._onMerge("/");
       this._mergeInPlace(
         this.oData as Record<string, unknown>,
         data as Record<string, unknown>,
@@ -570,6 +573,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         resolvedPath,
       );
       if (changed && this.registry.size > 0) {
+        for (const binding of this._listBindings) binding._onMerge(resolvedPath);
         this._invalidateParentSignals(resolvedPath);
       }
 

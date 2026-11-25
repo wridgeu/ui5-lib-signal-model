@@ -11,7 +11,14 @@ import nextUIUpdate from "sap/ui/test/utils/nextUIUpdate";
 import Input from "sap/m/Input";
 import List from "sap/m/List";
 import StandardListItem from "sap/m/StandardListItem";
+import StandardTreeItem from "sap/m/StandardTreeItem";
 import Text from "sap/m/Text";
+import Tree from "sap/m/Tree";
+import Message from "sap/ui/core/message/Message";
+import XMLView from "sap/ui/core/mvc/XMLView";
+import Column from "sap/ui/table/Column";
+import Table from "sap/ui/table/Table";
+import type DataState from "sap/ui/model/DataState";
 import type ListBinding from "sap/ui/model/ListBinding";
 import type PropertyBinding from "sap/ui/model/PropertyBinding";
 import type TreeBinding from "sap/ui/model/TreeBinding";
@@ -24,11 +31,15 @@ import type TreeBinding from "sap/ui/model/TreeBinding";
  * - list bindings: plain, sorted, filtered (test function and operators), extended change
  *   detection, suspended; tree bindings, also with a filter and a sorter;
  * - rendered controls with expression, composite, element, typed, two-way and aggregation
- *   bindings: their properties and their DOM;
+ *   bindings: their properties and their DOM. Among them a second and a named model, a
+ *   growing list, a grouped list, a sap.ui.table.Table, a sap.m.Tree and an XML view;
+ * - messages on a binding and on a control, and how often property bindings fire change
+ *   (not list bindings: there JSONModel's count depends on leftovers of its own merges);
  * - computeds, against the same function applied to JSONModel's data.
  * Operations: setProperty (also through a context), a binding's setValue, typing into an
  * input, setData replace and merge, mergeProperty, loadData, setContext, sort, filter,
- * suspend and resume, redefining a computed.
+ * suspend and resume, redefining a computed, bindElement, growing a list, scrolling a
+ * table, expanding a tree, setMessages.
  * The options autoCreatePaths and strictLeafCheck run against JSONModel plus the rule
  * the option adds.
  * Seeds are fixed, so a failure names the seed and step to replay.
@@ -258,16 +269,28 @@ const FILTERS: Record<string, () => Filter> = {
   contains: () => new Filter("name", FilterOperator.Contains, "a"),
 };
 
+const VIEW = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">
+  <Text id="expression" text="{= typeof \${/s} + '|' + typeof \${/obj/v} }"/>
+  <VBox binding="{/obj}"><Text id="element" text="{= typeof \${nested/v} }"/></VBox>
+  <List id="list" items="{/list}"><StandardListItem title="{= typeof \${name} }"/></List>
+</mvc:View>`;
+
+/** Paths the element binding of a control switches between */
+const ELEMENT_PATHS = ["/list/0", "/list/1", "/obj", "/missing", "/s"];
+
+type Controls = {
+  texts: () => string[];
+  rendered: () => string[];
+  type: (text: string) => void;
+  act: (action: string, argument: number) => void;
+  destroy: () => void;
+};
+
 /**
  * Rendered controls with the binding kinds an app uses.
  * `texts` reads the control properties, `rendered` the DOM.
  */
-function createControls(model: AnyModel): {
-  texts: () => string[];
-  rendered: () => string[];
-  type: (text: string) => void;
-  destroy: () => void;
-} {
+async function createControls(model: AnyModel): Promise<Controls> {
   const expression = new Text({
     text: "{= ${/n} > 0 ? 'positive' : ${/flag} ? 'flag' : 'other' }",
   });
@@ -280,48 +303,178 @@ function createControls(model: AnyModel): {
   const element = new Text({ text: { path: "name", formatter: typed } });
   element.bindElement("/list/0");
   const integer = new Text({ text: { path: "/n", type: new Integer() } });
-  const input = new Input({ value: { path: "/n", type: new Integer() } });
-  const list = new List({
-    items: {
-      path: "/list",
-      template: new StandardListItem({ title: { path: "name", formatter: typed } }),
+  // The model under a name, next to the default model and a second model
+  const other = new JSONModel({ label: "other" });
+  const named = new Text({
+    text: {
+      parts: [{ path: "named>/s" }, { path: "other>/label" }, { path: "/obj/v" }],
+      formatter: (s: unknown, label: unknown, v: unknown) =>
+        `${typed(s)}|${typed(label)}|${typeof v}`,
     },
   });
-  const texts = [expression, composite, element, integer];
-  // Without rows for undefined entries, and sorted: see listShape()
-  const rows = (): StandardListItem[] =>
-    (list.getItems() as StandardListItem[]).filter(
-      (item) => item.getBindingContext()?.getObject() !== undefined,
-    );
+  named.setModel(model, "named").setModel(other, "other");
+  const input = new Input({ value: { path: "/n", type: new Integer() } });
+  const item = (): StandardListItem =>
+    new StandardListItem({ title: { path: "name", formatter: typed } });
+  const list = new List({ items: { path: "/list", template: item() } });
+  const growing = new List({
+    growing: true,
+    growingThreshold: 1,
+    items: { path: "/list", template: item() },
+  });
+  const grouped = new List({
+    items: { path: "/list", sorter: new Sorter("name", false, true), template: item() },
+  });
+  const table = new Table({
+    visibleRowCount: 2,
+    rows: { path: "/list" },
+    columns: [new Column({ template: new Text({ text: { path: "name", formatter: typed } }) })],
+  });
+  const tree = new Tree({
+    items: {
+      path: "/",
+      template: new StandardTreeItem({ title: { path: "v", formatter: typed } }),
+    },
+  });
+  const view = await XMLView.create({ definition: VIEW });
+  const texts = [
+    expression,
+    composite,
+    element,
+    integer,
+    named,
+    view.byId("expression") as Text,
+    view.byId("element") as Text,
+  ];
+  const all = [...texts.slice(0, 5), input, list, growing, grouped, table, tree, view];
   const host = document.body.appendChild(document.createElement("div"));
-  for (const control of [...texts, input, list]) {
+  for (const control of all) {
     control.setModel(model);
     control.placeAt(host);
   }
+
+  // After a merge the two models differ in key order and in trailing undefined array
+  // entries (see difference()). So rows are read without the undefined entries and sorted,
+  // and where the order decides what is shown (paging, group headers) only for an array.
+  const isArray = (): boolean => Array.isArray(model.getProperty("/list"));
+  const rowsOf = (
+    control: List | Tree,
+    read: (row: StandardListItem) => string,
+    orderDecides = false,
+  ): string => {
+    if (orderDecides && !isArray()) return "not an array";
+    const kept: StandardListItem[] = [];
+    let header: StandardListItem | undefined;
+    for (const row of control.getItems() as StandardListItem[]) {
+      if (row.getMetadata().getName() === "sap.m.GroupHeaderListItem") {
+        header = row;
+      } else if (row.getBindingContext()?.getObject() !== undefined) {
+        // A group header only with a row that counts
+        if (header) kept.push(header);
+        header = undefined;
+        kept.push(row);
+      }
+    }
+    return kept.map(read).toSorted().join(",");
+  };
+  const cells = (read: (cell: Text) => string): string =>
+    isArray()
+      ? table
+          .getRows()
+          .filter((row) => row.getBindingContext()?.getObject() !== undefined)
+          .map((row) => read(row.getCells()[0] as Text))
+          .join(",")
+      : "not an array";
+  const dom = (control: { getDomRef: () => Element | null }): string =>
+    control.getDomRef()?.textContent ?? "not rendered";
   return {
     texts: () => [
       ...texts.map((text) => text.getText()),
       input.getValue(),
-      rows()
-        .map((item) => item.getTitle())
-        .toSorted()
-        .join(","),
+      `${input.getValueState()} ${input.getValueStateText()}`,
+      rowsOf(list, (row) => row.getTitle()),
+      rowsOf(growing, (row) => row.getTitle(), true),
+      rowsOf(grouped, (row) => row.getTitle(), true),
+      cells((cell) => cell.getText()),
+      rowsOf(tree, (row) => `${row.getBindingContext()?.getPath()}=${row.getTitle()}`),
+      rowsOf(view.byId("list") as List, (row) => row.getTitle()),
     ],
     rendered: () => [
-      ...texts.map((text) => text.getDomRef()?.textContent ?? "not rendered"),
+      ...texts.map(dom),
       (input.getFocusDomRef() as HTMLInputElement | null)?.value ?? "not rendered",
-      rows()
-        .map((item) => item.getDomRef()?.textContent ?? "not rendered")
-        .toSorted()
-        .join(","),
+      "",
+      rowsOf(list, dom),
+      rowsOf(growing, dom, true),
+      rowsOf(grouped, dom, true),
+      cells(dom),
+      rowsOf(tree, dom),
+      rowsOf(view.byId("list") as List, dom),
     ],
     // What typing into the field does: the binding parses the text and writes the model
     type: (text) => input.setValue(text),
+    act: (action, argument) => {
+      if (action === "bindElement") element.bindElement(ELEMENT_PATHS[argument]);
+      if (action === "unbindElement") element.unbindElement();
+      // What the "More" button of a growing list does
+      if (action === "grow") {
+        (
+          growing as unknown as { _oGrowingDelegate: { requestNewPage: () => void } }
+        )._oGrowingDelegate.requestNewPage();
+      }
+      if (action === "scroll") table.setFirstVisibleRow(argument % 3);
+      if (action === "expand") tree.expandToLevel(2);
+      if (action === "collapse") tree.collapseAll();
+      if (action === "refresh") {
+        for (const control of [list, growing, grouped, tree, view.byId("list") as List]) {
+          control.getBinding("items")?.refresh(true);
+        }
+        table.getBinding("rows")?.refresh(true);
+      }
+      if (action === "message") {
+        model.setMessages(
+          argument % 2
+            ? { "/n": [new Message({ message: "wrong", type: "Error", processor: model })] }
+            : {},
+        );
+      }
+    },
     destroy: () => {
-      for (const control of [...texts, input, list]) control.destroy();
+      for (const control of all) control.destroy();
+      other.destroy();
       host.remove();
     },
   };
+}
+
+/** Actions on the controls: [name, number of variants] */
+const ACTIONS: [string, number][] = [
+  ["bindElement", ELEMENT_PATHS.length],
+  ["unbindElement", 1],
+  ["grow", 1],
+  ["scroll", 3],
+  ["expand", 1],
+  ["collapse", 1],
+  ["message", 2],
+];
+
+/**
+ * Whether what a binding notices after a merge can differ between the models:
+ * - a key or an array entry holds undefined: JSONModel's merge drops those (see
+ *   difference()), and its bindings can take that for a change, or miss a change over it;
+ * - a class instance: JSONModel's merge copies all rows of a list except those, so a list
+ *   binding notices the next write to any other row. SignalModel cannot tell the rows apart.
+ */
+function mergeDiffers(value: unknown): boolean {
+  const merged = Array.isArray(value) || canMerge(value, value);
+  return (merged ? Object.values(value as object) : []).some(
+    (child) =>
+      child === undefined ||
+      (typeof child === "object" &&
+        child !== null &&
+        !Array.isArray(child) &&
+        !canMerge(child, child)) ||
+      mergeDiffers(child),
+  );
 }
 
 /** [path, with a filter and a sorter] for tree bindings */
@@ -509,6 +662,15 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
   };
 
   const bindings = READ_PATHS.map((path) => signal.bindProperty(path));
+  // Long-lived JSONModel twins: for the number of change events, and for messages
+  const jsonBindings = READ_PATHS.map((path) => json.bindProperty(path));
+  const fired = READ_PATHS.map(() => [0, 0]);
+  const jsonBefore = jsonBindings.map((binding) => binding.getValue() as unknown);
+  READ_PATHS.forEach((_, i) => {
+    jsonBindings[i].attachChange(() => fired[i][0]++);
+    jsonBindings[i].initialize();
+    bindings[i].attachChange(() => fired[i][1]++);
+  });
   const relativeContexts = RELATIVE_PATHS.map(([contextPath]) => contextPath);
   const relativeBindings = RELATIVE_PATHS.map(([contextPath, path]) =>
     signal.bindProperty(path, new Context(signal, contextPath)),
@@ -575,15 +737,17 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       // see above
     }
   }
-  const controls = createControls(signal);
-  const jsonControls = createControls(json);
+  const controls = await createControls(signal);
+  const jsonControls = await createControls(json);
 
   // Set when JSONModel reached the same data in more steps than SignalModel
   let resync = false;
+  // Set when JSONModel took more than one write for a step, so its bindings fired more often
+  let stepwise = false;
   /** A write on JSONModel, with the rules of the options under test applied first. */
   const jsonWrite = (path: string, write: () => boolean): string => {
     const created = autoCreatePaths && createParents(json, path);
-    if (created) resync = true;
+    if (created) resync = stepwise = true;
     // A parent that was just created has no properties yet
     if (strictLeafCheck && (created || isNewLeaf(signal, path))) return "rejected";
     return attempt(write);
@@ -602,7 +766,20 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     let jsonAccepted = "";
     let signalAccepted = "";
 
-    if (kind < 0.5) {
+    for (const counts of fired) counts.fill(0);
+    stepwise = false;
+    if (kind < 0.1) {
+      const [action, variants] = pick(ACTIONS);
+      const argument = Math.floor(random() * variants);
+      description = `${action}(${action === "bindElement" ? ELEMENT_PATHS[argument] : argument})`;
+      for (const target of [jsonControls, controls]) {
+        try {
+          target.act(action, argument);
+        } catch {
+          // see above
+        }
+      }
+    } else if (kind < 0.5) {
       // A quarter of the writes go through a context: "/obj/v" as "v" relative to "/obj"
       const cut = random() < 0.25 ? path.lastIndexOf("/") : 0;
       const contextPath = cut ? path.slice(0, cut) : "";
@@ -623,7 +800,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       // What a two-way binding does when the user changes a control
       description = `binding ${path}: setValue(${show(value())})`;
       // setValue writes only a changed value, so the option rules apply only then
-      const jsonBinding = json.bindProperty(path);
+      const jsonBinding = jsonBindings[WRITE_PATHS.indexOf(path)];
       if (!deepEqual(jsonBinding.getValue(), value())) {
         jsonWrite(path, () => {
           jsonBinding.setValue(value());
@@ -650,20 +827,23 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     } else if (kind < 0.76) {
       const key = path.split("/")[1];
       description = `setData({${key}: ${show(value())}}, merge)`;
+      resync = mergeDiffers(signal.getData());
       json.setData({ [key]: value() }, true);
       signal.setData({ [key]: value() }, true);
-      resync = true;
     } else if (kind < 0.81) {
       // JSONModel has no mergeProperty: the expected result is its merge applied at the path
       description = `mergeProperty("${path}", ${show(value())})`;
       const existing = json.getProperty(path) as unknown;
       if (canMerge(existing, value())) {
-        json.setProperty(
-          path,
-          deepExtend(Array.isArray(existing) ? [] : {}, existing as object, value() as object),
-        );
+        resync = mergeDiffers(signal.getData());
+        const merged = deepExtend(
+          Array.isArray(existing) ? [] : {},
+          existing as object,
+          value() as object,
+        ) as unknown;
+        // A merge that changes nothing leaves the data as it is
+        if (difference(merged, existing)) json.setProperty(path, merged);
         jsonAccepted = "accepted";
-        resync = true;
       } else {
         jsonAccepted = jsonWrite(path, () => json.setProperty(path, value()));
       }
@@ -671,6 +851,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     } else if (kind < 0.84) {
       const [url, merge] = pick(LOADS);
       description = `loadData(${url.slice(TESTDATA.length)}${merge ? ", merge" : ""})`;
+      resync = merge && mergeDiffers(signal.getData());
       const outcomes = await Promise.all(
         [json, signal].map((model) =>
           (model.loadData(url, undefined, true, "GET", merge) as Promise<unknown>).then(
@@ -680,7 +861,6 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         ),
       );
       [jsonAccepted, signalAccepted] = outcomes;
-      resync = true;
     } else if (kind < 0.88) {
       const index = Math.floor(random() * RELATIVE_PATHS.length);
       relativeContexts[index] = pick(RELATIVE_PATHS)[0];
@@ -726,15 +906,15 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     await macrotask();
     if (resync) {
       resync = false;
-      // A sorted or filtered binding sorts and filters again only when it notices a change,
-      // and what it notices differs here: JSONModel's merge rebuilds the data, so its
-      // bindings stop sharing row objects with the model, and the autoCreatePaths rule is
-      // applied to JSONModel one parent at a time. Update both sides.
+      // What a binding notices differs in two cases: a merge of some data (see
+      // mergeDiffers()), and the autoCreatePaths rule, which is applied to JSONModel one
+      // parent at a time. Update both sides.
       LIST_BINDINGS.forEach(([, , listKind], i) => {
         if (listKind !== "" && listKind !== "ecd") {
           onBoth([jsonListBindings[i], listBindings[i]], (binding) => binding.refresh(true));
         }
       });
+      onBoth([jsonControls, controls], (target) => target.act("refresh", 0));
     }
     await nextUIUpdate();
 
@@ -759,6 +939,35 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         : (json.getProperty(readPath) as unknown);
       const found = difference(bindings[i].getValue(), expected);
       if (found) failure = `${where}: binding ${readPath} differs at ${found}`;
+    }
+    for (let i = 0; i < READ_PATHS.length; i++) {
+      // Change events of a binding on a primitive. On an object the two differ by design:
+      // SignalModel fires for every write below it. A length: see above.
+      const after = jsonBindings[i].getValue() as unknown;
+      const [expected, actual] = fired[i];
+      if (
+        !failure &&
+        !stepwise &&
+        !READ_PATHS[i].endsWith("/length") &&
+        !isContainer(jsonBefore[i]) &&
+        !isContainer(after) &&
+        actual !== expected
+      ) {
+        failure = `${where}: binding ${READ_PATHS[i]} fired change ${actual} times, JSONModel ${expected}`;
+      }
+      jsonBefore[i] = after;
+    }
+    if (!failure) {
+      const [actual, expected] = [bindings, jsonBindings].map((list) =>
+        (list[READ_PATHS.indexOf("/n")] as unknown as { getDataState: () => DataState })
+          .getDataState()
+          .getMessages()
+          .map((message: Message) => message.getMessage())
+          .join(","),
+      );
+      if (actual !== expected) {
+        failure = `${where}: binding /n has the messages [${actual}], JSONModel [${expected}]`;
+      }
     }
     for (let i = 0; i < RELATIVE_PATHS.length && !failure; i++) {
       const contextPath = relativeContexts[i];

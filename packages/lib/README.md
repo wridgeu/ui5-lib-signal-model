@@ -357,12 +357,13 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted, filtered and suspended ones), rendered controls with expression, composite, typed, two-way and aggregation bindings, and computeds. These differences remain on purpose:
+A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted, filtered and suspended ones), computeds, messages, the change events of property bindings, and rendered controls. The controls cover expression, composite, typed, two-way, element and aggregation bindings, a second and a named model, a growing and a grouped list, `sap.ui.table.Table`, `sap.m.Tree` and an XML view. These differences remain on purpose:
 
 - **Write below a primitive.** `setProperty("/name/x", 1)` with `name: "Al"` returns `false`. JSONModel throws a `TypeError`.
 - **`undefined` keys after a merge.** `setData(data, true)` merges in place and keeps keys that hold `undefined`. JSONModel rebuilds the data and drops them. `getProperty` returns `undefined` either way, and list bindings skip such keys in both models. Only the key order can differ once such a key gets a value again.
 - **Errors while bindings update.** If a formatter, sorter or filter throws during an update, JSONModel throws the error out of `setProperty` and skips the remaining bindings. SignalModel updates bindings in a microtask: it logs the error and continues with the other bindings.
 - **Change events for objects.** A binding on an object or array fires a change event whenever something below it is written. JSONModel fires only when a deep comparison finds a difference.
+- **Change events of list bindings around a merge.** JSONModel's merge replaces every row object, so the list bindings of controls fire after each merge, also when no row changed. SignalModel's list bindings fire after a merge that changed something below them. A sorted, filtered or grouped list shows the same rows in both, with one exception in SignalModel's favour: if a row is a class instance, JSONModel does not sort again after a later write to that row, and SignalModel does.
 
 ### Merge Writes
 

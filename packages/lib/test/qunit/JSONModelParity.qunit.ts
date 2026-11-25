@@ -807,4 +807,139 @@ QUnit.module("JSONModel Parity", () => {
       model.destroy();
     }
   });
+  QUnit.test("a sorted list notices a merge like JSONModel", async (assert) => {
+    const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+    for (const model of [new JSONModel({}), new SignalModel<Record<string, unknown>>({})]) {
+      const name = model instanceof JSONModel ? "JSONModel" : "SignalModel";
+      model.setData({ list: [{ name: "a" }, { name: "b" }], other: 1 });
+      const binding = model.bindList("/list", undefined, new Sorter("name"));
+      let fired = 0;
+      binding.attachChange(() => fired++);
+      binding.initialize();
+      fired = 0;
+      const order = (): string =>
+        binding
+          .getContexts()
+          .map((context) => context.getPath())
+          .join(" ");
+
+      model.setProperty("/list/0/name", "z");
+      await settled();
+      assert.strictEqual(
+        `${order()}, ${fired}`,
+        "/list/0 /list/1, 0",
+        `${name}: not after a write`,
+      );
+
+      model.setData({ list: [{ name: "c" }] }, true);
+      await settled();
+      assert.strictEqual(`${order()}, ${fired}`, "/list/1 /list/0, 1", `${name}: after a merge`);
+
+      // JSONModel's merge rebuilds the data, so the binding's rows are no longer the model's
+      model.setData({ other: 2 }, true);
+      model.setProperty("/list/1/name", "a");
+      await settled();
+      assert.strictEqual(
+        `${order()}, ${fired}`,
+        "/list/1 /list/0, 2",
+        `${name}: after the next write to a row`,
+      );
+
+      model.setProperty("/list/1/name", "d");
+      await settled();
+      assert.strictEqual(`${order()}, ${fired}`, "/list/1 /list/0, 2", `${name}: not after that`);
+
+      // After a merge and new data with the same content, the binding still holds the rows
+      // from before, so the next write to a row is noticed
+      model.setData({ other: 3 }, true);
+      model.setData({ list: [{ name: "c" }, { name: "d" }], other: 3 });
+      await settled();
+      assert.strictEqual(fired, 2, `${name}: not for the same content`);
+      model.setProperty("/list/0/name", "b");
+      await settled();
+      assert.strictEqual(
+        `${order()}, ${fired}`,
+        "/list/0 /list/1, 3",
+        `${name}: after new data with the same content`,
+      );
+
+      // The change detection controls use compares the row objects themselves
+      const detecting = model.bindList("/list");
+      detecting.enableExtendedChangeDetection(false, "", {});
+      let detected = 0;
+      detecting.attachChange(() => detected++);
+      detecting.initialize();
+      detecting.getContexts(0, 10);
+      detected = 0;
+      model.setProperty("/list/0/name", "x");
+      await settled();
+      model.setData({ list: [{ name: "y" }] }, true);
+      await settled();
+      assert.strictEqual(detected, 1, `${name}: with change detection, only after the merge`);
+      detecting.getContexts(0, 10);
+      model.setProperty("/list/0/name", "x");
+      await settled();
+      assert.strictEqual(detected, 1, `${name}: with change detection, not after the next write`);
+
+      // With bDetectUpdates the row data is compared, for the rows that were read
+      const comparing = model.bindList("/list");
+      comparing.enableExtendedChangeDetection(true, "", {});
+      let compared = 0;
+      comparing.attachChange(() => compared++);
+      comparing.initialize();
+      comparing.getContexts(0, 1);
+      compared = 0;
+      model.setData({ list: [{}, { name: "w" }] }, true);
+      await settled();
+      assert.strictEqual(compared, 0, `${name}: no change in the rows that were read`);
+
+      model.destroy();
+    }
+  });
+  QUnit.test(
+    "a sorted list notices mergeProperty on a row, on the list and above it",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({
+        data: { list: [{ name: "a", sub: {} }, { name: "b" }] },
+        other: {},
+      });
+      const binding = model.bindList("/data/list", undefined, new Sorter("name"));
+      binding.initialize();
+      const merges: [string, unknown, string][] = [
+        ["/data/list/0", { name: "c" }, "/data/list/1 /data/list/0"],
+        ["/data/list", [{ name: "a" }], "/data/list/0 /data/list/1"],
+        ["/data", { list: [{ name: "c" }] }, "/data/list/1 /data/list/0"],
+        // Elsewhere or below a row: the write to a row is not noticed, as without a merge
+        ["/other", { list: [{ name: "a" }] }, "/data/list/1 /data/list/0"],
+        ["/data/list/0/sub", { x: 1 }, "/data/list/1 /data/list/0"],
+      ];
+      for (const [path, payload, expected] of merges) {
+        model.mergeProperty(path, payload);
+        if (path === "/other") model.setProperty("/data/list/0/name", "a");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const order = binding
+          .getContexts()
+          .map((context) => context.getPath())
+          .join(" ");
+        assert.strictEqual(order, expected, `after a merge at ${path}`);
+      }
+      binding.destroy();
+      assert.strictEqual(model._listBindings.size, 0, "a destroyed binding is forgotten");
+      model.destroy();
+    },
+  );
+  QUnit.test("a binding shows what the model holds after setValue -- parity", async (assert) => {
+    for (const model of [new JSONModel({}), new SignalModel<Record<string, unknown>>({})]) {
+      const name = model instanceof JSONModel ? "JSONModel" : "SignalModel";
+      model.setData({ list: [] });
+      const binding = model.bindProperty("/list/length");
+      binding.attachChange(() => {});
+      binding.initialize();
+      // An array turns the text into a number, here the one it already had
+      binding.setValue("");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(binding.getValue(), 0, `${name}: the length, not the text`);
+      model.destroy();
+    }
+  });
 });

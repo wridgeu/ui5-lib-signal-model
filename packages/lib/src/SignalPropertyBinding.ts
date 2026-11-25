@@ -114,6 +114,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
           context: self.oContext,
           value,
         });
+        // The model can hold something else than was written, e.g. the length of an array
+        if (!Object.is(self._getValue(), value)) {
+          this.checkUpdate();
+        }
       }
     }
   }

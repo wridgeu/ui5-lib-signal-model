@@ -15,6 +15,7 @@ type ListBindingInternal = ClientListBinding & {
   aIndices: (number | string)[];
   iLength: number;
   bUseExtendedChangeDetection: boolean;
+  bDetectUpdates: boolean;
   aLastContexts: Context[] | undefined;
   aLastContextData: string[] | undefined;
   iLastStartIndex: number | undefined;
@@ -52,10 +53,32 @@ export default class SignalListBinding extends ClientListBinding {
   watcher: Signal.subtle.Watcher | null = null;
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
+  private _merged = false;
+
+  /**
+   * A merge at `path` took place. JSONModel's merge rebuilds the merged data, so the row
+   * objects a list binding holds are no longer the model's, and it notices the next change
+   * in a row. Here rows are merged in place, so the binding has to be told.
+   * Used by SignalModel, not part of the public API.
+   *
+   * @internal
+   */
+  _onMerge(path: string): void {
+    const own = this._subscribedPath;
+    if (!own) return;
+    const below = own === "/" ? "/" : `${own}/`;
+    this._merged ||=
+      path === "/" ||
+      path === own ||
+      own.startsWith(`${path}/`) ||
+      // a row itself
+      (path.startsWith(below) && !path.includes("/", below.length));
+  }
 
   /** @since 0.1.0 */
   update(): void {
     const internal = asInternal(this);
+    this._merged = false;
     const list = this.oModel._getObject(internal.sPath, internal.oContext);
     if (list) {
       // Copied with the functions JSONListBinding uses: they drop undefined values
@@ -116,7 +139,18 @@ export default class SignalListBinding extends ClientListBinding {
       | Record<string, unknown>;
 
     if (!internal.bUseExtendedChangeDetection) {
-      if (!deepEqual(internal.oList, list) || forceUpdate) {
+      // After a merge the comparison cannot see a change in a row that the copy shares with
+      // the model. Rows that were replaced are compared as usual.
+      const rows = internal.oList as Record<string, unknown>;
+      const mergedRows =
+        this._merged &&
+        Object.keys(rows).some(
+          (key) =>
+            typeof rows[key] === "object" &&
+            rows[key] !== null &&
+            rows[key] === (list as Record<string, unknown>)[key],
+        );
+      if (!deepEqual(internal.oList, list) || mergedRows || forceUpdate) {
         this.update();
         internal._fireChange({ reason: ChangeReason.Change });
       }
@@ -125,6 +159,9 @@ export default class SignalListBinding extends ClientListBinding {
 
     let changeDetected = (internal.oList as unknown[]).length !== (list as unknown[]).length;
     if (!deepEqual(internal.oList, list)) {
+      // Without bDetectUpdates JSONModel compares the row objects themselves, and its merge
+      // replaces them
+      changeDetected ||= this._merged && !internal.bDetectUpdates;
       this.update();
     }
 
@@ -164,6 +201,7 @@ export default class SignalListBinding extends ClientListBinding {
     this.watcher.watch(signal);
 
     this._subscribedPath = resolvedPath;
+    this.oModel._listBindings.add(this);
     this._resubscribeCb = () => this.subscribe();
     this.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
   }
@@ -175,6 +213,7 @@ export default class SignalListBinding extends ClientListBinding {
       this._resubscribeCb = null;
       this._subscribedPath = null;
     }
+    this.oModel._listBindings.delete(this);
     cancelFlush(this);
     this.watcher = teardownWatcher(this.watcher);
   }
