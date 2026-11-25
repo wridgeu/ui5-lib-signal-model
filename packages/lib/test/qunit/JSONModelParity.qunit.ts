@@ -807,8 +807,9 @@ QUnit.module("JSONModel Parity", () => {
       model.destroy();
     }
   });
+  const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
   QUnit.test("a sorted list notices a merge like JSONModel", async (assert) => {
-    const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
     for (const model of [new JSONModel({}), new SignalModel<Record<string, unknown>>({})]) {
       const name = model instanceof JSONModel ? "JSONModel" : "SignalModel";
       model.setData({ list: [{ name: "a" }, { name: "b" }], other: 1 });
@@ -916,7 +917,7 @@ QUnit.module("JSONModel Parity", () => {
       for (const [path, payload, expected] of merges) {
         model.mergeProperty(path, payload);
         if (path === "/other") model.setProperty("/data/list/0/name", "a");
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await settled();
         const order = binding
           .getContexts()
           .map((context) => context.getPath())
@@ -934,9 +935,9 @@ QUnit.module("JSONModel Parity", () => {
       detecting.getContexts(0, 10);
       detected = 0;
       model.setData({ other: { y: 1 } }, true);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await settled();
       model.setProperty("/data/list/0/name", "q");
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await settled();
       assert.strictEqual(detected, 0, "no late change event for a merge elsewhere");
       detecting.destroy();
       assert.strictEqual(model._listBindings.size, 0, "a destroyed binding is forgotten");
@@ -952,7 +953,7 @@ QUnit.module("JSONModel Parity", () => {
       binding.initialize();
       // An array turns the text into a number, here the one it already had
       binding.setValue("");
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await settled();
       assert.strictEqual(binding.getValue(), 0, `${name}: the length, not the text`);
       model.destroy();
     }

@@ -226,6 +226,9 @@ function expectedComputed(path: string, json: JSONModel): unknown {
 type Mode = "default" | "autoCreatePaths" | "strictLeafCheck" | "both options";
 type AnyModel = JSONModel | SignalModel<Record<string, unknown>>;
 
+const contextAt = (model: AnyModel, path: string): Context | undefined =>
+  path ? new Context(model, path) : undefined;
+
 /** What autoCreatePaths adds to JSONModel: objects for missing (null or undefined) parents. */
 function createParents(json: JSONModel, path: string): boolean {
   let created = false;
@@ -690,7 +693,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     LIST_BINDINGS.map(([path, contextPath, kind]) => {
       const binding = model.bindList(
         path,
-        contextPath ? new Context(model, contextPath) : undefined,
+        contextAt(model, contextPath),
         kind === "sorted" ? new Sorter("name") : undefined,
         FILTERS[kind]?.(),
       );
@@ -747,10 +750,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
   const firesAlways = (i: number): boolean => {
     const [listPath, contextPath] = LIST_BINDINGS[i];
     return [json, signal].some((model) => {
-      const value = model.getProperty(
-        listPath,
-        contextPath ? new Context(model, contextPath) : undefined,
-      ) as unknown;
+      const value = model.getProperty(listPath, contextAt(model, contextPath)) as unknown;
       if (!value) return false;
       if (!Array.isArray(value) && (!canMerge(value, value) || "length" in (value as object))) {
         return true;
@@ -800,19 +800,14 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     let signalAccepted = "";
 
     for (const counts of [...fired, ...listFired]) counts.fill(0);
-    const merging = kind >= 0.68 && kind < 0.84;
     stepwise = false;
+    let merging = false;
+    let sorting = false;
     if (kind < 0.1) {
       const [action, variants] = pick(ACTIONS);
       const argument = Math.floor(random() * variants);
       description = `${action}(${action === "bindElement" ? ELEMENT_PATHS[argument] : argument})`;
-      for (const target of [jsonControls, controls]) {
-        try {
-          target.act(action, argument);
-        } catch {
-          // see above
-        }
-      }
+      onBoth([jsonControls, controls], (target) => target.act(action, argument));
     } else if (kind < 0.5) {
       // A quarter of the writes go through a context: "/obj/v" as "v" relative to "/obj"
       const cut = random() < 0.25 ? path.lastIndexOf("/") : 0;
@@ -822,12 +817,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         contextPath ? `, context ${contextPath}` : ""
       }${async ? ", async" : ""})`;
       const write = (model: AnyModel): boolean =>
-        model.setProperty(
-          written,
-          value(),
-          contextPath ? new Context(model, contextPath) : undefined,
-          async,
-        );
+        model.setProperty(written, value(), contextAt(model, contextPath), async);
       jsonAccepted = jsonWrite(path, () => write(json));
       signalAccepted = attempt(() => write(signal));
     } else if (kind < 0.57) {
@@ -861,12 +851,14 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     } else if (kind < 0.76) {
       const key = path.split("/")[1];
       description = `setData({${key}: ${show(value())}}, merge)`;
+      merging = true;
       resync = mergeDiffers(signal.getData());
       json.setData({ [key]: value() }, true);
       signal.setData({ [key]: value() }, true);
     } else if (kind < 0.81) {
       // JSONModel has no mergeProperty: the expected result is its merge applied at the path
       description = `mergeProperty("${path}", ${show(value())})`;
+      merging = true;
       const existing = json.getProperty(path) as unknown;
       if (canMerge(existing, value())) {
         resync = mergeDiffers(signal.getData());
@@ -885,8 +877,9 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     } else if (kind < 0.84) {
       const [url, merge] = pick(LOADS);
       description = `loadData(${url.slice(TESTDATA.length)}${merge ? ", merge" : ""})`;
+      merging = true;
       resync = merge && mergeDiffers(signal.getData());
-      const outcomes = await Promise.all(
+      [jsonAccepted, signalAccepted] = await Promise.all(
         [json, signal].map((model) =>
           (model.loadData(url, undefined, true, "GET", merge) as Promise<unknown>).then(
             () => "accepted",
@@ -894,7 +887,6 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
           ),
         ),
       );
-      [jsonAccepted, signalAccepted] = outcomes;
     } else if (kind < 0.88) {
       const index = Math.floor(random() * RELATIVE_PATHS.length);
       relativeContexts[index] = pick(RELATIVE_PATHS)[0];
@@ -902,6 +894,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       relativeBindings[index].setContext(new Context(signal, relativeContexts[index]));
     } else if (kind < 0.91) {
       descending = !descending;
+      sorting = true;
       description = `sort(${descending ? "descending" : "ascending"})`;
       LIST_BINDINGS.forEach(([, , listKind], i) => {
         if (listKind === "sorted") {
@@ -913,6 +906,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       });
     } else if (kind < 0.94) {
       filterKind = pick(Object.keys(FILTERS));
+      sorting = true;
       description = `filter(${filterKind})`;
       const index = LIST_BINDINGS.findIndex(([, , listKind]) => listKind === "filtered");
       onBoth([jsonListBindings[index], listBindings[index]], (binding) =>
@@ -1043,9 +1037,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       // The order of a sorted object list depends on the key order: see listShape()
       const ordered =
         listKind === "sorted" &&
-        Array.isArray(
-          signal.getProperty(listPath, contextPath ? new Context(signal, contextPath) : undefined),
-        );
+        Array.isArray(signal.getProperty(listPath, contextAt(signal, contextPath)));
       const actual = listShape(listBindings[i], ordered);
       const expected = listShape(jsonListBindings[i], ordered);
       const [jsonFired, signalFired] = listFired[i];
@@ -1067,7 +1059,6 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     LIST_BINDINGS.forEach((_, i) => {
       listFiredAlways[i] = firesAlways(i);
       // sort() and filter() fire without reading the list again
-      const sorting = kind >= 0.88 && kind < 0.94;
       const quiet = sorting || listFired[i][0] + listFired[i][1] === 0;
       mergePending[i] = quiet && (merging || mergePending[i]);
     });

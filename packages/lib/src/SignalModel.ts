@@ -251,7 +251,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             errorobject: errorInfo,
           });
           this.fireRequestFailed(errorInfo);
-          // Like JSONModel: the returned promise rejects with the error object
           return Promise.reject(errorInfo);
         },
       ),
