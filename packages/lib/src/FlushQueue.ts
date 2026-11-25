@@ -4,7 +4,7 @@ import { Signal } from "signal-polyfill";
 /**
  * Interface for bindings that participate in microtask-batched flush.
  */
-interface FlushableBinding {
+export interface FlushableBinding {
   watcher: Signal.subtle.Watcher | null;
   checkUpdate(forceUpdate?: boolean): void;
   _checkUpdateFromSignal?(value: unknown): void;

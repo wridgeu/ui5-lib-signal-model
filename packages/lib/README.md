@@ -357,14 +357,15 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted, filtered and suspended ones), computeds, messages, the change events of property and list bindings, and rendered controls. The controls cover expression, composite, typed, two-way, element and aggregation bindings, a second and a named model, a growing and a grouped list, `sap.ui.table.Table`, `sap.m.Tree` and an XML view. These differences remain on purpose:
+A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted, filtered and suspended ones), computeds, messages, the change events of property and list bindings, and rendered controls. The controls cover expression, composite, typed, two-way, element and aggregation bindings, a second and a named model, a growing and a grouped list, `sap.ui.table.Table`, `sap.m.Tree` and an XML view. UI5's own tests of the JSON model and its bindings (194 tests) run against SignalModel as well (`npm run test:ui5`), with the binding updates flushed at once because they assert right after a write. All pass except the one for `bObserve` and eleven that mock JSONModel's internals (`jQuery.ajax`, `checkUpdate` of the prototype, the binding's constructor); those are listed in `test/ui5native/expected-failures.json`. These differences remain on purpose:
 
 - **Write below a primitive.** `setProperty("/name/x", 1)` with `name: "Al"` returns `false`. JSONModel throws a `TypeError`.
-- **`undefined` keys after a merge.** `setData(data, true)` merges in place and keeps keys that hold `undefined`. JSONModel rebuilds the data and drops them. `getProperty` returns `undefined` either way, and list bindings skip such keys in both models. Only the key order can differ once such a key gets a value again.
+- **`undefined` keys after a merge.** `setData(data, true)` merges in place and keeps keys that hold `undefined`. JSONModel rebuilds the data and drops them. `getProperty` returns `undefined` either way, and list bindings skip such keys in both models. The key order can differ once such a key gets a value again. The same holds for array entries: JSONModel's merge drops trailing `undefined` entries of every array in the model, so the array's `length` can be smaller there.
 - **Errors while bindings update.** If a formatter, sorter or filter throws during an update, JSONModel throws the error out of `setProperty` and skips the remaining bindings. SignalModel updates bindings in a microtask: it logs the error and continues with the other bindings.
-- **Change events for objects.** A binding on an object or array fires a change event whenever something below it is written. JSONModel fires only when a deep comparison finds a difference.
+- **Change events for objects.** A binding on an object or array fires a change event whenever something below it is written. JSONModel fires only when a deep comparison finds a difference, and its binding holds the same object as the model, so it usually finds none. A formatter or expression that reads from a bound object (`{= Object.keys(${/obj}).length }`) therefore shows the new content with SignalModel and can keep the old text with JSONModel.
+- **No `bObserve`.** The second constructor argument of JSONModel (`bObserve`, which wraps the data in getters and setters) is not supported; bindings learn about writes through the model, and about data changed without it through `refresh()`, as with a JSONModel without that option.
 - **Keys named `constructor` or `prototype`.** A merge skips payload keys with these names, and `autoCreatePaths` skips such path segments. JSONModel skips only `__proto__`.
-- **Change events of list bindings around a merge.** JSONModel's merge replaces every row object. A list binding whose change detection uses the row object itself as key (`enableExtendedChangeDetection(false, "")`) therefore fires after each merge, also when no row changed; with SignalModel it fires after a merge that changed something below it. The list bindings of controls compare the data of their rows and behave the same in both models. After a merge, JSONModel notices the next change in a row by comparing with the rows from before; SignalModel takes the next write below the list for a change, also where that comparison sees none (a value written again, a property set on an array). A sorted, filtered or grouped list shows the same rows in both, with one exception in SignalModel's favour: if a row is a class instance, JSONModel does not sort again after a later write to that row, and SignalModel does.
+- **Change events of list bindings around a merge.** JSONModel's merge replaces every row object. A list binding whose change detection uses the row object itself as key (`enableExtendedChangeDetection(false, "")`) therefore fires after each merge, also when no row changed; with SignalModel it fires after a merge that changed something below it. The list bindings of controls compare the data of their rows and behave the same in both models. After a merge, JSONModel notices the next change in a row by comparing with the rows from before; SignalModel fires for the next write below the list that changes a value, also where that comparison is blind to the change (a property set on an array). A sorted, filtered or grouped list shows the same rows in both, with one exception in SignalModel's favour: if a row is a class instance, JSONModel does not sort again after a later write to that row, and SignalModel does.
 
 ### Merge Writes
 
@@ -440,9 +441,10 @@ model.mergeProperty("/customer", { age: 30 });
 model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => `${first} ${last}`);
 model.removeComputed("/fullName");
 
-// Direct signal access (read-only recommended)
+// Direct signal access
 const signal = model.getSignal("/path");
 signal.get(); // read current value
+signal.set(1); // on a state signal: the same as model.setProperty("/path", 1)
 
 // Lifecycle
 model.destroy(); // aborts in-flight requests, clears all subscriptions
@@ -452,9 +454,9 @@ model.destroy(); // aborts in-flight requests, clears all subscriptions
 
 | Class                   | Extends                 | Purpose                                              |
 | ----------------------- | ----------------------- | ---------------------------------------------------- |
-| `SignalPropertyBinding` | `ClientPropertyBinding` | Single-value bindings with Watcher push              |
-| `SignalListBinding`     | `ClientListBinding`     | List bindings with filter/sort, Watcher push         |
-| `SignalTreeBinding`     | `ClientTreeBinding`     | Tree bindings with hierarchy traversal, Watcher push |
+| `SignalPropertyBinding` | `ClientPropertyBinding` | Single-value bindings, updated by push               |
+| `SignalListBinding`     | `ClientListBinding`     | List bindings with filter/sort, updated by push      |
+| `SignalTreeBinding`     | `ClientTreeBinding`     | Tree bindings with hierarchy traversal, push updates |
 
 ## Feature Comparison: SignalModel vs JSONModel
 

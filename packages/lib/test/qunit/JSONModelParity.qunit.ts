@@ -809,6 +809,56 @@ QUnit.module("JSONModel Parity", () => {
   });
   const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
+  QUnit.test(
+    "after a merge a list fires for a changed row only, like JSONModel",
+    async (assert) => {
+      for (const model of [new JSONModel({}), new SignalModel<Record<string, unknown>>({})]) {
+        const name = model instanceof JSONModel ? "JSONModel" : "SignalModel";
+        model.setData({ list: [{ name: "a" }, { name: "b" }], other: 1 });
+        const binding = model.bindList("/list");
+        let fired = 0;
+        binding.attachChange(() => fired++);
+        binding.initialize();
+        fired = 0;
+
+        model.setData({ other: 2 }, true);
+        model.setProperty("/list/0/name", "a");
+        await settled();
+        assert.strictEqual(fired, 0, `${name}: not for a write of the same value`);
+
+        model.setData({ list: [{ name: "c" }] }, true);
+        await settled();
+        assert.strictEqual(fired, 1, `${name}: for a merge that changes a row`);
+
+        model.setData({ other: 3 }, true);
+        model.setProperty("/list/1/name", "b");
+        await settled();
+        assert.strictEqual(fired, 1, `${name}: not for the same value after the next merge`);
+        model.destroy();
+      }
+    },
+  );
+
+  QUnit.test(
+    "a merge below a row does not make the list fire after a later merge",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ list: [{ nested: { v: 1 } }] });
+      const binding = model.bindList("/list");
+      let fired = 0;
+      binding.attachChange(() => fired++);
+      binding.initialize();
+      model.mergeProperty("/list/0/nested", { v: 2 });
+      await settled();
+      fired = 0;
+
+      model.setData({ other: 2 }, true);
+      model.setProperty("/list/0/nested/v", 2);
+      await settled();
+      assert.strictEqual(fired, 0);
+      model.destroy();
+    },
+  );
+
   QUnit.test("a sorted list notices a merge like JSONModel", async (assert) => {
     for (const model of [new JSONModel({}), new SignalModel<Record<string, unknown>>({})]) {
       const name = model instanceof JSONModel ? "JSONModel" : "SignalModel";

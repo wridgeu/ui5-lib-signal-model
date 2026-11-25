@@ -1,8 +1,10 @@
 import ClientModel from "sap/ui/model/ClientModel";
 import Log from "sap/base/Log";
+import deepEqual from "sap/base/util/deepEqual";
 import deepExtend from "sap/base/util/deepExtend";
 import type Context from "sap/ui/model/Context";
-import SignalRegistry from "./SignalRegistry";
+import SignalRegistry, { type Subscriber } from "./SignalRegistry";
+import { cancelFlush, type FlushableBinding } from "./FlushQueue";
 import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
 import SignalTreeBinding from "./SignalTreeBinding";
@@ -13,10 +15,19 @@ import type { Signal } from "signal-polyfill";
 type ClientModelInternal = ClientModel & {
   resolve(path: string, oContext?: Context): string | undefined;
   checkUpdate(bForceUpdate?: boolean, bAsync?: boolean): number;
+  getBindings(): FlushableBinding[];
   fireRequestSent(parameters: Record<string, unknown>): ClientModel;
   fireRequestCompleted(parameters: Record<string, unknown>): ClientModel;
   bDestroyed: boolean;
   bCache: boolean;
+};
+
+/** What a failed loadData reports, as JSONModel does */
+type LoadFailure = {
+  message: string;
+  statusCode: number;
+  statusText: string;
+  responseText?: string;
 };
 
 /** A `{}`-style object: what a merge descends into (not Date, class instances, arrays). */
@@ -53,9 +64,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private registry: SignalRegistry;
   /** The subscribed list bindings: a merge has to reach them. Used by SignalListBinding. @internal */
   readonly _listBindings = new Set<SignalListBinding>();
+  /** Those of them a merge has reached since their last update. @internal */
+  readonly _mergedLists = new Set<SignalListBinding>();
   private autoCreatePaths: boolean;
   private strictLeafCheck: boolean;
-  private _pathSubscribers = new Map<string, Set<() => void>>();
   private _importChain: Promise<void> = Promise.resolve();
   private _abortController: AbortController | null = new AbortController();
   declare oData: T;
@@ -64,7 +76,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   constructor(data?: T, options?: SignalModelOptions);
   constructor(dataOrUrl?: T | string, options?: SignalModelOptions) {
     super();
-    this.registry = new SignalRegistry();
+    this.registry = new SignalRegistry((path, value) => {
+      this.setProperty(path, value);
+    });
     this.autoCreatePaths = options?.autoCreatePaths ?? false;
     this.strictLeafCheck = options?.strictLeafCheck ?? false;
 
@@ -79,26 +93,28 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /**
    * Load data from a URL. JSONModel-compatible API.
    *
-   * Uses `fetch()` internally. Fires `requestSent`, `requestCompleted`,
-   * and `requestFailed` events matching the JSONModel contract.
+   * Uses `fetch()`, or a blocking `XMLHttpRequest` if `async` is `false`. Fires
+   * `requestSent`, `requestCompleted` and `requestFailed` events matching the JSONModel
+   * contract.
    * Calls are chained sequentially, matching JSONModel's `pSequentialImportCompleted` behavior.
    *
    * @param url URL to load JSON from
    * @param parameters Query parameters (appended to URL for GET, sent as body for POST)
-   * @param _async Has no effect. Kept for JSONModel.loadData signature compatibility.
+   * @param async `false` loads synchronously, as in JSONModel (deprecated there as well)
    * @param type HTTP method: "GET" (default) or "POST"
    * @param merge Whether to merge loaded data instead of replacing
    * @param cache Set to false to append a cache-busting timestamp
    * @param customHeaders Additional HTTP headers
    * @param abortSignal AbortSignal to cancel the request (SignalModel extension)
    * @returns Promise that resolves when data is loaded and, like JSONModel, rejects with
-   *   `{ message, statusCode, statusText, responseText }` when the request fails
+   *   `{ message, statusCode, statusText, responseText }` when the request fails;
+   *   `undefined` for a synchronous load
    * @since 0.1.0
    */
   loadData(
     url: string,
     parameters?: Record<string, string> | string,
-    _async?: undefined,
+    async?: true,
     type?: string,
     merge?: boolean,
     cache?: boolean,
@@ -106,33 +122,33 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     abortSignal?: AbortSignal,
   ): Promise<void>;
   /**
-   * @deprecated The `_async` parameter has no effect. SignalModel uses the Fetch API, which is
-   *   inherently asynchronous. The behavior matches JSONModel but requests are always async
-   *   regardless of this flag. Use the overload without `_async` instead.
+   * @deprecated A synchronous request blocks the page. JSONModel has deprecated it as well;
+   *   use the overload without `async` instead.
    */
   loadData(
     url: string,
     parameters: Record<string, string> | string | undefined,
-    _async: boolean,
+    async: boolean,
     type?: string,
     merge?: boolean,
     cache?: boolean,
     customHeaders?: Record<string, string>,
     abortSignal?: AbortSignal,
-  ): Promise<void>;
+  ): Promise<void> | undefined;
   loadData(
     url: string,
     parameters?: Record<string, string> | string,
-    _async?: boolean,
+    async?: boolean,
     type?: string,
     merge?: boolean,
     cache?: boolean,
     customHeaders?: Record<string, string>,
     abortSignal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<void> | undefined {
     if (asInternal(this).bDestroyed) {
       return Promise.resolve();
     }
+    const isAsync = async !== false;
     const method = type || "GET";
     let fullURL = url;
     // Fall back to model-level cache setting (set via forceNoCache), matching JSONModel.
@@ -173,11 +189,87 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     asInternal(this).fireRequestSent({
       url,
       type: method,
-      async: true,
+      async: isAsync,
       headers: customHeaders,
       info,
       infoObject,
     });
+
+    // The same error object as JSONModel, which takes the message from jQuery.ajax
+    const parse = (statusCode: number, statusText: string, responseText: string): T => {
+      const failure = { message: "error", statusCode, statusText, responseText };
+      if (statusCode < 200 || statusCode >= 300) throw failure;
+      try {
+        return JSON.parse(responseText) as T;
+      } catch {
+        throw { ...failure, message: "parsererror" };
+      }
+    };
+    const noResponse = (message: string): LoadFailure => ({
+      message,
+      statusCode: 0,
+      statusText: message,
+      responseText: undefined,
+    });
+    const succeed = (data: T): void => {
+      if (merge) {
+        this.setData(data as Partial<T>, true);
+      } else {
+        this.setData(data);
+      }
+      asInternal(this).fireRequestCompleted({
+        url,
+        type: method,
+        async: isAsync,
+        headers: customHeaders,
+        info,
+        infoObject,
+        success: true,
+      });
+    };
+    const fail = (errorInfo: LoadFailure): void => {
+      Log.fatal(
+        "The following problem occurred: " + errorInfo.message,
+        `${errorInfo.responseText},${errorInfo.statusCode},${errorInfo.statusText}`,
+      );
+      asInternal(this).fireRequestCompleted({
+        url,
+        type: method,
+        async: isAsync,
+        headers: customHeaders,
+        info,
+        infoObject,
+        success: false,
+        errorobject: errorInfo,
+      });
+      this.fireRequestFailed(errorInfo);
+    };
+
+    if (!isAsync) {
+      // fetch cannot block, so this is the request JSONModel makes
+      const request = new XMLHttpRequest();
+      request.addEventListener("load", () => {
+        let data: T;
+        try {
+          data = parse(request.status, request.statusText, request.responseText);
+        } catch (failure) {
+          fail(failure as LoadFailure);
+          return;
+        }
+        succeed(data);
+      });
+      try {
+        request.open(method, fullURL, false);
+        for (const [name, value] of Object.entries(headers)) {
+          request.setRequestHeader(name, value);
+        }
+        request.send(body);
+      } catch {
+        // No response: a blocking request throws instead of firing an error event
+        fail(noResponse("error"));
+      }
+      return undefined;
+    }
 
     // Combine the model's internal abort signal with any user-provided signal.
     // AbortSignal.any() fires when either signal aborts -- on destroy() or caller abort.
@@ -193,68 +285,33 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       headers,
       signal: combinedSignal,
       body,
-    }).then(async (res) => {
-      if (!res.ok) {
-        throw Object.assign(new Error(`HTTP ${res.status}: ${res.statusText}`), {
-          statusCode: res.status,
-          statusText: res.statusText,
-          responseText: await res.text().catch(() => ""),
-        });
-      }
-      return res.json() as Promise<T>;
-    });
+    }).then(
+      async (res) => parse(res.status, res.statusText, await res.text().catch(() => "")),
+      (error: Error) => {
+        throw noResponse(error.name === "AbortError" ? "abort" : "error");
+      },
+    );
 
     // Chain sequentially: wait for previous imports, then process this one.
     // Matches JSONModel's pSequentialImportCompleted pattern.
     const returnPromise = this._importChain.then(() =>
       importPromise.then(
         (data: T) => {
-          if (asInternal(this).bDestroyed) {
-            return;
-          }
-          if (merge) {
-            this.setData(data as Partial<T>, true);
-          } else {
-            this.setData(data);
-          }
-          asInternal(this).fireRequestCompleted({
-            url,
-            type: method,
-            async: true,
-            headers: customHeaders,
-            info,
-            infoObject,
-            success: true,
-          });
+          if (!asInternal(this).bDestroyed) succeed(data);
         },
-        (error: Error & { statusCode?: number; statusText?: string; responseText?: string }) => {
+        (errorInfo: LoadFailure) => {
           if (asInternal(this).bDestroyed) {
             return;
           }
-          const errorInfo = {
-            message: error.message,
-            statusCode: error.statusCode ?? 0,
-            statusText: error.statusText ?? error.message,
-            responseText: error.responseText ?? "",
-          };
-          asInternal(this).fireRequestCompleted({
-            url,
-            type: method,
-            async: true,
-            headers: customHeaders,
-            info,
-            infoObject,
-            success: false,
-            errorobject: errorInfo,
-          });
-          this.fireRequestFailed(errorInfo);
+          fail(errorInfo);
           return Promise.reject(errorInfo);
         },
       ),
     );
 
+    // Caught so that the chain stays alive for subsequent calls
     this._importChain = returnPromise.catch(() => {
-      // Swallow errors so the chain stays alive for subsequent calls
+      Log.error("Loading of data failed: " + url);
     });
 
     return returnPromise;
@@ -309,11 +366,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         this.setData(data);
       }
     } catch (e) {
-      Log.fatal(
-        "The following problem occurred: JSON parse Error: " + e,
-        undefined,
-        "ui5.model.signal.SignalModel",
-      );
+      Log.fatal("The following problem occurred: JSON parse Error: " + e);
       this.fireParseError({
         url: "",
         errorCode: -1,
@@ -432,7 +485,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this.strictLeafCheck && !(propertyName in parent)) {
       return false;
     }
+    const oldValue = parent[propertyName];
     parent[propertyName] = value;
+    if (this._mergedLists.size > 0 && !deepEqual(oldValue, value)) {
+      for (const binding of this._mergedLists) binding._onChange(resolvedPath);
+    }
 
     if (this.registry.size > 0) {
       if (asyncUpdate) {
@@ -490,10 +547,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         const invalidatedParents = new Set<string>();
 
         for (const path of dirty) {
-          const signal = this.registry.getState(path);
-          if (signal) {
-            signal.set(this._getObject(path));
-          }
+          this.registry.refresh(path, this._readPath);
           this.registry.invalidateChildren(path, this._readPath);
           if (this.registry.minDepth >= depthOf(path)) {
             continue; // no signal above this path
@@ -506,18 +560,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
               break;
             }
             invalidatedParents.add(parentPath);
-            const parentSignal = this.registry.getState(parentPath);
-            if (parentSignal) {
-              parentSignal.set(this._getObject(parentPath));
-            }
+            this.registry.refresh(parentPath, this._readPath);
             idx = path.lastIndexOf("/", idx - 1);
           }
           if (!invalidatedParents.has("/")) {
             invalidatedParents.add("/");
-            const rootSignal = this.registry.getState("/");
-            if (rootSignal) {
-              rootSignal.set(this.oData);
-            }
+            this.registry.refresh("/", this._readPath);
           }
         }
       }, 0);
@@ -657,16 +705,22 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @since 0.1.0
    */
   checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): void {
-    // Signal-based bindings self-update via watchers, so routine polling
-    // (forceUpdate=false) is unnecessary. However, the framework calls
-    // checkUpdate(true) during context propagation (e.g. setBindingContext)
-    // -- delegate to Model.prototype.checkUpdate so bindings re-evaluate.
-    if (forceUpdate) {
-      (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
-        this,
-        forceUpdate,
-        asyncMode,
-      );
+    // Bindings are told about writes through the model. This is for data changed without
+    // it (getData() and refresh()): bring the signals in line, then let every binding
+    // check, as JSONModel does.
+    if (!asyncMode && this.registry.size > 0) {
+      this.registry.invalidateAll(this._readPath);
+    }
+    (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
+      this,
+      forceUpdate,
+      asyncMode,
+    );
+    if (asyncMode) return;
+    // Every binding has checked by now: drop the updates the signals queued for them
+    for (const binding of asInternal(this).getBindings()) {
+      cancelFlush(binding);
+      binding.watcher?.watch();
     }
   }
 
@@ -909,17 +963,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     let idx = path.lastIndexOf("/");
     while (idx > 0) {
       const parentPath = path.substring(0, idx);
-      const signal = this.registry.getState(parentPath);
-      if (signal) {
-        signal.set(this._getObject(parentPath));
-      }
+      this.registry.refresh(parentPath, this._readPath);
       idx = path.lastIndexOf("/", idx - 1);
     }
-    // Check root
-    const rootSignal = this.registry.getState("/");
-    if (rootSignal) {
-      rootSignal.set(this.oData);
-    }
+    this.registry.refresh("/", this._readPath);
   }
 
   /**
@@ -971,6 +1018,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
       } else if (!Object.is(oldValue, newValue)) {
         changed = true;
+        for (const binding of this._listBindings) binding._onChange(childPath);
         // Clone incoming arrays and plain objects to prevent external mutation, with the
         // function JSONModel's merge uses: class instances inside stay the same instances.
         if (Array.isArray(newValue)) {
@@ -999,48 +1047,29 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   /** Used by binding classes, not part of the public API. @internal */
-  _onPathResubscribe(path: string, cb: () => void): void {
-    let set = this._pathSubscribers.get(path);
-    if (!set) {
-      set = new Set();
-      this._pathSubscribers.set(path, set);
-    }
-    set.add(cb);
+  _subscribe(path: string, binding: Subscriber): void {
+    this.registry.subscribe(path, binding);
   }
 
   /** Used by binding classes, not part of the public API. @internal */
-  _offPathResubscribe(path: string, cb: () => void): void {
-    const set = this._pathSubscribers.get(path);
-    if (set) {
-      set.delete(cb);
-      if (set.size === 0) {
-        this._pathSubscribers.delete(path);
-      }
-    }
+  _unsubscribe(path: string, binding: Subscriber): void {
+    this.registry.unsubscribe(path, binding);
   }
 
+  /**
+   * Re-subscribes the bindings at `path` and below it: after a computed was created or
+   * removed there, they have to follow another signal.
+   */
   private _firePathResubscribe(path: string): void {
-    const cbs = this._pathSubscribers.get(path);
-    if (cbs) {
-      for (const cb of Array.from(cbs)) cb();
-    }
-    // Also re-subscribe bindings at sub-paths of this computed.
-    // When a computed at "/c" is redefined, bindings at "/c/name"
-    // must switch their watcher from the old signal to the new one.
-    //
-    // Snapshot matching entries before iteration: each callback calls
-    // subscribe() which removes and re-inserts the entry in _pathSubscribers,
-    // causing the live Map iterator to revisit it and loop indefinitely.
     const prefix = path + "/";
-    const subEntries: Array<() => void>[] = [];
-    for (const [subscribedPath, set] of this._pathSubscribers) {
-      if (subscribedPath.startsWith(prefix)) {
-        subEntries.push(Array.from(set));
+    // Collected first: subscribe() changes the map
+    const bindings: Subscriber[] = [];
+    for (const [subscribedPath, subscribed] of this.registry.subscribers) {
+      if (subscribedPath === path || subscribedPath.startsWith(prefix)) {
+        bindings.push(...(Array.isArray(subscribed) ? subscribed : [subscribed]));
       }
     }
-    for (const callbacks of subEntries) {
-      for (const cb of callbacks) cb();
-    }
+    for (const binding of bindings) binding.subscribe();
   }
 
   /** @since 0.1.0 */
@@ -1054,7 +1083,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Abort all in-flight loadData requests (matching JSONModel's XHR abort behavior)
     this._abortController?.abort();
     this._abortController = null;
-    this._pathSubscribers.clear();
     this.registry.destroy();
     super.destroy();
   }

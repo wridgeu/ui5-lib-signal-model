@@ -246,14 +246,32 @@ QUnit.module("SignalPropertyBinding", () => {
     model.destroy();
   });
 
+  QUnit.test(
+    "a write of the value a path already holds does not reach its binding",
+    async (assert) => {
+      const model = new SignalModel({ name: "Alice" });
+      const binding = model.bindProperty("/name");
+      binding.attachChange(() => {});
+      binding.initialize();
+      let updates = 0;
+      const patched = binding as unknown as Record<string, () => void>;
+      patched._checkUpdateFromSignal = patched.checkUpdate = () => updates++;
+
+      model.setProperty("/name", "Alice");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(updates, 0, "no update queued for an unchanged value");
+      model.setProperty("/name", "Bob");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(updates, 1, "one update for a changed value");
+      model.destroy();
+    },
+  );
+
   QUnit.test("initialize skips subscribe when binding is already subscribed", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     const binding = model.bindProperty("/name");
 
-    // After bindProperty, the binding is already subscribed (watcher exists).
-    const watcherBefore = (binding as unknown as { watcher: unknown }).watcher;
-    assert.ok(watcherBefore, "watcher exists after bindProperty");
-
+    // After bindProperty, the binding is already subscribed.
     // Spy: count subscribe calls by wrapping the method
     let subscribeCount = 0;
     const origSubscribe = binding.subscribe.bind(binding);
@@ -266,10 +284,6 @@ QUnit.module("SignalPropertyBinding", () => {
     (binding as unknown as { initialize(): void }).initialize();
 
     assert.strictEqual(subscribeCount, 0, "initialize did not re-subscribe");
-    assert.ok(
-      (binding as unknown as { watcher: unknown }).watcher,
-      "watcher still exists after initialize",
-    );
     assert.strictEqual(binding.getValue(), "Alice", "value is correct after initialize");
     model.destroy();
   });

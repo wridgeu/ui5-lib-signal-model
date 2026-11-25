@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>UI5's JSON model tests against SignalModel</title>
+    <!-- UI5's tests load their data relative to the page -->
+    <base href="upstream/" />
+    <script
+      src="/resources/sap-ui-core.js"
+      data-sap-ui-async="true"
+      data-sap-ui-compat-version="edge"
+      data-sap-ui-resource-roots='{ "ui5/model/signal": "/resources/ui5/model/signal/", "native": "./" }'
+    ></script>
+    <script>
+      // ?file=JSONModel&model=signal|json[&flush=microtask]  (see scripts/run-ui5-tests.mjs)
+      const query = new URLSearchParams(location.search);
+      const useSignal = query.get("model") !== "json";
+      window.__results = { done: false, total: 0, failed: [], messages: {} };
+      sap.ui.require(["sap/ui/core/Core"], (Core) => {
+        Core.ready(() => {
+          if (useSignal) {
+            sap.ui.loader.config({
+              map: {
+                native: {
+                  "sap/ui/model/json/JSONModel": "ui5/model/signal/SignalModel",
+                  "sap/ui/model/json/JSONListBinding": "ui5/model/signal/SignalListBinding",
+                  "sap/ui/model/json/JSONPropertyBinding": "ui5/model/signal/SignalPropertyBinding",
+                  "sap/ui/model/json/JSONTreeBinding": "ui5/model/signal/SignalTreeBinding",
+                },
+              },
+            });
+            // SignalModel updates its bindings in a microtask; UI5's tests assert right
+            // after a write, so the flush runs at once here (not with &flush=microtask).
+            if (query.get("flush") !== "microtask") window.queueMicrotask = (fn) => fn();
+            // UI5's tests fake the server through XMLHttpRequest; SignalModel uses fetch
+            window.fetch = (url, options = {}) =>
+              new Promise((resolve, reject) => {
+                const request = new XMLHttpRequest();
+                request.open(options.method || "GET", url);
+                for (const [name, value] of Object.entries(options.headers || {})) {
+                  request.setRequestHeader(name, value);
+                }
+                request.onload = () =>
+                  resolve(
+                    new Response(request.responseText, {
+                      status: request.status || 200,
+                      statusText: request.statusText,
+                    }),
+                  );
+                request.onerror = () => reject(new TypeError("Failed to fetch"));
+                options.signal?.addEventListener("abort", () => {
+                  request.abort();
+                  reject(new DOMException("Aborted", "AbortError"));
+                });
+                request.send(options.body);
+              });
+          }
+          sap.ui.require(["sap/ui/thirdparty/qunit-2", "sap/ui/thirdparty/sinon-4"], () => {
+            QUnit.config.autostart = false;
+            QUnit.config.reorder = false;
+            sap.ui.require(["sap/ui/qunit/sinon-qunit-bridge"], () => {
+              QUnit.testDone((details) => {
+                window.__results.total++;
+                if (details.failed) {
+                  window.__results.failed.push(details.name);
+                  const first = details.assertions.find((assertion) => !assertion.result);
+                  window.__results.messages[details.name] = first?.message;
+                }
+              });
+              QUnit.done(() => (window.__results.done = true));
+              sap.ui.require(["native/" + query.get("file") + ".qunit"], () => QUnit.start());
+            });
+          });
+        });
+      });
+    </script>
+  </head>
+  <body>
+    <div id="qunit"></div>
+    <div id="qunit-fixture"></div>
+    <div id="content"></div>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "JSONModel": [
+    "checkPerformanceOfUpdate",
+    "loadData: calls _ajax with jsonp=false",
+    "setProperty calls checkPerformanceOfUpdate",
+    "test JSONModel destroy",
+    "test JSONModel loadData after destroy",
+    "test model observation"
+  ],
+  "JSONPropertyBinding": [
+    "checkUpdate performs no update as the binding is the same",
+    "checkUpdate performs update due to: Different paths, same value",
+    "checkUpdate performs update due to: Different values, same path",
+    "checkUpdate performs update due to: bForceUpdate = true",
+    "constructor: bRelative=false",
+    "constructor: bRelative=true"
+  ]
+}

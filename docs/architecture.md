@@ -7,13 +7,13 @@ Implementation-level details of SignalModel's reactive architecture. For usage d
 ```mermaid
 flowchart TD
   Views["XML View Bindings<br/>{/customer/name}, {/orders}, {path: '/tree'}"]
-  Bindings["SignalPropertyBinding / SignalListBinding / SignalTreeBinding<br/>Each watches its path signal via Signal.subtle.Watcher"]
+  Bindings["SignalPropertyBinding / SignalListBinding / SignalTreeBinding<br/>Subscribed to their path; a Signal.subtle.Watcher only on computeds"]
   Queue["FlushQueue (shared)<br/>Deduplicates into Map and flushes once per microtask"]
-  Registry["SignalRegistry<br/>Lazy State signals + Computed signals (signalEquals)<br/>Index: path -> signals below it"]
+  Registry["SignalRegistry<br/>Lazy State signals + Computed signals (signalEquals)<br/>Index: path -> signals below it<br/>Subscribers: path -> bindings"]
   Model["SignalModel (extends ClientModel)<br/>oData = plain JS object (source of truth)"]
 
   Views -->|"bindProperty / bindList / bindTree"| Bindings
-  Bindings -->|"getSignal(path) & watch()"| Registry
+  Bindings -->|"getSignal(path) & subscribe"| Registry
   Registry -->|"sync notify callback"| Queue
   Queue -->|"signal.get() -> re-arm -> checkUpdate"| Bindings
   Model -->|"setProperty / setData / mergeProperty"| Registry
@@ -21,32 +21,31 @@ flowchart TD
 
 ## Unified Microtask Flush Queue
 
-Each binding type (property, list, tree) subscribes to its path's signal via `Signal.subtle.Watcher`. When a signal changes, the Watcher callback fires synchronously, but `checkUpdate()` is not called immediately. All bindings share a single flush queue (`FlushQueue.ts`) that batches updates into one `queueMicrotask`:
+Each binding type (property, list, tree) subscribes to its path in the registry. The registry is the only writer of state signals, so when it sets one to a changed value it queues the bindings of that path itself. A binding on plain data therefore needs no `Signal.subtle.Watcher`; only a binding that resolves through a computed has one, because a computed changes through its dependencies. For the same reason `set()` on a state signal from `getSignal()` does not set the signal directly: it calls `setProperty` for the signal's path, so the data, the bindings and the computeds stay in line. Data changed without the model (`getData()` and then `refresh()`) is picked up as in JSONModel: the model reads every signal's value again and lets all bindings check. Either way `checkUpdate()` is not called immediately. All bindings share a single flush queue (`FlushQueue.ts`) that batches updates into one `queueMicrotask`:
 
 ```mermaid
 sequenceDiagram
   participant App as App Code
   participant Model as SignalModel
-  participant Sig as Signal & Watcher
+  participant Sig as SignalRegistry
   participant Queue as FlushQueue
   participant UI as UI5 Binding / Control
 
   App->>Model: setProperty("/a", 1)
   Model->>Sig: signal("/a").set(1)
-  Sig->>Queue: notify() -> pendingUpdates.set(bindingA, sigA)
+  Sig->>Queue: scheduleFlush -> pendingUpdates.set(bindingA, sigA)
   Queue-->>Queue: queueMicrotask(flush)
   App->>Model: setProperty("/a", 2)
   Model->>Sig: signal("/a").set(2)
-  Note over Sig,Queue: Watcher already dirty — no duplicate notify
+  Note over Sig,Queue: bindingA is already queued: the entry is replaced
   Note over App,UI: End of synchronous JS turn -> Microtask runs BEFORE browser paint
   Queue->>Sig: val = sigA.get() (inside try/catch)
-  Queue->>Sig: watcher.watch() (re-arm for next change)
   Queue->>UI: _checkUpdateFromSignal(val) -> single DOM update
 ```
 
 - **One microtask per synchronous block**, regardless of how many bindings or binding types are notified.
 - **Map-based deduplication**: `Map<binding, signal>` ensures each binding appears at most once. Rapid-fire `setProperty` calls (e.g., updating 10 fields in a loop) produce exactly one `checkUpdate` per affected binding.
-- **Watcher re-arm and error isolation**: The TC39 Watcher fires at most once between `watch()` calls. The flush reads the current value (`signal.get()`, inside `try/catch` so a throwing computed cannot abort the batch), always re-arms the watcher (`watcher.watch()`), then updates the binding. For direct property bindings, the already-read value is passed straight to `_checkUpdateFromSignal`, avoiding a second path traversal.
+- **Error isolation**: The flush reads the current value (`signal.get()`, inside `try/catch` so a throwing computed cannot abort the batch), then updates the binding. A binding on a computed has a watcher, which fires at most once between `watch()` calls, so the flush re-arms it first. For direct property bindings, the already-read value is passed straight to `_checkUpdateFromSignal`, avoiding a second path traversal.
 - **Cancelled updates**: An update earlier in a batch can destroy a binding or move it to another path (a list re-using an item for a different row). `cancelFlush()` then removes the binding from the batch being processed as well, so the value of its old path is not applied to it.
 
 When `bAsyncUpdate=true` is passed to `setProperty`, synchronous signal notification is skipped. Dirty paths are recorded in a `Set` and synced once in a single `setTimeout` pass with deduplicated ancestor invalidation. See [Batching and `bAsyncUpdate`](#batching-and-basyncupdate).
@@ -86,13 +85,15 @@ Memory grows with the number of bound paths, not with the amount of data. The da
 | What                                                       | JSONModel | SignalModel |
 | ---------------------------------------------------------- | --------- | ----------- |
 | 20,000 rows of data (2.3 MB as JSON text), nothing bound   | 3.75 MB   | 3.75 MB     |
-| One property binding on a top-level path (`/k1`)           | ~0.5 kB   | ~1.4 kB     |
-| One property binding on `/items/1/name`                    | ~0.5 kB   | ~1.5 kB     |
-| One property binding on an 8-segment path                  | ~0.5 kB   | ~1.6 kB     |
-| A `sap.m.Text` property bound to `/items/1/name` (binding) | ~1.1 kB   | ~2.1 kB     |
+| One property binding on a top-level path (`/k1`)           | ~0.5 kB   | ~0.6 kB     |
+| One property binding on `/items/1/name`                    | ~0.5 kB   | ~0.7 kB     |
+| One property binding on an 8-segment path                  | ~0.5 kB   | ~0.8 kB     |
+| A `sap.m.Text` property bound to `/items/1/name` (binding) | ~1.1 kB   | ~1.4 kB     |
 | One list binding over 20,000 rows, per row                 | ~80 B     | ~80 B       |
 
-So a property binding costs about 1 kB more than with JSONModel: the state signal, its watcher and the entries of the path index. The index is the part that grows with the path depth, about 0.1-0.2 kB of that. As a range: 1,000 bound paths are about 1.5 MB instead of 0.5 MB, 10,000 about 15 MB instead of 5 MB. A list binding costs the same in both models, and unbound data costs nothing extra, so 100,000 rows shown through a table with 20 visible rows need signals only for the cells of those rows. The numbers are from one machine and one Chrome version.
+So a property binding costs about 0.1-0.35 kB more than with JSONModel: the state signal, the subscription and the entries of the path index. The index is the part that grows with the path depth. As a range: 1,000 bound paths are about 0.7 MB instead of 0.5 MB, 10,000 about 7 MB instead of 5 MB. A binding that resolves through a computed also has a watcher, about 0.6 kB. A list binding costs the same in both models, and unbound data costs nothing extra, so 100,000 rows shown through a table with 20 visible rows need signals only for the cells of those rows. The numbers are from one machine and one Chrome version.
+
+Up to version 0.1.2 every binding had its own watcher and a property binding cost about 1.5 kB.
 
 ## In-Place Merge (Eliminating `deepExtend`)
 

@@ -36,7 +36,6 @@ function asInternal(self: SignalTreeBinding): TreeBindingInternal {
 export default class SignalTreeBinding extends ClientTreeBinding {
   declare oModel: SignalModel;
   watcher: Signal.subtle.Watcher | null = null;
-  private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
   /**
@@ -69,21 +68,22 @@ export default class SignalTreeBinding extends ClientTreeBinding {
 
     const signal = this.oModel.getSignal(resolvedPath);
 
-    this.watcher = new Signal.subtle.Watcher(() => {
-      scheduleFlush(this, signal);
-    });
-    this.watcher.watch(signal);
+    // The model tells the bindings on a state signal itself; only a computed needs a watcher
+    if (!(signal instanceof Signal.State)) {
+      this.watcher = new Signal.subtle.Watcher(() => {
+        scheduleFlush(this, signal);
+      });
+      this.watcher.watch(signal);
+    }
 
     this._subscribedPath = resolvedPath;
-    this._resubscribeCb = () => this.subscribe();
-    this.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
+    this.oModel._subscribe(resolvedPath, this);
   }
 
   /** @since 0.1.0 */
   unsubscribe(): void {
-    if (this._resubscribeCb && this._subscribedPath) {
-      this.oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
-      this._resubscribeCb = null;
+    if (this._subscribedPath) {
+      this.oModel._unsubscribe(this._subscribedPath, this);
       this._subscribedPath = null;
     }
     cancelFlush(this);
@@ -95,7 +95,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
    * @since 0.1.0
    */
   override initialize(): this {
-    if (!this.watcher) {
+    if (!this._subscribedPath) {
       this.subscribe();
     }
     // Fire initial change so controls (e.g. sap.m.Tree) populate their aggregation

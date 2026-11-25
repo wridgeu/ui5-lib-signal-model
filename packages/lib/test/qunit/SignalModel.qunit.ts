@@ -1,4 +1,6 @@
+import type { Signal } from "signal-polyfill";
 import SignalModel from "ui5/model/signal/SignalModel";
+import JSONModel from "sap/ui/model/json/JSONModel";
 import Text from "sap/m/Text";
 import VBox from "sap/m/VBox";
 
@@ -98,25 +100,87 @@ QUnit.module(
       model.destroy();
     });
 
-    QUnit.test("checkUpdate without force is a no-op", (assert) => {
-      const done = assert.async();
-      const model = new SignalModel({ name: "Alice" });
-      const binding = model.bindProperty("/name");
-      let changeCount = 0;
+    QUnit.test(
+      "refresh() picks up data changed without the model, like JSONModel",
+      async (assert) => {
+        for (const Model of [JSONModel, SignalModel]) {
+          const name = Model === JSONModel ? "JSONModel" : "SignalModel";
+          const model = new Model({ name: "Alice", list: [{ id: 1 }] });
+          const binding = model.bindProperty("/name");
+          const list = model.bindList("/list");
+          let changes = 0;
+          let listChanges = 0;
+          binding.attachChange(() => changes++);
+          list.attachChange(() => listChanges++);
+          binding.initialize();
+          list.initialize();
+          changes = listChanges = 0;
 
-      binding.attachChange(() => changeCount++);
-      // Change the data behind the model's back: only a forced checkUpdate may pick it up
-      model.getData().name = "Bob";
-      model.checkUpdate();
+          const data = model.getData() as { name: string; list: { id: number }[] };
+          data.name = "Bob";
+          data.list.push({ id: 2 });
+          model.refresh();
+          assert.strictEqual(binding.getValue(), "Bob", `${name}: value right after refresh()`);
+          assert.strictEqual(list.getContexts(0, 10).length, 2, `${name}: list after refresh()`);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          assert.strictEqual(
+            `${changes}, ${listChanges}`,
+            "1, 1",
+            `${name}: one change event each`,
+          );
 
-      setTimeout(() => {
-        assert.strictEqual(changeCount, 0, "no binding notification from checkUpdate()");
-        model.checkUpdate(true);
-        assert.strictEqual(changeCount, 1, "forced checkUpdate notifies the binding");
-        assert.strictEqual(binding.getValue(), "Bob", "binding picked up the new value");
+          data.name = "Carol";
+          model.updateBindings(false);
+          assert.strictEqual(binding.getValue(), "Carol", `${name}: updateBindings()`);
+
+          const whole = model.bindProperty("/list");
+          let wholeChanges = 0;
+          whole.attachChange(() => wholeChanges++);
+          whole.initialize();
+          wholeChanges = 0;
+          data.list.push({ id: 3 });
+          model.refresh(true);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          assert.strictEqual(wholeChanges, 1, `${name}: one change event for a forced refresh`);
+          model.destroy();
+        }
+      },
+    );
+
+    QUnit.test(
+      "refresh() brings computeds in line with data changed without the model",
+      (assert) => {
+        const model = new SignalModel({ price: 2 });
+        model.createComputed("/double", ["/price"], (price) => (price as number) * 2);
+        (model.getData() as { price: number }).price = 5;
+        model.refresh();
+        assert.strictEqual(model.getProperty("/double"), 10, "computed sees the new value");
         model.destroy();
-        done();
-      }, 50);
+      },
+    );
+
+    QUnit.test("set() on a state signal writes through the model", async (assert) => {
+      const model = new SignalModel({ price: 2, customer: { name: "Alice" } });
+      model.createComputed("/double", ["/price"], (price) => (price as number) * 2);
+      const binding = model.bindProperty("/price");
+      let changes = 0;
+      binding.attachChange(() => changes++);
+      binding.initialize();
+      changes = 0;
+
+      (model.getSignal("/price") as Signal.State<number>).set(5);
+      assert.strictEqual(model.getProperty("/price"), 5, "the data");
+      assert.strictEqual(model.getSignal("/price").get(), 5, "the signal");
+      assert.strictEqual(model.getProperty("/double"), 10, "a computed on it");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(`${binding.getValue()}, ${changes}`, "5, 1", "the binding, once");
+
+      const name = model.bindProperty("/customer/name");
+      name.initialize();
+      (model.getSignal("/customer") as Signal.State<{ name: string }>).set({ name: "Bob" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(name.getValue(), "Bob", "a binding below the written path");
+      model.destroy();
     });
 
     QUnit.test("getSignal returns the signal for a path", (assert) => {

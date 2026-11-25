@@ -1,6 +1,10 @@
 import { Signal } from "signal-polyfill";
+import { scheduleFlush, type FlushableBinding } from "./FlushQueue";
 
 type ValueResolver = (path: string) => unknown;
+
+/** A binding subscribed to a path */
+export type Subscriber = FlushableBinding & { subscribe(): void };
 
 /**
  * Custom equality that uses Object.is for primitives but always returns false
@@ -14,12 +18,34 @@ function signalEquals(_a: unknown, _b: unknown): boolean {
 }
 
 /**
+ * A state signal of the model. set() writes through the model, so that the data, the
+ * bindings and the computeds stay in line; the registry itself sets it with apply().
+ */
+class PathState extends Signal.State<unknown> {
+  constructor(
+    value: unknown,
+    private readonly path: string,
+    private readonly writeThrough: (path: string, value: unknown) => void,
+  ) {
+    super(value, { equals: signalEquals });
+  }
+
+  override set(value: unknown): void {
+    this.writeThrough(this.path, value);
+  }
+
+  apply(value: unknown): void {
+    super.set(value);
+  }
+}
+
+/**
  * Manages signal state and computed signals for path-based subscriptions.
  *
  * @since 0.1.0
  */
 export default class SignalRegistry {
-  private readonly signals = new Map<string, Signal.State<unknown>>();
+  private readonly signals = new Map<string, PathState>();
   private readonly computeds = new Map<string, Signal.Computed<unknown>>();
   /**
    * Paths of the state signals below each path, filled as signals are created. Lets a
@@ -32,6 +58,57 @@ export default class SignalRegistry {
    */
   minDepth = Infinity;
 
+  /** @param writeThrough - What `set()` on a state signal does: a write through the model. */
+  constructor(private readonly writeThrough: (path: string, value: unknown) => void = () => {}) {}
+
+  /**
+   * The bindings subscribed to each path. A binding on a state signal has no watcher of its
+   * own: the registry writes every state signal, so it tells the bindings itself.
+   */
+  readonly subscribers = new Map<string, Subscriber | Subscriber[]>();
+
+  subscribe(path: string, binding: Subscriber): void {
+    const current = this.subscribers.get(path);
+    if (!current) {
+      this.subscribers.set(path, binding);
+    } else if (Array.isArray(current)) {
+      current.push(binding);
+    } else {
+      this.subscribers.set(path, [current, binding]);
+    }
+  }
+
+  unsubscribe(path: string, binding: Subscriber): void {
+    const current = this.subscribers.get(path);
+    if (current === binding) {
+      this.subscribers.delete(path);
+    } else if (Array.isArray(current)) {
+      const index = current.indexOf(binding);
+      if (index !== -1) current.splice(index, 1);
+      if (current.length === 0) this.subscribers.delete(path);
+    }
+  }
+
+  /** Sets a state signal and queues the update of the bindings on its path. */
+  private write(path: string, signal: PathState, value: unknown): void {
+    const changed = !signalEquals(signal.get(), value);
+    signal.apply(value);
+    if (!changed) return;
+    const current = this.subscribers.get(path);
+    if (!current) return;
+    if (Array.isArray(current)) {
+      for (const binding of current) scheduleFlush(binding, signal);
+    } else {
+      scheduleFlush(current, signal);
+    }
+  }
+
+  /** Sets the state signal of `path`, if there is one, to the value the resolver returns. */
+  refresh(path: string, resolver: ValueResolver): void {
+    const signal = this.signals.get(path);
+    if (signal) this.write(path, signal, resolver(path));
+  }
+
   /**
    * @param path - Property path to look up or create.
    * @param initialValue - Value used when creating a new signal.
@@ -41,7 +118,7 @@ export default class SignalRegistry {
   getOrCreate(path: string, initialValue: unknown): Signal.State<unknown> {
     let signal = this.signals.get(path);
     if (!signal) {
-      signal = new Signal.State(initialValue, { equals: signalEquals });
+      signal = new PathState(initialValue, path, this.writeThrough);
       this.signals.set(path, signal);
       let depth = path === "/" ? 0 : 1;
       for (let idx = path.lastIndexOf("/"); idx > 0; idx = path.lastIndexOf("/", idx - 1)) {
@@ -96,7 +173,7 @@ export default class SignalRegistry {
   set(path: string, value: unknown): void {
     const signal = this.signals.get(path);
     if (signal) {
-      signal.set(value);
+      this.write(path, signal, value);
     }
   }
 
@@ -124,7 +201,7 @@ export default class SignalRegistry {
    */
   invalidateAll(resolver: ValueResolver): void {
     for (const [path, signal] of this.signals) {
-      signal.set(resolver(path));
+      this.write(path, signal, resolver(path));
     }
   }
 
@@ -211,6 +288,7 @@ export default class SignalRegistry {
     this.signals.clear();
     this.computeds.clear();
     this.descendants.clear();
+    this.subscribers.clear();
     this.minDepth = Infinity;
   }
 }

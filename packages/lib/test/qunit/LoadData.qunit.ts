@@ -590,9 +590,12 @@ QUnit.module("loadData", () => {
   QUnit.test(
     "loadData rejects with the error object on failure -- parity with JSONModel",
     async (assert) => {
-      const outcome = async (model: JSONModel | SignalModel<Record<string, unknown>>) => {
+      const outcome = async (
+        model: JSONModel | SignalModel<Record<string, unknown>>,
+        url = BAD_URL,
+      ) => {
         let result: unknown = "resolved";
-        await model.loadData(BAD_URL)?.catch((error: unknown) => {
+        await model.loadData(url)?.catch((error: unknown) => {
           result = error;
         });
         model.destroy();
@@ -609,9 +612,65 @@ QUnit.module("loadData", () => {
       );
       assert.strictEqual(signal.statusCode, json.statusCode, "same statusCode");
       assert.strictEqual(signal.statusText, json.statusText, "same statusText");
-      assert.strictEqual(typeof signal.message, "string", "has a message");
+      assert.strictEqual(signal.message, json.message, "same message");
+
+      for (const [what, url] of [
+        ["a response that is not JSON", MALFORMED_URL],
+        ["no server", "http://localhost:1/none.json"],
+      ]) {
+        assert.deepEqual(
+          await outcome(new SignalModel<Record<string, unknown>>(), url),
+          await outcome(new JSONModel(), url),
+          `same error object for ${what}`,
+        );
+      }
     },
   );
+
+  QUnit.test("loadData with async = false loads synchronously, like JSONModel", (assert) => {
+    for (const model of [new JSONModel(), new SignalModel<Record<string, unknown>>()]) {
+      const name = model instanceof JSONModel ? "JSONModel" : "SignalModel";
+      const events: string[] = [];
+      model.attachRequestSent((event) => events.push(`sent async=${event.getParameter("async")}`));
+      model.attachRequestCompleted((event) =>
+        events.push(`completed success=${event.getParameter("success")}`),
+      );
+      model.attachRequestFailed((event) =>
+        events.push(`failed ${event.getParameter("message")} ${event.getParameter("statusCode")}`),
+      );
+
+      const result: unknown = model.loadData(SAMPLE_URL, undefined, false);
+      assert.strictEqual(result, undefined, `${name}: returns no promise`);
+      assert.strictEqual(model.getProperty("/name"), "Alice", `${name}: data on the next line`);
+
+      model.loadData(MERGE_URL, undefined, false, "GET", true);
+      assert.strictEqual(
+        `${model.getProperty("/name")}, ${model.getProperty("/age")}`,
+        "Alice, 30",
+        `${name}: merged`,
+      );
+
+      model.loadData(BAD_URL, undefined, false);
+      model.loadData(MALFORMED_URL, undefined, false);
+      assert.deepEqual(
+        events,
+        [
+          "sent async=false",
+          "completed success=true",
+          "sent async=false",
+          "completed success=true",
+          "sent async=false",
+          "completed success=false",
+          "failed error 404",
+          "sent async=false",
+          "completed success=false",
+          "failed parsererror 200",
+        ],
+        `${name}: events`,
+      );
+      model.destroy();
+    }
+  });
 
   QUnit.test("a failed load does not block the next one", async (assert) => {
     let unhandled = 0;

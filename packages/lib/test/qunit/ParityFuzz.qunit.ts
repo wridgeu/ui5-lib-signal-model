@@ -142,7 +142,7 @@ const RELATIVE_PATHS: [string, string][] = [
   ["/missing", "x"],
 ];
 
-/** [path, context path or "", "ecd" (extended change detection), "sorted" or a key of FILTERS] */
+/** [path, context path or "", a key of CHANGE_DETECTION, "sorted" or a key of FILTERS] */
 const LIST_BINDINGS: [string, string, string][] = [
   ["/list", "", ""],
   ["/list", "", "ecd"],
@@ -151,6 +151,11 @@ const LIST_BINDINGS: [string, string, string][] = [
   ["/list", "", "eq"],
   ["/list", "", "gt"],
   ["/list", "", "contains"],
+  ["/list", "", "test"],
+  ["/list", "", "any"],
+  ["/list", "", "ecd-nokey"],
+  ["/list", "", "ecd-name"],
+  ["/list", "", "ecd-detect"],
   ["list", "/", ""],
   ["nested", "/obj", ""],
   ["/obj", "", ""],
@@ -270,6 +275,24 @@ const FILTERS: Record<string, () => Filter> = {
   eq: () => new Filter("name", FilterOperator.EQ, "a"),
   gt: () => new Filter("name", FilterOperator.GT, "a"),
   contains: () => new Filter("name", FilterOperator.Contains, "a"),
+  // Without a path the test function gets the row
+  test: () => new Filter({ test: (row: unknown) => isContainer(row) } as never),
+  any: () =>
+    new Filter({
+      filters: [
+        new Filter("name", FilterOperator.EQ, "a"),
+        new Filter({ path: "name", test: (name: unknown) => typeof name === "number" }),
+      ],
+      and: false,
+    }),
+};
+
+/** Extended change detection: [bDetectUpdates, key]. Controls use no key. */
+const CHANGE_DETECTION: Record<string, [boolean, string | undefined]> = {
+  ecd: [false, ""],
+  "ecd-nokey": [false, undefined],
+  "ecd-name": [false, "name"],
+  "ecd-detect": [true, undefined],
 };
 
 const VIEW = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">
@@ -277,6 +300,26 @@ const VIEW = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">
   <VBox binding="{/obj}"><Text id="element" text="{= typeof \${nested/v} }"/></VBox>
   <List id="list" items="{/list}"><StandardListItem title="{= typeof \${name} }"/></List>
 </mvc:View>`;
+
+/**
+ * Expression bindings on Text controls. They use typeof where a value could not be turned
+ * into text (a symbol), and read the default model, a named one and a second model.
+ * None reads the content of an object through a binding on the object: JSONModel keeps
+ * the old text there after a write below the object (a documented difference). None reads
+ * the length of an array, which differs after a merge (see difference()).
+ */
+const EXPRESSIONS = [
+  "{= ${/n} > 0 ? 'positive' : ${/flag} ? 'flag' : 'other' }",
+  "{= typeof ${/obj/nested/v} + '/' + (${/flag} && !${/s} ? 'x' : typeof ${/list/0/name}) }",
+  "{= ${/list/1/name} !== undefined ? typeof ${/list/1/name} : ${/list/0} ? 'one' : typeof ${/list} }",
+  "{= ${named>/n} === ${/n} ? ${other>/label} + typeof ${named>/s} : 'differs' }",
+  "{= Array.isArray(${/list}) ? 'array' : typeof ${/obj} === 'object' && ${/obj} !== null ? 'object' : 'else' }",
+  "{= typeof ${/obj} === 'function' ? 'fn' : String(typeof ${/obj/v}) + (${/obj/nested/v} === undefined ? '?' : '!') }",
+  "n={= typeof ${/n} }, length={= typeof ${/s/length} }, {= ${/flag} ? 'on' : 'off' }",
+  "{= isNaN(${/n}) ? 'no number' : Math.round(Number(${/n}) * 10) > 5 ? 'large' : 'small' }",
+];
+/** For a row or an element: its own path and an absolute one in one expression */
+const ROW_EXPRESSION = "{= ${name} === 'a' ? 'A' : ${/n} > 1 ? 'big' : typeof ${name} }";
 
 /** Paths the element binding of a control switches between */
 const ELEMENT_PATHS = ["/list/0", "/list/1", "/obj", "/missing", "/s"];
@@ -294,9 +337,6 @@ type Controls = {
  * `texts` reads the control properties, `rendered` the DOM.
  */
 async function createControls(model: AnyModel): Promise<Controls> {
-  const expression = new Text({
-    text: "{= ${/n} > 0 ? 'positive' : ${/flag} ? 'flag' : 'other' }",
-  });
   const composite = new Text({
     text: {
       parts: [{ path: "/s" }, { path: "/obj/v" }],
@@ -304,7 +344,8 @@ async function createControls(model: AnyModel): Promise<Controls> {
     },
   });
   const element = new Text({ text: { path: "name", formatter: typed } });
-  element.bindElement("/list/0");
+  const elementExpression = new Text({ text: ROW_EXPRESSION });
+  for (const control of [element, elementExpression]) control.bindElement("/list/0");
   const integer = new Text({ text: { path: "/n", type: new Integer() } });
   // The model under a name, next to the default model and a second model
   const other = new JSONModel({ label: "other" });
@@ -316,10 +357,16 @@ async function createControls(model: AnyModel): Promise<Controls> {
     },
   });
   named.setModel(model, "named").setModel(other, "other");
+  const expressions = EXPRESSIONS.map((text) =>
+    new Text({ text }).setModel(model, "named").setModel(other, "other"),
+  );
   const input = new Input({ value: { path: "/n", type: new Integer() } });
   const item = (): StandardListItem =>
     new StandardListItem({ title: { path: "name", formatter: typed } });
   const list = new List({ items: { path: "/list", template: item() } });
+  const mixed = new List({
+    items: { path: "/list", template: new StandardListItem({ title: ROW_EXPRESSION }) },
+  });
   const growing = new List({
     growing: true,
     growingThreshold: 1,
@@ -340,16 +387,9 @@ async function createControls(model: AnyModel): Promise<Controls> {
     },
   });
   const view = await XMLView.create({ definition: VIEW });
-  const texts = [
-    expression,
-    composite,
-    element,
-    integer,
-    named,
-    view.byId("expression") as Text,
-    view.byId("element") as Text,
-  ];
-  const all = [...texts.slice(0, 5), input, list, growing, grouped, table, tree, view];
+  const created = [...expressions, composite, element, elementExpression, integer, named];
+  const texts = [...created, view.byId("expression") as Text, view.byId("element") as Text];
+  const all = [...created, input, list, mixed, growing, grouped, table, tree, view];
   const host = document.body.appendChild(document.createElement("div"));
   for (const control of all) {
     control.setModel(model);
@@ -393,9 +433,10 @@ async function createControls(model: AnyModel): Promise<Controls> {
   return {
     texts: () => [
       ...texts.map((text) => text.getText()),
-      input.getValue(),
-      `${input.getValueState()} ${input.getValueStateText()}`,
+      `input:${input.getValue()}`,
+      `input:${input.getValueState()} ${input.getValueStateText()}`,
       rowsOf(list, (row) => row.getTitle()),
+      rowsOf(mixed, (row) => row.getTitle()),
       rowsOf(growing, (row) => row.getTitle(), true),
       rowsOf(grouped, (row) => row.getTitle(), true),
       cells((cell) => cell.getText()),
@@ -404,9 +445,10 @@ async function createControls(model: AnyModel): Promise<Controls> {
     ],
     rendered: () => [
       ...texts.map(dom),
-      (input.getFocusDomRef() as HTMLInputElement | null)?.value ?? "not rendered",
-      "",
+      `input:${(input.getFocusDomRef() as HTMLInputElement | null)?.value ?? "not rendered"}`,
+      "input:",
       rowsOf(list, dom),
+      rowsOf(mixed, dom),
       rowsOf(growing, dom, true),
       rowsOf(grouped, dom, true),
       cells(dom),
@@ -416,8 +458,10 @@ async function createControls(model: AnyModel): Promise<Controls> {
     // What typing into the field does: the binding parses the text and writes the model
     type: (text) => input.setValue(text),
     act: (action, argument) => {
-      if (action === "bindElement") element.bindElement(ELEMENT_PATHS[argument]);
-      if (action === "unbindElement") element.unbindElement();
+      for (const control of [element, elementExpression]) {
+        if (action === "bindElement") control.bindElement(ELEMENT_PATHS[argument]);
+        if (action === "unbindElement") control.unbindElement();
+      }
       // What the "More" button of a growing list does
       if (action === "grow") {
         (
@@ -428,7 +472,7 @@ async function createControls(model: AnyModel): Promise<Controls> {
       if (action === "expand") tree.expandToLevel(2);
       if (action === "collapse") tree.collapseAll();
       if (action === "refresh") {
-        for (const control of [list, growing, grouped, tree, view.byId("list") as List]) {
+        for (const control of [list, mixed, growing, grouped, tree, view.byId("list") as List]) {
           control.getBinding("items")?.refresh(true);
         }
         table.getBinding("rows")?.refresh(true);
@@ -482,14 +526,18 @@ function mergeDiffers(value: unknown): boolean {
   );
 }
 
-/** [path, with a filter and a sorter] for tree bindings */
-const TREE_BINDINGS: [string, boolean][] = [
+/** [path, with a filter and a sorter, context path, with arrayNames] for tree bindings */
+const TREE_BINDINGS: [string, boolean, string?, boolean?][] = [
   ["/", false],
   ["/obj", false],
   ["/list", false],
   ["/missing", false],
   ["/", true],
   ["/list", true],
+  ["obj", false, "/"],
+  ["nested", true, "/obj"],
+  ["/", false, "", true],
+  ["/", true, "", true],
 ];
 
 /** Paths of property bindings that get suspended and resumed */
@@ -595,7 +643,7 @@ function treeShape(binding: TreeBinding): string {
       .map((context) =>
         depth < 2
           ? `${context.getPath()}(${walk(binding.getNodeContexts(context, 0, 100), depth + 1)})`
-          : context.getPath(),
+          : `${context.getPath()}:${binding.getChildCount(context)}${binding.hasChildren(context) ? "+" : ""}`,
       )
       .toSorted()
       .join(" ");
@@ -697,20 +745,23 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         kind === "sorted" ? new Sorter("name") : undefined,
         FILTERS[kind]?.(),
       );
-      if (kind === "ecd") binding.enableExtendedChangeDetection(false, "", {});
+      if (CHANGE_DETECTION[kind]) {
+        const [detectUpdates, key] = CHANGE_DETECTION[kind];
+        binding.enableExtendedChangeDetection(detectUpdates, key as string, {});
+      }
       return binding;
     });
   const bindTrees = (model: AnyModel): TreeBinding[] =>
-    TREE_BINDINGS.map(([path, filteredAndSorted]) =>
-      filteredAndSorted
-        ? model.bindTree(
-            path,
-            undefined,
-            [new Filter({ path: "name", test: (name: unknown) => name !== "b" })],
-            undefined,
-            [new Sorter("name")],
-          )
-        : model.bindTree(path),
+    TREE_BINDINGS.map(([path, filteredAndSorted, contextPath = "", arrayNames]) =>
+      model.bindTree(
+        path,
+        contextAt(model, contextPath),
+        filteredAndSorted
+          ? [new Filter({ path: "name", test: (name: unknown) => name !== "b" })]
+          : undefined,
+        arrayNames ? { arrayNames: ["list", "nested"] } : undefined,
+        filteredAndSorted ? [new Sorter("name")] : undefined,
+      ),
     );
   const bindSuspendable = (model: AnyModel): (PropertyBinding | ListBinding)[] => [
     ...SUSPEND_PATHS.map((path) => model.bindProperty(path)),
@@ -723,6 +774,15 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
   const suspendable = bindSuspendable(signal);
   const jsonSuspendable = bindSuspendable(json);
   const suspended = suspendable.map(() => false);
+  // The rows of the list among them, in both models, when it was last suspended or resumed
+  let frozen: (string | undefined)[] = [];
+  const contextPaths = (binding: PropertyBinding | ListBinding): string | undefined =>
+    "getValue" in binding
+      ? undefined
+      : binding
+          .getContexts(0, 100)
+          .map((context) => context.getPath())
+          .join(" ");
   for (const binding of [
     ...bindings,
     ...relativeBindings,
@@ -743,25 +803,43 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     }
   }
   const listFired = LIST_BINDINGS.map(() => [0, 0]);
+  const treeFired = TREE_BINDINGS.map(() => [0, 0]);
+  // Set while JSONModel's tree binding can miss a change: its merge drops a key holding
+  // undefined, and a comparison of objects with the same number of keys does not see that
+  // one key went and another came. Until it fires again, it compares with outdated data.
+  const treeBlind = TREE_BINDINGS.map(() => false);
+  TREE_BINDINGS.forEach((_, i) => {
+    jsonTreeBindings[i].attachChange(() => treeFired[i][0]++);
+    treeBindings[i].attachChange(() => treeFired[i][1]++);
+  });
   // JSONModel's list binding fires on every update of the model while its path holds
   // something truthy that is neither an array nor a plain object, or that holds undefined
   // (the copy it compares with leaves undefined out), NaN (never equal to itself) or, in an
   // object, a "length" key. A class instance: see mergeDiffers().
   const firesAlways = (i: number): boolean => {
-    const [listPath, contextPath] = LIST_BINDINGS[i];
+    const [listPath, contextPath, listKind] = LIST_BINDINGS[i];
     return [json, signal].some((model) => {
       const value = model.getProperty(listPath, contextAt(model, contextPath)) as unknown;
       if (!value) return false;
       if (!Array.isArray(value) && (!canMerge(value, value) || "length" in (value as object))) {
         return true;
       }
-      return mergeDiffers(value) || Object.values(value).some((row) => Number.isNaN(row));
+      return (
+        mergeDiffers(value) ||
+        Object.values(value).some(
+          (row) =>
+            Number.isNaN(row) ||
+            // the key of a row, compared on every update of the model
+            (listKind === "ecd-name" && isContainer(row) && Number.isNaN(row.name)),
+        )
+      );
     });
   };
   const listFiredAlways = LIST_BINDINGS.map((_, i) => firesAlways(i));
   // After a merge JSONModel notices the next change in a row by comparing with the rows from
-  // before; SignalModel takes any write below the list for one. Where the comparison is
-  // blind (a property set on an array, a value written again), SignalModel alone fires, once.
+  // before; SignalModel is told about a write below the list that changed a value. Where
+  // JSONModel's comparison is blind to that change (a property set on an array, for one),
+  // SignalModel alone fires, once.
   const mergePending = LIST_BINDINGS.map(() => false);
   LIST_BINDINGS.forEach((_, i) => {
     // Read once: until then a binding with change detection fires on every update
@@ -799,10 +877,11 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     let jsonAccepted = "";
     let signalAccepted = "";
 
-    for (const counts of [...fired, ...listFired]) counts.fill(0);
+    for (const counts of [...fired, ...listFired, ...treeFired]) counts.fill(0);
     stepwise = false;
     let merging = false;
     let sorting = false;
+    let refreshed = false;
     if (kind < 0.1) {
       const [action, variants] = pick(ACTIONS);
       const argument = Math.floor(random() * variants);
@@ -904,12 +983,24 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
           );
         }
       });
+      TREE_BINDINGS.forEach(([, filteredAndSorted], i) => {
+        if (filteredAndSorted) {
+          onBoth([jsonTreeBindings[i], treeBindings[i]], (binding) =>
+            // oxlint-disable-next-line unicorn/no-array-sort -- a tree binding, not an array
+            binding.sort([new Sorter("name", descending)]),
+          );
+        }
+      });
     } else if (kind < 0.94) {
       filterKind = pick(Object.keys(FILTERS));
       sorting = true;
       description = `filter(${filterKind})`;
       const index = LIST_BINDINGS.findIndex(([, , listKind]) => listKind === "filtered");
       onBoth([jsonListBindings[index], listBindings[index]], (binding) =>
+        binding.filter(FILTERS[filterKind]()),
+      );
+      const tree = TREE_BINDINGS.findIndex(([, filteredAndSorted]) => filteredAndSorted);
+      onBoth([jsonTreeBindings[tree], treeBindings[tree]], (binding) =>
         binding.filter(FILTERS[filterKind]()),
       );
     } else if (kind < 0.97) {
@@ -921,6 +1012,33 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       onBoth([jsonSuspendable[index], suspendable[index]], (binding) =>
         suspended[index] ? binding.suspend() : binding.resume(),
       );
+      frozen = [suspendable, jsonSuspendable].map((list) => contextPaths(list[index]));
+    } else if (kind < 0.985) {
+      // What apps do instead of a write: change the data object, then refresh the model
+      const key = path.split("/")[1];
+      const forced = random() < 0.3;
+      description = `data.${key} = ${show(value())}; refresh(${forced ? "true" : ""})`;
+      for (const model of [json, signal]) {
+        (model.getData() as Record<string, unknown>)[key] = value();
+        try {
+          model.refresh(forced);
+        } catch {
+          // A binding threw (see above). JSONModel goes on here; let SignalModel's do so too
+          // (the bindings before it check twice, so their change events are not compared)
+          stepwise = true;
+          // What a forced refresh does after the bindings: it drops the model's messages
+          if (forced) model.setMessages({});
+          for (const binding of (model as unknown as typeof jsonInternal).getBindings()) {
+            try {
+              binding.checkUpdate(forced);
+            } catch {
+              // see above
+            }
+          }
+        }
+      }
+      // A forced refresh fires every binding
+      refreshed = forced;
     } else {
       const [computedPath, deps, fn] = pick(COMPUTEDS);
       description = `redefine computed ${computedPath}`;
@@ -932,7 +1050,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     await Promise.resolve();
     await macrotask();
     await macrotask();
-    const refreshed = resync;
+    refreshed ||= resync;
     if (resync) {
       resync = false;
       // What a binding notices differs in two cases: a merge of some data (see
@@ -1039,8 +1157,21 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         listKind === "sorted" &&
         Array.isArray(signal.getProperty(listPath, contextAt(signal, contextPath)));
       const actual = listShape(listBindings[i], ordered);
-      const expected = listShape(jsonListBindings[i], ordered);
+      let expected = listShape(jsonListBindings[i], ordered);
       const [jsonFired, signalFired] = listFired[i];
+      if (actual !== expected && jsonFired === 0 && (mergePending[i] || firesAlways(i))) {
+        // SignalModel alone updated (see mergePending and firesAlways) and its filter or
+        // sorter threw, which leaves the rows unfiltered. JSONModel's binding gets there
+        // with its next update.
+        try {
+          (jsonListBindings[i] as unknown as { checkUpdate(force: boolean): void }).checkUpdate(
+            true,
+          );
+        } catch {
+          // see above
+        }
+        expected = listShape(jsonListBindings[i], ordered);
+      }
       if (actual !== expected) {
         failure = `${where}: list binding ${LIST_BINDINGS[i].join(",")}: [${actual}], JSONModel [${expected}]`;
       } else if (
@@ -1049,8 +1180,10 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         !listFiredAlways[i] &&
         !firesAlways(i) &&
         // After a merge JSONModel's rows are new objects. A binding that compares the rows
-        // themselves then fires even if nothing in them changed.
-        (listKind === "ecd" && merging ? signalFired > jsonFired : signalFired !== jsonFired) &&
+        // themselves, or objects in them, then fires even if nothing in them changed.
+        ((listKind === "ecd" || listKind === "ecd-name") && merging
+          ? signalFired > jsonFired
+          : signalFired !== jsonFired) &&
         !(mergePending[i] && signalFired === 1 && jsonFired === 0)
       ) {
         failure = `${where}: list binding ${LIST_BINDINGS[i].join(",")} fired change ${signalFired} times, JSONModel ${jsonFired}`;
@@ -1067,9 +1200,26 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       const expected = treeShape(jsonTreeBindings[i]);
       if (actual !== expected) {
         failure = `${where}: tree binding ${TREE_BINDINGS[i].join(",")}: [${actual}], JSONModel [${expected}]`;
+        // JSONModel's tree binding also fires for unrelated writes in some states (while its
+        // data is missing, for one), so only "not more often" can be compared
+      } else if (!stepwise && !refreshed && !treeBlind[i] && treeFired[i][1] > treeFired[i][0]) {
+        failure = `${where}: tree binding ${TREE_BINDINGS[i].join(",")} fired change ${treeFired[i][1]} times, JSONModel ${treeFired[i][0]}`;
       }
     }
+    TREE_BINDINGS.forEach(([treePath, , contextPath = ""], i) => {
+      treeBlind[i] =
+        mergeDiffers(signal.getProperty(treePath, contextAt(signal, contextPath))) ||
+        (treeBlind[i] && treeFired[i][0] === 0);
+    });
     for (let i = 0; i < suspendable.length && !failure; i++) {
+      // A suspended list that has not changed is not compared with the other model's: which
+      // of its old rows count depends on the data of now (see listShape())
+      if (
+        suspended[i] &&
+        [suspendable, jsonSuspendable].every((list, k) => contextPaths(list[i]) === frozen[k])
+      ) {
+        continue;
+      }
       // Objects by type only: a long-lived JSONModel binding keeps an object that is
       // deep-equal to the new one, which can differ in ways deepEqual does not see.
       const [actual, expected] = [suspendable[i], jsonSuspendable[i]].map((binding) =>
@@ -1087,7 +1237,14 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     for (const read of ["texts", "rendered"] as const) {
       const actual = controls[read]();
       const expected = jsonControls[read]();
-      const index = failure ? -1 : actual.findIndex((text, i) => text !== expected[i]);
+      // While /n holds an object, SignalModel's binding fires on every update (a documented
+      // difference), which resets a text the user typed that could not be parsed
+      const typedOver = isContainer(json.getProperty("/n"));
+      const index = failure
+        ? -1
+        : actual.findIndex(
+            (text, i) => text !== expected[i] && !(typedOver && text.startsWith("input:")),
+          );
       if (index !== -1) {
         failure = `${where}: control ${index} ${read}: "${actual[index]}", JSONModel "${expected[index]}"`;
       }

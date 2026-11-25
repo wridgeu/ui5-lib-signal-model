@@ -24,3 +24,4 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run test:qunit
+      - run: npm run test:ui5
