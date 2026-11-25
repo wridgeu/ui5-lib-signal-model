@@ -54,6 +54,8 @@ export default class SignalListBinding extends ClientListBinding {
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
   private _merged = false;
+  /** Like _merged, but only until the bindings were updated after the merge */
+  private _mergedNow = false;
 
   /**
    * A merge at `path` took place. JSONModel's merge rebuilds the merged data, so the row
@@ -67,12 +69,19 @@ export default class SignalListBinding extends ClientListBinding {
     const own = this._subscribedPath;
     if (!own) return;
     const below = own === "/" ? "/" : `${own}/`;
-    this._merged ||=
+    const reached =
       path === "/" ||
       path === own ||
       own.startsWith(`${path}/`) ||
       // a row itself
       (path.startsWith(below) && !path.includes("/", below.length));
+    if (!reached) return;
+    this._merged = true;
+    this._mergedNow = true;
+    // The merge has notified the bindings by now, so this runs after their update
+    queueMicrotask(() => {
+      this._mergedNow = false;
+    });
   }
 
   /** @since 0.1.0 */
@@ -161,7 +170,7 @@ export default class SignalListBinding extends ClientListBinding {
     if (!deepEqual(internal.oList, list)) {
       // Without bDetectUpdates JSONModel compares the row objects themselves, and its merge
       // replaces them
-      changeDetected ||= this._merged && !internal.bDetectUpdates;
+      changeDetected ||= this._mergedNow && !internal.bDetectUpdates;
       this.update();
     }
 

@@ -344,12 +344,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       }
       // In-place merge: walk the payload and apply changes directly to this.oData.
       // O(k) where k = payload size, instead of O(n) deep clone of all data.
-      for (const binding of this._listBindings) binding._onMerge("/");
       this._mergeInPlace(
         this.oData as Record<string, unknown>,
         data as Record<string, unknown>,
         "",
       );
+      for (const binding of this._listBindings) binding._onMerge("/");
     } else {
       this.oData = data as T;
       if (this.registry.size > 0) {

@@ -924,6 +924,21 @@ QUnit.module("JSONModel Parity", () => {
         assert.strictEqual(order, expected, `after a merge at ${path}`);
       }
       binding.destroy();
+
+      // With change detection a merge counts only for the update that follows it
+      const detecting = model.bindList("/data/list");
+      detecting.enableExtendedChangeDetection(false, "", {});
+      let detected = 0;
+      detecting.attachChange(() => detected++);
+      detecting.initialize();
+      detecting.getContexts(0, 10);
+      detected = 0;
+      model.setData({ other: { y: 1 } }, true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      model.setProperty("/data/list/0/name", "q");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(detected, 0, "no late change event for a merge elsewhere");
+      detecting.destroy();
       assert.strictEqual(model._listBindings.size, 0, "a destroyed binding is forgotten");
       model.destroy();
     },

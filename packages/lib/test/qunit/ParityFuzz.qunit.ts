@@ -33,8 +33,8 @@ import type TreeBinding from "sap/ui/model/TreeBinding";
  * - rendered controls with expression, composite, element, typed, two-way and aggregation
  *   bindings: their properties and their DOM. Among them a second and a named model, a
  *   growing list, a grouped list, a sap.ui.table.Table, a sap.m.Tree and an XML view;
- * - messages on a binding and on a control, and how often property bindings fire change
- *   (not list bindings: there JSONModel's count depends on leftovers of its own merges);
+ * - messages on a binding and on a control, and how often property and list bindings fire
+ *   change;
  * - computeds, against the same function applied to JSONModel's data.
  * Operations: setProperty (also through a context), a binding's setValue, typing into an
  * input, setData replace and merge, mergeProperty, loadData, setContext, sort, filter,
@@ -466,6 +466,8 @@ const ACTIONS: [string, number][] = [
  */
 function mergeDiffers(value: unknown): boolean {
   const merged = Array.isArray(value) || canMerge(value, value);
+  // an array hole counts as undefined
+  if (Array.isArray(value) && Object.keys(value).length < value.length) return true;
   return (merged ? Object.values(value as object) : []).some(
     (child) =>
       child === undefined ||
@@ -737,6 +739,37 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       // see above
     }
   }
+  const listFired = LIST_BINDINGS.map(() => [0, 0]);
+  // JSONModel's list binding fires on every update of the model while its path holds
+  // something truthy that is neither an array nor a plain object, or that holds undefined
+  // (the copy it compares with leaves undefined out), NaN (never equal to itself) or, in an
+  // object, a "length" key. A class instance: see mergeDiffers().
+  const firesAlways = (i: number): boolean => {
+    const [listPath, contextPath] = LIST_BINDINGS[i];
+    return [json, signal].some((model) => {
+      const value = model.getProperty(
+        listPath,
+        contextPath ? new Context(model, contextPath) : undefined,
+      ) as unknown;
+      if (!value) return false;
+      if (!Array.isArray(value) && (!canMerge(value, value) || "length" in (value as object))) {
+        return true;
+      }
+      return mergeDiffers(value) || Object.values(value).some((row) => Number.isNaN(row));
+    });
+  };
+  const listFiredAlways = LIST_BINDINGS.map((_, i) => firesAlways(i));
+  // After a merge JSONModel notices the next change in a row by comparing with the rows from
+  // before; SignalModel takes any write below the list for one. Where the comparison is
+  // blind (a property set on an array, a value written again), SignalModel alone fires, once.
+  const mergePending = LIST_BINDINGS.map(() => false);
+  LIST_BINDINGS.forEach((_, i) => {
+    // Read once: until then a binding with change detection fires on every update
+    listShape(jsonListBindings[i]);
+    listShape(listBindings[i]);
+    jsonListBindings[i].attachChange(() => listFired[i][0]++);
+    listBindings[i].attachChange(() => listFired[i][1]++);
+  });
   const controls = await createControls(signal);
   const jsonControls = await createControls(json);
 
@@ -766,7 +799,8 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     let jsonAccepted = "";
     let signalAccepted = "";
 
-    for (const counts of fired) counts.fill(0);
+    for (const counts of [...fired, ...listFired]) counts.fill(0);
+    const merging = kind >= 0.68 && kind < 0.84;
     stepwise = false;
     if (kind < 0.1) {
       const [action, variants] = pick(ACTIONS);
@@ -904,15 +938,14 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     await Promise.resolve();
     await macrotask();
     await macrotask();
+    const refreshed = resync;
     if (resync) {
       resync = false;
       // What a binding notices differs in two cases: a merge of some data (see
       // mergeDiffers()), and the autoCreatePaths rule, which is applied to JSONModel one
       // parent at a time. Update both sides.
-      LIST_BINDINGS.forEach(([, , listKind], i) => {
-        if (listKind !== "" && listKind !== "ecd") {
-          onBoth([jsonListBindings[i], listBindings[i]], (binding) => binding.refresh(true));
-        }
+      LIST_BINDINGS.forEach((_, i) => {
+        onBoth([jsonListBindings[i], listBindings[i]], (binding) => binding.refresh(true));
       });
       onBoth([jsonControls, controls], (target) => target.act("refresh", 0));
     }
@@ -1015,10 +1048,29 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         );
       const actual = listShape(listBindings[i], ordered);
       const expected = listShape(jsonListBindings[i], ordered);
+      const [jsonFired, signalFired] = listFired[i];
       if (actual !== expected) {
         failure = `${where}: list binding ${LIST_BINDINGS[i].join(",")}: [${actual}], JSONModel [${expected}]`;
+      } else if (
+        !stepwise &&
+        !refreshed &&
+        !listFiredAlways[i] &&
+        !firesAlways(i) &&
+        // After a merge JSONModel's rows are new objects. A binding that compares the rows
+        // themselves then fires even if nothing in them changed.
+        (listKind === "ecd" && merging ? signalFired > jsonFired : signalFired !== jsonFired) &&
+        !(mergePending[i] && signalFired === 1 && jsonFired === 0)
+      ) {
+        failure = `${where}: list binding ${LIST_BINDINGS[i].join(",")} fired change ${signalFired} times, JSONModel ${jsonFired}`;
       }
     }
+    LIST_BINDINGS.forEach((_, i) => {
+      listFiredAlways[i] = firesAlways(i);
+      // sort() and filter() fire without reading the list again
+      const sorting = kind >= 0.88 && kind < 0.94;
+      const quiet = sorting || listFired[i][0] + listFired[i][1] === 0;
+      mergePending[i] = quiet && (merging || mergePending[i]);
+    });
     for (let i = 0; i < TREE_BINDINGS.length && !failure; i++) {
       const actual = treeShape(treeBindings[i]);
       const expected = treeShape(jsonTreeBindings[i]);
