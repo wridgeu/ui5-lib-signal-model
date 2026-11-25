@@ -109,7 +109,7 @@ npm run clean  # remove dist and .ui5 caches
 
 ### Benchmark
 
-A self-contained benchmark suite compares SignalModel vs JSONModel across 24 scenarios on OpenUI5 1.154.0. Each number is the time from a model write until UI5 has re-rendered the affected controls; browser layout and paint are not included. The largest difference is 2,000 consecutive synchronous `setProperty` calls on a model with 2,000 bindings: ~17 ms instead of ~1.0 s (**56x faster**, 95% CI 53x-60x), because JSONModel checks every binding on every call. With `bAsyncUpdate`, the mitigation UI5 recommends, JSONModel does the same work in ~17 ms and the two models cannot be separated. Across all 24 scenarios, SignalModel is faster in 16, not clearly different in 7 (aggregation replace, full merges, full `bAsyncUpdate` batches) and marginally slower in 1 (`setData` replace, 1.04x).
+A self-contained benchmark suite compares SignalModel vs JSONModel across 24 scenarios on OpenUI5 1.154.0. Each number is the time from a model write until UI5 has re-rendered the affected controls; browser layout and paint are not included. The largest difference is 2,000 consecutive synchronous `setProperty` calls on a model with 2,000 bindings: ~27 ms instead of ~1.5 s (**56x faster**, 95% CI 53x-59x), because JSONModel checks every binding on every call. With `bAsyncUpdate`, the mitigation UI5 recommends, JSONModel does the same work in ~27 ms and the two models cannot be separated. Across all 24 scenarios, SignalModel is faster in 16 and not clearly different in 8 (aggregation replace, `setData` replace, full merges, full `bAsyncUpdate` batches).
 
 ![SignalModel vs JSONModel Benchmark](docs/benchmark-results.svg)
 
