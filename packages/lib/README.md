@@ -357,7 +357,7 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted and filtered lists), controls with expression, composite and aggregation bindings, and computeds. These differences remain on purpose:
+A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted, filtered and suspended ones), rendered controls with expression, composite, typed, two-way and aggregation bindings, and computeds. These differences remain on purpose:
 
 - **Write below a primitive.** `setProperty("/name/x", 1)` with `name: "Al"` returns `false`. JSONModel throws a `TypeError`.
 - **`undefined` keys after a merge.** `setData(data, true)` merges in place and keeps keys that hold `undefined`. JSONModel rebuilds the data and drops them. `getProperty` returns `undefined` either way, and list bindings skip such keys in both models. Only the key order can differ once such a key gets a value again.
@@ -382,7 +382,7 @@ model.mergeProperty("/customer", { age: 30 });
 
 `mergeProperty` only fires signals for paths that actually changed (here, only `/customer/age`). Bindings to `/customer/name` and `/customer/city` are not notified.
 
-`setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally.
+`setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally. Like that merge, `mergeProperty` merges only two arrays or two plain objects. Any other combination (a `Date`, a class instance, an array into an object) replaces the value, as `setProperty` does.
 
 ## API
 

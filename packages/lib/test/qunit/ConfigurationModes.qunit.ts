@@ -177,4 +177,29 @@ QUnit.module("Configuration Modes", () => {
       model.destroy();
     },
   );
+
+  QUnit.test(
+    "both options: a created parent reaches its binding though the leaf is rejected",
+    (assert) => {
+      const done = assert.async();
+      const model = new SignalModel<Record<string, unknown>>(
+        {},
+        { autoCreatePaths: true, strictLeafCheck: true },
+      );
+      const parent = model.bindProperty("/new");
+      const root = model.bindProperty("/");
+      let rootChanges = 0;
+      parent.attachChange(() => {});
+      root.attachChange(() => rootChanges++);
+
+      assert.notOk(model.setProperty("/new/leaf", "value"), "leaf rejected");
+
+      setTimeout(() => {
+        assert.deepEqual(parent.getValue(), {}, "binding shows the created parent");
+        assert.strictEqual(rootChanges, 1, "binding above it fired");
+        model.destroy();
+        done();
+      }, 50);
+    },
+  );
 });

@@ -558,7 +558,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
 
     const existing = this._getObject(resolvedPath);
-    if (existing && typeof existing === "object" && typeof value === "object" && value !== null) {
+    // Like a merge with setData: only two arrays or two plain objects are merged
+    if (
+      (Array.isArray(existing) && Array.isArray(value)) ||
+      (isPlainObject(existing) && isPlainObject(value))
+    ) {
       // In-place merge: walk the payload, compare, overwrite, and fire signals in one pass.
       const changed = this._mergeInPlace(
         existing as Record<string, unknown>,
@@ -886,8 +890,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       node = node[part] as Record<string, unknown>;
       current += "/" + part;
     }
-    // Bindings below a created object showed the null that was there before
+    // Notified here, because strictLeafCheck can still reject the write itself.
+    // Bindings below a created object showed the null that was there before.
     if (createdAt && this.registry.size > 0) {
+      this.registry.set(createdAt, this._getObject(createdAt));
+      this._invalidateParentSignals(createdAt);
       this.registry.invalidateChildren(createdAt, this._readPath);
     }
     return node;
