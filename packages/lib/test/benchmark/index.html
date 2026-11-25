@@ -1527,9 +1527,13 @@
           setTimeout(r, 50);
         });
 
-        // Warmup
+        // Warmup with new values: with unchanged values no binding would update
         for (var w = 0; w < warmupRounds; w++) {
-          model.setData(JSON.parse(JSON.stringify(generateData(n))));
+          var warmupData = generateData(n);
+          for (var wi = 0; wi < n; wi++) {
+            warmupData.items[wi].value = "warmup-" + w + "-" + wi;
+          }
+          model.setData(warmupData);
           await flush();
         }
 

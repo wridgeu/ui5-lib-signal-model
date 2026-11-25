@@ -273,11 +273,11 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter that batches `check
 
 **Where the models are close:**
 
-- `setData` replace: 20.3 ms vs 22.0 ms, marginally slower (1.04x, interval 1.00x-1.08x). Three measurements in a row lean this way. A separate interleaved measurement that times the phases does not show a model cost behind it: the model work takes ~2.0 ms with SignalModel and ~2.3 ms with JSONModel, and the remaining ~13.5 ms are the 2,000 DOM updates in both. The cause of the difference in this scenario is not located.
+- `setData` replace: 20.3 ms vs 22.0 ms, marginally slower (1.04x, interval 1.00x-1.08x). This number comes from a flaw in the scenario, which is fixed but not yet re-measured on a quiet machine: its warm-up wrote the values the model already had, so no binding updated during warm-up and the measured sample was the first update each binding ever made. That first update costs about 3.9 ms for 2,000 bindings with SignalModel and 3.1 ms with JSONModel. From the second update on, an interleaved measurement that times the phases shows SignalModel slightly ahead: ~2.0 ms against ~2.3 ms of model work, plus ~13.5 ms of DOM updates in both. The warm-up now writes new values, like the other scenarios.
 - Replacing a whole aggregation (list, table, grid table, tree) shows no clear difference. The intervals span roughly -9% to +14% around parity, so differences of that size in either direction cannot be ruled out.
 - A deep merge covering all 2,000 items shows no clear difference (0.98x-1.13x); the previous measurement had it 1.07x faster. Both models are dominated by updating 2,000 controls.
 
-With 24 intervals at 95%, about one is expected to miss the true value by chance. One scenario, `setData` replace, shows SignalModel as marginally slower.
+With 24 intervals at 95%, about one is expected to miss the true value by chance. One scenario, `setData` replace, shows SignalModel as marginally slower; see above for why.
 
 **Computed signals:**
 
