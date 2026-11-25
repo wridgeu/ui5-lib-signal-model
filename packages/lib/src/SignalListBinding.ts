@@ -17,7 +17,7 @@ type ListBindingInternal = ClientListBinding & {
   bUseExtendedChangeDetection: boolean;
   bDetectUpdates: boolean;
   aLastContexts: Context[] | undefined;
-  aLastContextData: string[] | undefined;
+  aLastContextData: unknown[] | undefined;
   iLastStartIndex: number | undefined;
   iLastLength: number | undefined;
   sPath: string;
@@ -53,6 +53,7 @@ export default class SignalListBinding extends ClientListBinding {
   watcher: Signal.subtle.Watcher | null = null;
   private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
+  /** A merge reached this list since the last update() */
   private _merged = false;
   /** Like _merged, but only until the bindings were updated after the merge */
   private _mergedNow = false;
@@ -168,9 +169,12 @@ export default class SignalListBinding extends ClientListBinding {
 
     let changeDetected = (internal.oList as unknown[]).length !== (list as unknown[]).length;
     if (!deepEqual(internal.oList, list)) {
-      // Without bDetectUpdates JSONModel compares the row objects themselves, and its merge
-      // replaces them
-      changeDetected ||= this._mergedNow && !internal.bDetectUpdates;
+      // Where the key of a row is the row object itself, JSONModel compares the objects, and
+      // its merge replaces them
+      changeDetected ||=
+        this._mergedNow &&
+        !internal.bDetectUpdates &&
+        !!internal.aLastContextData?.some((key) => typeof key === "object" && key !== null);
       this.update();
     }
 

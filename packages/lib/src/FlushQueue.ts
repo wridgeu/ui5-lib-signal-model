@@ -67,9 +67,7 @@ export function scheduleFlush(
         }
         // Always re-arm watcher before checkUpdate (and even if s.get() threw)
         // so the binding can recover on subsequent dependency changes.
-        if (b.watcher) {
-          b.watcher.watch();
-        }
+        b.watcher?.watch();
         if (readFailed) continue;
         try {
           if (b._checkUpdateFromSignal) {

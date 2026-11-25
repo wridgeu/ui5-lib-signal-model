@@ -1,5 +1,6 @@
 import SignalModel from "ui5/model/signal/SignalModel";
 import JSONModel from "sap/ui/model/json/JSONModel";
+import Filter from "sap/ui/model/Filter";
 import Sorter from "sap/ui/model/Sorter";
 import List from "sap/m/List";
 import StandardListItem from "sap/m/StandardListItem";
@@ -863,7 +864,7 @@ QUnit.module("JSONModel Parity", () => {
         `${name}: after new data with the same content`,
       );
 
-      // The change detection controls use compares the row objects themselves
+      // With the row itself as key, the change detection compares the row objects
       const detecting = model.bindList("/list");
       detecting.enableExtendedChangeDetection(false, "", {});
       let detected = 0;
@@ -892,6 +893,49 @@ QUnit.module("JSONModel Parity", () => {
       model.setData({ list: [{}, { name: "w" }] }, true);
       await settled();
       assert.strictEqual(compared, 0, `${name}: no change in the rows that were read`);
+
+      // What controls use: no key, so the data of the rows that were read is compared.
+      // With a key property, the keys are.
+      for (const key of [undefined, "id"]) {
+        model.setData({
+          list: [
+            { id: 1, name: "a" },
+            { id: 2, name: "b" },
+          ],
+        });
+        const keyed = model.bindList("/list");
+        keyed.enableExtendedChangeDetection(false, key as string, {});
+        let count = 0;
+        keyed.attachChange(() => count++);
+        keyed.initialize();
+        keyed.getContexts(0, 1);
+        count = 0;
+        model.setData({ list: [{}, { name: "w" }] }, true);
+        await settled();
+        assert.strictEqual(count, 0, `${name}, key ${key}: merge changed a row that was not read`);
+        model.setData({ list: [{ name: "v" }] }, true);
+        await settled();
+        assert.strictEqual(
+          count,
+          key ? 0 : 1,
+          `${name}, key ${key}: merge changed a row that was read`,
+        );
+        keyed.destroy();
+      }
+
+      // A filter with only a test function gets the row
+      const filtered = model.bindList("/list", undefined, undefined, [
+        new Filter({ test: (row: { id: number }) => row.id === 2 } as never),
+      ]);
+      filtered.initialize();
+      assert.strictEqual(
+        filtered
+          .getContexts(0, 10)
+          .map((context) => context.getPath())
+          .join(),
+        "/list/1",
+        `${name}: filter without a path`,
+      );
 
       model.destroy();
     }

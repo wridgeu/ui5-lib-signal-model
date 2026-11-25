@@ -52,7 +52,7 @@ function asInternal(self: ClientModel): ClientModelInternal {
 export default class SignalModel<T extends object = Record<string, unknown>> extends ClientModel {
   private registry: SignalRegistry;
   /** The subscribed list bindings: a merge has to reach them. Used by SignalListBinding. @internal */
-  _listBindings = new Set<SignalListBinding>();
+  readonly _listBindings = new Set<SignalListBinding>();
   private autoCreatePaths: boolean;
   private strictLeafCheck: boolean;
   private _pathSubscribers = new Map<string, Set<() => void>>();
@@ -165,10 +165,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (method !== "GET" && parameters) {
       body =
         typeof parameters === "string" ? parameters : new URLSearchParams(parameters).toString();
-      const hasContentType =
-        customHeaders !== undefined &&
-        Object.keys(customHeaders).some((k) => k.toLowerCase() === "content-type");
-      if (!hasContentType) {
+      if (!Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
         headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
       }
     }
@@ -477,8 +474,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * Schedule a single deferred sync of all dirty paths from `bAsyncUpdate=true` writes.
    *
    * Instead of scanning the entire registry (`invalidateAll`), only the paths written
-   * during the batch (plus their ancestor state signals, deduplicated) are synced.
-   * Sparse async writes stay O(1) while bulk async writes stay O(N).
+   * during the batch, the signals below them and their ancestor state signals
+   * (deduplicated) are synced.
    */
   private _scheduleBulkSync(): void {
     if (this._bulkSyncTimer === null) {
@@ -762,8 +759,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (
       context != null &&
       typeof (context as Context).getPath !== "function" &&
-      path.charCodeAt(0) !== 47
+      path?.charCodeAt(0) !== 47
     ) {
+      // A filter with only a test function reads without a path
+      if (!path) return context;
       let node: unknown = context;
       let start = 0;
       while (start < path.length) {
@@ -885,7 +884,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         createdAt ||= current + "/" + part;
         // A new element can grow the array
         if (Array.isArray(node)) {
-          this.registry.set(`${current}/length`, node.length);
+          this.registry.set(lengthPath(current), node.length);
         }
       } else if (!isContainer(node[part])) {
         return undefined;

@@ -77,7 +77,7 @@ flowchart LR
   Defer --> Sync["Same steps once per dirty path,<br/>ancestors deduplicated"]
 ```
 
-Cost of the index: creating a signal adds one entry per ancestor path (about 0.3 µs per binding in a model-only measurement with 2000 bindings). Before the index existed, a write of an object or array value scanned every signal in the registry, which made "replace every row object" quadratic: 2000 row writes with 2000 bindings took about 100 ms and now take about 2 ms.
+Cost of the index: creating a signal adds one entry per ancestor path (about 0.2 µs per binding in a model-only measurement with 2000 bindings). Before the index existed, a write of an object or array value scanned every signal in the registry, which made "replace every row object" quadratic: 2000 row writes with 2000 bindings took about 75 ms and now take about 1.3 ms.
 
 ## Memory
 
@@ -122,9 +122,9 @@ This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload s
 
 ## List Copies
 
-`SignalListBinding.update()` copies the list with the same functions as `JSONListBinding`: `slice()` for arrays, `extend` for objects, and `deepExtend` for extended change detection. An earlier version used `structuredClone()`. It was no faster (about 0.5 ms either way for 2,000 flat rows) and gave different results for keys holding `undefined` and for properties set on a `Map`, `Set` or `Date`.
+`SignalListBinding.update()` copies the list with the same functions as `JSONListBinding`: `slice()` for arrays, `extend` for objects, and `deepExtend` for extended change detection. An earlier version used `structuredClone()`. It was faster for extended change detection (about 0.75 ms instead of 0.96 ms per update of 2,000 flat rows) but gave different results for keys holding `undefined` and for properties set on a `Map`, `Set` or `Date`.
 
-A non-detecting copy shares its row objects with the model, in both models. A write to a row is therefore not a change for the list binding, and a sorted list does not sort again. JSONModel's merge is the exception: it rebuilds the data, so the binding's rows are no longer the model's rows and the binding notices the difference. SignalModel merges in place, so the model tells its list bindings about a merge (`SignalListBinding._onMerge`): a `setData` merge reaches every list binding, a `mergeProperty` that changed something reaches the bindings at, above or one level below the merged path. A binding that was told updates on its next notification, as long as it still shares a row object with the model; rows that were replaced since are compared as usual. With the change detection that controls use (`enableExtendedChangeDetection` without `bDetectUpdates`), JSONModel compares the row objects themselves, so there a merge counts only for the update that directly follows it. The cost is one loop over the list bindings per merge; property bindings are not involved.
+A non-detecting copy shares its row objects with the model, in both models. A write to a row is therefore not a change for the list binding, and a sorted list does not sort again. JSONModel's merge is the exception: it rebuilds the data, so the binding's rows are no longer the model's rows and the binding notices the difference. SignalModel merges in place, so the model tells its list bindings about a merge (`SignalListBinding._onMerge`): a `setData` merge reaches every list binding, a `mergeProperty` that changed something reaches the bindings at, above or one level below the merged path. A binding that was told updates on its next notification, as long as it still shares a row object with the model; rows that were replaced since are compared as usual. Extended change detection compares the data or the key of each row. Only where the key is the row object itself does JSONModel's merge make a difference, and there it counts only for the update that directly follows it. The cost is one loop over the list bindings per merge; property bindings are not involved.
 
 ## Batching and `bAsyncUpdate`
 
