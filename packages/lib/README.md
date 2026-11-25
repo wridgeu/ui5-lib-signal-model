@@ -193,6 +193,14 @@ model.removeComputed("/total");
 model.createComputed("/total", ["/price"], (p) => p);
 ```
 
+### Computed Signals That Throw
+
+An error thrown by a computed's function is not turned into a value:
+
+- `getProperty`, `getObject` and a new binding on the path rethrow the error until a dependency changes and the function succeeds again. This is how `Signal.Computed` behaves, and how JSONModel behaves when a formatter throws.
+- A binding that already shows a value keeps it. The error is logged, and other bindings update as usual.
+- `createComputed` runs the function once. If that first run throws, `createComputed` throws and no computed is registered, so the function must handle the data the model holds at that moment (for example before `loadData` has finished).
+
 > **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters, the closest existing equivalent, are also fixed in code and never replaced at runtime.
 >
 > **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative -- bindings are declared in XML and the developer never touches them directly. SignalModel's automatic resubscription mechanism (described below) ensures that `removeComputed` + `createComputed` works seamlessly regardless of how bindings were created.
@@ -335,7 +343,7 @@ model.setProperty("/a/b/c", value)
                    └────── INTERMEDIATE: {a}, {b}       ← autoCreatePaths controls this
 ```
 
-- **`autoCreatePaths: true`**: Auto-creates intermediate objects when setting a deeply nested path. `model.setProperty("/a/b/c", value)` creates `{a: {b: {}}}` if the parent path doesn't exist, instead of returning `false`. Useful for dynamic form models where the schema isn't known upfront.
+- **`autoCreatePaths: true`**: Auto-creates intermediate objects when setting a deeply nested path. `model.setProperty("/a/b/c", value)` creates `{a: {b: {}}}` if the parent path doesn't exist, instead of returning `false`. Useful for dynamic form models where the schema isn't known upfront. Only missing parents (`undefined` or `null`) are created. An existing value is never replaced: with `name: "Al"`, `setProperty("/name/first", "x")` still returns `false`.
 - **`strictLeafCheck: true`**: Rejects `setProperty` writes to leaf properties that don't exist on the parent object (returns `false`). JSONModel allows creating new properties on existing parents; this flag prevents it. Useful for catching typos in property names against a known schema.
 
 | `autoCreatePaths` | `strictLeafCheck` | Missing parent | New leaf on existing parent | Use case                         |
@@ -349,10 +357,11 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-A randomized test runs the same writes against both models and compares data and binding values after every step. These differences remain on purpose:
+A randomized test runs the same writes against both models and compares the data and the property, list and tree bindings after every step. These differences remain on purpose:
 
 - **Write below a primitive.** `setProperty("/name/x", 1)` with `name: "Al"` returns `false`. JSONModel throws a `TypeError`.
-- **`undefined` keys after a merge.** `setData(data, true)` merges in place and keeps keys that hold `undefined`. JSONModel rebuilds the data and drops them. `getProperty` returns `undefined` either way.
+- **`undefined` keys after a merge.** `setData(data, true)` merges in place and keeps keys that hold `undefined`. JSONModel rebuilds the data and drops them. `getProperty` returns `undefined` either way, and list bindings skip such keys in both models. Only the key order can differ once such a key gets a value again.
+- **Errors while bindings update.** If a formatter, sorter or filter throws during an update, JSONModel throws the error out of `setProperty` and skips the remaining bindings. SignalModel updates bindings in a microtask: it logs the error and continues with the other bindings.
 - **Change events for objects.** A binding on an object or array fires a change event whenever something below it is written. JSONModel fires only when a deep comparison finds a difference.
 
 ### Merge Writes

@@ -1,5 +1,6 @@
 import SignalModel from "ui5/model/signal/SignalModel";
 import JSONModel from "sap/ui/model/json/JSONModel";
+import Sorter from "sap/ui/model/Sorter";
 import Text from "sap/m/Text";
 import VBox from "sap/m/VBox";
 
@@ -736,6 +737,34 @@ QUnit.module("JSONModel Parity", () => {
       },
     );
   }
+
+  QUnit.test("a sorter reads falsy list items like JSONModel", (assert) => {
+    const order = (model: JSONModel | SignalModel<Record<string, unknown>>): string =>
+      model
+        .bindList("/list", undefined, new Sorter("name"))
+        .getContexts()
+        .map((context) => context.getPath())
+        .join(" ");
+    const data = (): Record<string, unknown> => ({ list: [{ name: "b" }, "", 0, { name: "a" }] });
+    const json = new JSONModel(data());
+    const signal = new SignalModel(data());
+    assert.strictEqual(order(signal), order(json), "same order");
+    json.destroy();
+    signal.destroy();
+  });
+
+  QUnit.test("a list binding over an object skips undefined values like JSONModel", (assert) => {
+    for (const model of [new JSONModel({}), new SignalModel<Record<string, unknown>>({})]) {
+      model.setData({ obj: { a: 1, b: undefined } });
+      const paths = model
+        .bindList("/obj")
+        .getContexts()
+        .map((context) => context.getPath());
+      const name = model instanceof JSONModel ? "JSONModel" : "SignalModel";
+      assert.deepEqual(paths, ["/obj/a"], `${name}: only the key with a value`);
+      model.destroy();
+    }
+  });
 
   QUnit.test("a merge copies the payload -- parity with JSONModel", (assert) => {
     for (const model of [new JSONModel({}), new SignalModel<Record<string, unknown>>({})]) {

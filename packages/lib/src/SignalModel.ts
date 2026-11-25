@@ -423,10 +423,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     // Like JSONModel, a function can hold properties; other primitives cannot
     if (!parent || (typeof parent !== "object" && typeof parent !== "function")) {
-      if (!this.autoCreatePaths) {
+      const created = this.autoCreatePaths && this._createPath(objectPath);
+      if (!created) {
         return false;
       }
-      parent = this._createPath(objectPath);
+      parent = created;
     }
 
     if (this.strictLeafCheck && !(propertyName in parent)) {
@@ -749,13 +750,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   _getObject(path: string, context?: object): unknown {
     // If context is a raw data object (not a Context instance), navigate into it directly.
     // This is needed for FilterProcessor/SorterProcessor which pass raw list items as context.
-    if (context && typeof (context as Context).getPath !== "function") {
-      if (!path) {
-        return context;
-      }
-      // Match JSONModel._getObject: absolute path starting with "/" resolves from this.oData
-      let node: unknown = path.charCodeAt(0) === 47 ? this.oData : context;
-      let start = path.charCodeAt(0) === 47 ? 1 : 0;
+    // A falsy item ("" or 0 in a sorted list) is a context too, as in JSONModel.
+    // An absolute path ignores the context and is resolved below.
+    if (
+      context != null &&
+      typeof (context as Context).getPath !== "function" &&
+      path.charCodeAt(0) !== 47
+    ) {
+      let node: unknown = context;
+      let start = 0;
       while (start < path.length) {
         const end = path.indexOf("/", start);
         const part = end === -1 ? path.substring(start) : path.substring(start, end);
@@ -848,22 +851,40 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return null;
   }
 
-  private _createPath(path: string): Record<string, unknown> {
-    if (!this.oData || typeof this.oData !== "object") {
+  /**
+   * Creates the missing objects along `path` and returns the last one.
+   * Only null and undefined count as missing: an existing value is never replaced, so the
+   * result is `undefined` when a primitive is in the way.
+   */
+  private _createPath(path: string): Record<string, unknown> | undefined {
+    const isContainer = (value: unknown): boolean =>
+      typeof value === "object" || typeof value === "function";
+    let createdAt = "";
+    if (this.oData == null) {
       this.oData = {} as T;
+      createdAt = "/";
+    } else if (!isContainer(this.oData)) {
+      return undefined;
     }
-    let node: Record<string, unknown> = this.oData as Record<string, unknown>;
-    const parts = path.substring(1).split("/");
+    let node = this.oData as Record<string, unknown>;
+    let current = "";
 
-    for (const part of parts) {
+    for (const part of path.substring(1).split("/")) {
       if (part === "" || part === "__proto__" || part === "constructor" || part === "prototype") {
         continue;
       }
-      const next = node[part];
-      if (!next || typeof next !== "object") {
+      current += "/" + part;
+      if (node[part] == null) {
         node[part] = {};
+        createdAt ||= current;
+      } else if (!isContainer(node[part])) {
+        return undefined;
       }
       node = node[part] as Record<string, unknown>;
+    }
+    // Bindings below a created object showed the null that was there before
+    if (createdAt && this.registry.size > 0) {
+      this.registry.invalidateChildren(createdAt, this._readPath);
     }
     return node;
   }

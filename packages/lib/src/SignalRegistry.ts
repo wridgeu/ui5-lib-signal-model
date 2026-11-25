@@ -8,7 +8,8 @@ type ValueResolver = (path: string) => unknown;
  * are mutated in place (the parent reference doesn't change but its contents did).
  */
 function signalEquals(_a: unknown, _b: unknown): boolean {
-  if (typeof _a === "object" && _a !== null) return false;
+  // A function can hold properties too (JSONModel writes below one)
+  if ((typeof _a === "object" && _a !== null) || typeof _a === "function") return false;
   return Object.is(_a, _b);
 }
 
@@ -21,10 +22,10 @@ export default class SignalRegistry {
   private readonly signals = new Map<string, Signal.State<unknown>>();
   private readonly computeds = new Map<string, Signal.Computed<unknown>>();
   /**
-   * State signals below each path, filled as signals are created. Lets a write
-   * reach its child signals directly instead of scanning the whole registry.
+   * Paths of the state signals below each path, filled as signals are created. Lets a
+   * write reach its child signals directly instead of scanning the whole registry.
    */
-  private readonly descendants = new Map<string, [string, Signal.State<unknown>][]>();
+  private readonly descendants = new Map<string, string[]>();
   /**
    * Depth of the shallowest state signal ("/" is 0, "/a" is 1, "/a/b" is 2). A write at
    * this depth or above has no signal among its ancestors, so the ancestor walk is skipped.
@@ -48,9 +49,9 @@ export default class SignalRegistry {
         const ancestor = path.substring(0, idx);
         const below = this.descendants.get(ancestor);
         if (below) {
-          below.push([path, signal]);
+          below.push(path);
         } else {
-          this.descendants.set(ancestor, [[path, signal]]);
+          this.descendants.set(ancestor, [path]);
         }
       }
       if (depth < this.minDepth) {
@@ -111,8 +112,8 @@ export default class SignalRegistry {
     }
     const below = this.descendants.get(parentPath);
     if (below) {
-      for (const [path, signal] of below) {
-        signal.set(resolver(path));
+      for (const path of below) {
+        this.set(path, resolver(path));
       }
     }
   }

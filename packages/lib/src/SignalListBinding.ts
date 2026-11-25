@@ -3,6 +3,7 @@ import ChangeReason from "sap/ui/model/ChangeReason";
 import type Context from "sap/ui/model/Context";
 import deepEqual from "sap/base/util/deepEqual";
 import deepExtend from "sap/base/util/deepExtend";
+import extend from "sap/base/util/extend";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
 import { scheduleFlush, cancelFlush, teardownWatcher } from "./FlushQueue";
@@ -32,18 +33,6 @@ type ListBindingInternal = ClientListBinding & {
 };
 
 /**
- * Deep-clone an array or object using structuredClone, falling back to UI5's
- * deepExtend when the data contains non-cloneable values (e.g. functions).
- */
-function safeDeepClone<T extends object>(value: T): T {
-  try {
-    return structuredClone(value);
-  } catch {
-    return deepExtend(Array.isArray(value) ? [] : {}, value) as T;
-  }
-}
-
-/**
  * Casts to an internal type that includes UI5 runtime properties not exposed
  * by `@openui5/types` (e.g. `oList`, `bSuspended`, `_fireChange`).
  */
@@ -69,12 +58,16 @@ export default class SignalListBinding extends ClientListBinding {
     const internal = asInternal(this);
     const list = this.oModel._getObject(internal.sPath, internal.oContext);
     if (list) {
+      // Copied with the functions JSONListBinding uses: they drop undefined values
       if (Array.isArray(list)) {
-        internal.oList = internal.bUseExtendedChangeDetection ? safeDeepClone(list) : list.slice();
-      } else {
         internal.oList = internal.bUseExtendedChangeDetection
-          ? safeDeepClone(list as Record<string, unknown>)
-          : Object.assign({}, list);
+          ? (deepExtend([], list) as unknown[])
+          : list.slice();
+      } else {
+        internal.oList = (internal.bUseExtendedChangeDetection ? deepExtend : extend)(
+          {},
+          list,
+        ) as Record<string, unknown>;
       }
       this.updateIndices();
       internal.applyFilter();

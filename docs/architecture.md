@@ -78,6 +78,8 @@ flowchart LR
 
 Cost of the index: creating a signal adds one entry per ancestor path (about 0.3 µs per binding in a model-only measurement with 2000 bindings). Before the index existed, a write of an object or array value scanned every signal in the registry, which made "replace every row object" quadratic: 2000 row writes with 2000 bindings took about 100 ms and now take about 2 ms.
 
+Memory: the index stores each signal's path once per ancestor path. Measured in Node.js with 20,000 state signals, a signal costs about 145 bytes without the index. With it, a signal at `/items/0/name` costs about 315 bytes and one at `/a/b/c/d/items/0/meta/name` about 495 bytes. Top-level paths such as `/name` have no ancestor and cost nothing extra.
+
 ## In-Place Merge (Eliminating `deepExtend`)
 
 UI5's `JSONModel.setData(data, true)` uses `sap/base/util/deepExtend` to deep-clone the entire model data and then overlay the merge payload. For a model with 1000 items where you merge 5, this clones all 1000, doing O(n) work for an O(k) operation.
@@ -104,9 +106,9 @@ The result matches `JSONModel.setData(data, true)`: payload keys whose value is 
 
 This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload size. The improvement is largest for shallow merges into large datasets, common in form-based Fiori apps that update a few fields at a time.
 
-## `structuredClone` with `deepExtend` Fallback
+## List Copies
 
-`SignalListBinding.update()` needs a deep copy of the list for extended change detection. It uses `structuredClone()` with a `try/catch` fallback to UI5's `deepExtend` when values contain non-cloneable properties (such as functions).
+`SignalListBinding.update()` copies the list with the same functions as `JSONListBinding`: `slice()` for arrays, `extend` for objects, and `deepExtend` for extended change detection. An earlier version used `structuredClone()`. It was no faster (about 0.5 ms either way for 2,000 flat rows) and gave different results for keys holding `undefined` and for properties set on a `Map`, `Set` or `Date`.
 
 ## Batching and `bAsyncUpdate`
 

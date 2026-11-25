@@ -930,6 +930,38 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
+  // Like a throwing formatter on a JSONModel binding, and like Signal.Computed itself:
+  // the error reaches the caller instead of turning into a wrong value.
+  QUnit.test("reading a failing computed rethrows its error until it recovers", (assert) => {
+    const model = new SignalModel({ a: 1 });
+    model.createComputed("/checked", ["/a"], (a) => {
+      if (a === 2) throw new Error("computed failed");
+      return { value: a };
+    });
+
+    model.setProperty("/a", 2);
+    assert.throws(() => model.getProperty("/checked"), /computed failed/, "getProperty");
+    assert.throws(() => model.getProperty("/checked/value"), /computed failed/, "path below it");
+    assert.throws(() => model.bindProperty("/checked").getValue(), /computed failed/, "binding");
+    assert.strictEqual(model.getProperty("/a"), 2, "other paths are readable");
+
+    model.setProperty("/a", 3);
+    assert.strictEqual(model.getProperty("/checked/value"), 3, "readable again");
+    model.destroy();
+  });
+
+  QUnit.test("createComputed throws and registers nothing if the first run fails", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    const failing = (): never => {
+      throw new Error("first run failed");
+    };
+    assert.throws(() => model.createComputed("/bad", ["/a"], failing), /first run failed/);
+    assert.strictEqual(model.getProperty("/bad"), undefined, "no computed at the path");
+    model.createComputed("/bad", ["/a"], (a) => a);
+    assert.strictEqual(model.getProperty("/bad"), 1, "the path can be defined afterwards");
+    model.destroy();
+  });
+
   QUnit.test("binding keeps its value when its computed throws during a flush", (assert) => {
     const done = assert.async();
     const model = new SignalModel({ a: 1 });

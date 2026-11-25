@@ -1,10 +1,14 @@
 import SignalModel from "ui5/model/signal/SignalModel";
 import JSONModel from "sap/ui/model/json/JSONModel";
+import Context from "sap/ui/model/Context";
+import type ListBinding from "sap/ui/model/ListBinding";
+import type TreeBinding from "sap/ui/model/TreeBinding";
 
 /**
  * Differential test: the same random sequence of writes runs against JSONModel and
  * SignalModel, and after every step the data must match and every SignalModel binding
- * must show what JSONModel holds at its path.
+ * (property, list and tree; absolute and relative to a context) must show what JSONModel
+ * holds at its path.
  * Seeds are fixed, so a failure names the seed and step to replay.
  */
 
@@ -93,6 +97,33 @@ const READ_PATHS = [
   "/obj/length",
 ];
 
+/** [context path, path relative to it] for property bindings and for writes */
+const RELATIVE_PATHS: [string, string][] = [
+  ["/", "n"],
+  ["/obj", "v"],
+  ["/obj", "nested/v"],
+  ["/list", "length"],
+  ["/list/0", "name"],
+  ["/list/1", "name"],
+  ["/s", "length"],
+  ["/missing", "x"],
+];
+
+/** [path, context path or "", "ecd" for extended change detection] */
+const LIST_BINDINGS: [string, string, string][] = [
+  ["/list", "", ""],
+  ["/list", "", "ecd"],
+  ["list", "/", ""],
+  ["nested", "/obj", ""],
+  ["/obj", "", ""],
+  ["/obj", "", "ecd"],
+  ["/", "", ""],
+  ["/s", "", ""],
+  ["/missing", "", ""],
+];
+
+const TREE_PATHS = ["/", "/obj", "/list", "/missing"];
+
 const initialData = (): Record<string, unknown> => ({
   s: "Al",
   n: 42,
@@ -158,6 +189,45 @@ function attempt(write: () => boolean): string {
   }
 }
 
+/**
+ * Paths of the contexts a list binding returns, or the name of the error it throws.
+ * Sorted and without undefined entries: after a merge the two models differ in key order
+ * and in trailing undefined array entries (see difference()).
+ */
+function listShape(binding: ListBinding): string {
+  try {
+    return binding
+      .getContexts(0, 100)
+      .filter((context) => context.getObject() !== undefined)
+      .map((context) => context.getPath())
+      .toSorted()
+      .join(" ");
+  } catch (error) {
+    return (error as Error).name;
+  }
+}
+
+/**
+ * Paths of the first three levels of a tree binding, or the name of the error it throws.
+ * Sorted, because the key order differs after a merge (see listShape()).
+ */
+function treeShape(binding: TreeBinding): string {
+  const walk = (contexts: Context[], depth: number): string =>
+    contexts
+      .map((context) =>
+        depth < 2
+          ? `${context.getPath()}(${walk(binding.getNodeContexts(context, 0, 100), depth + 1)})`
+          : context.getPath(),
+      )
+      .toSorted()
+      .join(" ");
+  try {
+    return walk(binding.getRootContexts(0, 100), 0);
+  } catch (error) {
+    return (error as Error).name;
+  }
+}
+
 const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 async function runSeed(seed: number, steps: number): Promise<string> {
@@ -168,6 +238,34 @@ async function runSeed(seed: number, steps: number): Promise<string> {
   const signal = new SignalModel<Record<string, unknown>>(initialData());
   const bindings = READ_PATHS.map((path) => signal.bindProperty(path));
   for (const binding of bindings) {
+    binding.attachChange(() => {});
+    binding.initialize();
+  }
+  const relativeBindings = RELATIVE_PATHS.map(([contextPath, path]) =>
+    signal.bindProperty(path, new Context(signal, contextPath)),
+  );
+  // List and tree bindings are compared with long-lived JSONModel bindings: like those,
+  // a list binding only sorts again once it notices a change.
+  const bindLists = (model: JSONModel | typeof signal): ListBinding[] =>
+    LIST_BINDINGS.map(([path, contextPath, mode]) => {
+      const binding = model.bindList(
+        path,
+        contextPath ? new Context(model, contextPath) : undefined,
+      );
+      if (mode === "ecd") binding.enableExtendedChangeDetection(false, "", {});
+      return binding;
+    });
+  const listBindings = bindLists(signal);
+  const jsonListBindings = bindLists(json);
+  const treeBindings = TREE_PATHS.map((path) => signal.bindTree(path));
+  const jsonTreeBindings = TREE_PATHS.map((path) => json.bindTree(path));
+  for (const binding of [
+    ...relativeBindings,
+    ...listBindings,
+    ...jsonListBindings,
+    ...treeBindings,
+    ...jsonTreeBindings,
+  ]) {
     binding.attachChange(() => {});
     binding.initialize();
   }
@@ -183,9 +281,22 @@ async function runSeed(seed: number, steps: number): Promise<string> {
     let signalAccepted: unknown;
 
     if (kind < 0.8) {
-      description = `setProperty("${path}", ${show(value())}${async ? ", async" : ""})`;
-      jsonAccepted = attempt(() => json.setProperty(path, value(), undefined, async));
-      signalAccepted = attempt(() => signal.setProperty(path, value(), undefined, async));
+      // A quarter of the writes go through a context: "/obj/v" as "v" relative to "/obj"
+      const cut = random() < 0.25 ? path.lastIndexOf("/") : 0;
+      const contextPath = cut ? path.slice(0, cut) : "";
+      const written = cut ? path.slice(cut + 1) : path;
+      description = `setProperty("${written}", ${show(value())}${
+        contextPath ? `, context ${contextPath}` : ""
+      }${async ? ", async" : ""})`;
+      const write = (model: JSONModel | typeof signal): boolean =>
+        model.setProperty(
+          written,
+          value(),
+          contextPath ? new Context(model, contextPath) : undefined,
+          async,
+        );
+      jsonAccepted = attempt(() => write(json));
+      signalAccepted = attempt(() => write(signal));
     } else if (kind < 0.9) {
       description = "setData(replace)";
       json.setData(initialData());
@@ -223,6 +334,30 @@ async function runSeed(seed: number, steps: number): Promise<string> {
       const found = difference(bindings[i].getValue(), expected);
       if (found) failure = `${where}: binding ${readPath} differs at ${found}`;
     }
+    for (let i = 0; i < RELATIVE_PATHS.length && !failure; i++) {
+      const [contextPath, relative] = RELATIVE_PATHS[i];
+      // The length of an array: see above
+      const ownArray = relative === "length" && (signal.getProperty(contextPath) as unknown);
+      const expected = Array.isArray(ownArray)
+        ? ownArray.length
+        : (json.getProperty(relative, new Context(json, contextPath)) as unknown);
+      const found = difference(relativeBindings[i].getValue(), expected);
+      if (found) failure = `${where}: binding ${relative} in ${contextPath} differs at ${found}`;
+    }
+    for (let i = 0; i < LIST_BINDINGS.length && !failure; i++) {
+      const actual = listShape(listBindings[i]);
+      const expected = listShape(jsonListBindings[i]);
+      if (actual !== expected) {
+        failure = `${where}: list binding ${LIST_BINDINGS[i].join(",")}: [${actual}], JSONModel [${expected}]`;
+      }
+    }
+    for (let i = 0; i < TREE_PATHS.length && !failure; i++) {
+      const actual = treeShape(treeBindings[i]);
+      const expected = treeShape(jsonTreeBindings[i]);
+      if (actual !== expected) {
+        failure = `${where}: tree binding ${TREE_PATHS[i]}: [${actual}], JSONModel [${expected}]`;
+      }
+    }
   }
 
   json.destroy();
@@ -231,7 +366,11 @@ async function runSeed(seed: number, steps: number): Promise<string> {
 }
 
 QUnit.module("Parity fuzz (JSONModel as oracle)", () => {
-  for (let seed = 1; seed <= 10; seed++) {
+  // More seeds on demand: open the test page with ?fuzzFrom=11&fuzzCount=25
+  const query = new URLSearchParams(location.search);
+  const from = Number(query.get("fuzzFrom") ?? 1);
+  const to = from + Number(query.get("fuzzCount") ?? 10);
+  for (let seed = from; seed < to; seed++) {
     QUnit.test(`random writes keep data and bindings in parity (seed ${seed})`, async (assert) => {
       assert.strictEqual(await runSeed(seed, 40), "", "no divergence from JSONModel");
     });
