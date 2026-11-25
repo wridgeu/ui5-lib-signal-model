@@ -873,14 +873,18 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       if (part === "" || part === "__proto__" || part === "constructor" || part === "prototype") {
         continue;
       }
-      current += "/" + part;
       if (node[part] == null) {
         node[part] = {};
-        createdAt ||= current;
+        createdAt ||= current + "/" + part;
+        // A new element can grow the array
+        if (Array.isArray(node)) {
+          this.registry.set(`${current}/length`, node.length);
+        }
       } else if (!isContainer(node[part])) {
         return undefined;
       }
       node = node[part] as Record<string, unknown>;
+      current += "/" + part;
     }
     // Bindings below a created object showed the null that was there before
     if (createdAt && this.registry.size > 0) {

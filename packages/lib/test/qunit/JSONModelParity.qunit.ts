@@ -1,6 +1,8 @@
 import SignalModel from "ui5/model/signal/SignalModel";
 import JSONModel from "sap/ui/model/json/JSONModel";
 import Sorter from "sap/ui/model/Sorter";
+import List from "sap/m/List";
+import StandardListItem from "sap/m/StandardListItem";
 import Text from "sap/m/Text";
 import VBox from "sap/m/VBox";
 
@@ -737,6 +739,33 @@ QUnit.module("JSONModel Parity", () => {
       },
     );
   }
+
+  // The list re-uses the item of row 1 for row 0. The update queued for its old row
+  // must not be applied to it afterwards.
+  QUnit.test("a list item moved to another row shows that row -- parity", (assert) => {
+    const done = assert.async();
+    const titles = [new JSONModel({}), new SignalModel<Record<string, unknown>>({})].map(
+      (model) => {
+        model.setData({ list: { 1: { name: "x" } } });
+        const list = new List({
+          items: { path: "/list", template: new StandardListItem({ title: "{name}" }) },
+        });
+        list.setModel(model);
+        model.setData({ list: [{ name: "a" }, { name: "b" }] });
+        return (): string => {
+          const result = list.getItems().map((item) => (item as StandardListItem).getTitle());
+          list.destroy();
+          model.destroy();
+          return result.join(",");
+        };
+      },
+    );
+    setTimeout(() => {
+      assert.strictEqual(titles[0](), "a,b", "JSONModel");
+      assert.strictEqual(titles[1](), "a,b", "SignalModel");
+      done();
+    }, 50);
+  });
 
   QUnit.test("a sorter reads falsy list items like JSONModel", (assert) => {
     const order = (model: JSONModel | SignalModel<Record<string, unknown>>): string =>

@@ -26,6 +26,8 @@ interface FlushableBinding {
  */
 let pendingUpdates = new Map<FlushableBinding, Signal.State<unknown> | Signal.Computed<unknown>>();
 let flushScheduled = false;
+/** The batch being processed, so that cancelFlush() also reaches bindings queued in it. */
+let flushing: typeof pendingUpdates | null = null;
 
 /**
  * Enqueue a binding for batched update in the next microtask.
@@ -47,11 +49,10 @@ export function scheduleFlush(
       // queued for the next flush cycle, not processed in this one.
       const batch = pendingUpdates;
       pendingUpdates = new Map();
+      flushing = batch;
+      // A binding destroyed or re-subscribed by an earlier update of this batch has been
+      // removed from it by cancelFlush(): its queued signal is no longer the one it shows.
       for (const [b, s] of batch) {
-        // Skip bindings destroyed/unsubscribed since they were queued.
-        // cancelFlush() operates on the live pendingUpdates map, but after
-        // the swap the binding is in the detached batch -- unreachable by cancel.
-        if (!b.watcher) continue;
         let value: unknown;
         let readFailed = false;
         try {
@@ -84,6 +85,7 @@ export function scheduleFlush(
           );
         }
       }
+      flushing = null;
     });
   }
 }
@@ -96,6 +98,7 @@ export function scheduleFlush(
  */
 export function cancelFlush(binding: FlushableBinding): void {
   pendingUpdates.delete(binding);
+  flushing?.delete(binding);
 }
 
 /**

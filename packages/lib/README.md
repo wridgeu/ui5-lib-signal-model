@@ -357,7 +357,7 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-A randomized test runs the same writes against both models and compares the data and the property, list and tree bindings after every step. These differences remain on purpose:
+A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted and filtered lists), controls with expression, composite and aggregation bindings, and computeds. These differences remain on purpose:
 
 - **Write below a primitive.** `setProperty("/name/x", 1)` with `name: "Al"` returns `false`. JSONModel throws a `TypeError`.
 - **`undefined` keys after a merge.** `setData(data, true)` merges in place and keeps keys that hold `undefined`. JSONModel rebuilds the data and drops them. `getProperty` returns `undefined` either way, and list bindings skip such keys in both models. Only the key order can differ once such a key gets a value again.

@@ -47,6 +47,7 @@ sequenceDiagram
 - **One microtask per synchronous block**, regardless of how many bindings or binding types are notified.
 - **Map-based deduplication**: `Map<binding, signal>` ensures each binding appears at most once. Rapid-fire `setProperty` calls (e.g., updating 10 fields in a loop) produce exactly one `checkUpdate` per affected binding.
 - **Watcher re-arm and error isolation**: The TC39 Watcher fires at most once between `watch()` calls. The flush reads the current value (`signal.get()`, inside `try/catch` so a throwing computed cannot abort the batch), always re-arms the watcher (`watcher.watch()`), then updates the binding. For direct property bindings, the already-read value is passed straight to `_checkUpdateFromSignal`, avoiding a second path traversal.
+- **Cancelled updates**: An update earlier in a batch can destroy a binding or move it to another path (a list re-using an item for a different row). `cancelFlush()` then removes the binding from the batch being processed as well, so the value of its old path is not applied to it.
 
 When `bAsyncUpdate=true` is passed to `setProperty`, synchronous signal notification is skipped. Dirty paths are recorded in a `Set` and synced once in a single `setTimeout` pass with deduplicated ancestor invalidation. See [Batching and `bAsyncUpdate`](#batching-and-basyncupdate).
 

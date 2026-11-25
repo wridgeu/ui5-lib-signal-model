@@ -92,6 +92,9 @@ QUnit.module("Configuration Modes", () => {
       { nothing: null },
       { autoCreatePaths: true },
     );
+    model.setProperty("/rows", []);
+    const length = model.bindProperty("/rows/length");
+    length.attachChange(() => {});
     const sibling = model.bindProperty("/nothing/other");
     const rootModel = new SignalModel<Record<string, unknown>>({}, { autoCreatePaths: true });
     rootModel.setData(null as never);
@@ -102,10 +105,12 @@ QUnit.module("Configuration Modes", () => {
     belowRoot.attachChange(() => {});
 
     model.setProperty("/nothing/a/b", 1);
+    model.setProperty("/rows/0/name", "x");
     rootModel.setProperty("/a/b", 1);
 
     setTimeout(() => {
       assert.strictEqual(sibling.getValue(), undefined, "now a missing property");
+      assert.strictEqual(length.getValue(), 1, "length of an array that got a new element");
       assert.strictEqual(belowRoot.getValue(), undefined, "now a missing property of the root");
       model.destroy();
       rootModel.destroy();
