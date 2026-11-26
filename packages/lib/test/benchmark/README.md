@@ -206,7 +206,7 @@ npm run bench:render                                                   # regener
 
 **Run:** 10 runs x 20 rounds (10 samples per model and run), 2,000 bindings, measured 2026-11-26.
 **Environment:** OpenUI5 1.154.0, headless Chrome 158, Node.js 26.10.0, 12th Gen Intel(R) Core(TM) i7-12700K, 32 GB RAM, Windows_NT 10.0.26300.
-**Harness floor:** 7.5 µs per operation (`setText` + render pass, no model), included in every time below.
+**Harness floor:** 7.6 µs per operation (`setText` + render pass, no model), included in every time below.
 
 ![SignalModel vs JSONModel Benchmark](../../../../docs/benchmark-results.svg)
 
@@ -215,51 +215,51 @@ npm run bench:render                                                   # regener
 
 | #   | Binding Type              | Scenario                                        | JSONModel | SignalModel | SignalModel vs JSONModel (95% CI)     |
 | --- | ------------------------- | ----------------------------------------------- | --------- | ----------- | ------------------------------------- |
-| 1   | Model API                 | setProperty throughput (no bindings)            | 97.1 µs   | 62.8 µs     | **1.55x faster (1.52x-1.58x)**        |
-| 2   | Model API                 | getProperty throughput                          | 72.9 µs   | 50.0 µs     | **1.46x faster (1.43x-1.49x)**        |
-| 3   | Property (sap.m.Text)     | Single-path update, 2000 bindings               | 0.550 ms  | 12.7 µs     | **44x faster (41x-46x)**              |
-| 4   | Property (sap.m.Text)     | Update all 2000 bindings (sync)                 | 1024 ms   | 17.25 ms    | **59x faster (58x-60x)**              |
-| 5   | Property (sap.m.Text)     | Update all 2000 bindings (bAsyncUpdate)         | 17.16 ms  | 16.75 ms    | marginally faster 1.02x (1.01x-1.03x) |
-| 6   | Property (sap.m.Text)     | Sparse update, 1 of 2000 (bAsyncUpdate)         | 0.539 ms  | 22.2 µs     | **24x faster (23x-26x)**              |
-| 7   | List (sap.m.List)         | List binding replace, 500 items                 | 39.38 ms  | 39.30 ms    | no clear difference (0.97x-1.03x)     |
-| 8   | List (sap.m.Table)        | Table binding replace, 500 rows                 | 12.27 ms  | 12.55 ms    | no clear difference (0.95x-1.06x)     |
-| 9   | List (sap.ui.table.Table) | Grid table binding replace, 2000 rows           | 1.18 ms   | 1.14 ms     | no clear difference (0.90x-1.10x)     |
-| 10  | Tree (sap.m.Tree)         | Tree binding replace, 200 nodes                 | 8.25 ms   | 8.48 ms     | no clear difference (0.90x-1.12x)     |
-| 11  | Expression (sap.m.Text)   | Expression binding, 500 controls                | 0.290 ms  | 14.9 µs     | **19x faster (18x-20x)**              |
-| 12  | Computed (sap.m.Text)     | Computed signals, 2000 computeds                | 0.454 ms  | 14.3 µs     | **31x faster (30x-32x)**              |
-| 13  | Computed (sap.m.Text)     | Computed (redefined), 2000 computeds            | 0.519 ms  | 16.8 µs     | **31x faster (28x-35x)**              |
-| 14  | Computed (sap.m.Text)     | Computed sub-path, 2000 computeds               | 0.520 ms  | 14.6 µs     | **35x faster (33x-38x)**              |
-| 15  | Computed (sap.m.Text)     | Computed redefine + sub-path, 2000 computeds    | 0.607 ms  | 16.1 µs     | **37x faster (33x-40x)**              |
-| 16  | Property (sap.m.Text)     | setData replace, 2000 bindings                  | 18.77 ms  | 18.08 ms    | marginally faster 1.03x (1.02x-1.04x) |
-| 17  | Property (sap.m.Text)     | setData merge (shallow), 2000 bindings          | 1.21 ms   | 58.1 µs     | **21x faster (20x-22x)**              |
-| 18  | Property (sap.m.Text)     | setData merge (deep), 2000 bindings             | 20.14 ms  | 18.59 ms    | marginally faster 1.08x (1.07x-1.09x) |
-| 19  | Property (sap.m.Text)     | setData merge (nested config), 2000 bindings    | 1.15 ms   | 15.6 µs     | **74x faster (72x-76x)**              |
-| 20  | Property (sap.m.Text)     | setData merge (large, pinpoint), 20000 items    | 17.65 ms  | 37.3 µs     | **480x faster (460x-500x)**           |
-| 21  | Property (sap.m.Text)     | Warning threshold: 29 sync calls, 3449 bindings | 25.70 ms  | 0.290 ms    | **87x faster (85x-90x)**              |
-| 22  | Property (sap.m.Text)     | Deep-path setProperty (no computeds), 2000      | 0.621 ms  | 13.7 µs     | **46x faster (42x-50x)**              |
-| 23  | Property (sap.m.Text)     | Replace all 2000 row objects (sync)             | 980 ms    | 20.06 ms    | **49x faster (48x-50x)**              |
-| 24  | Property (sap.m.Text)     | Replace all 2000 row objects (bAsyncUpdate)     | 19.88 ms  | 19.27 ms    | marginally faster 1.03x (1.01x-1.04x) |
+| 1   | Model API                 | setProperty throughput (no bindings)            | 97.7 µs   | 61.9 µs     | **1.57x faster (1.55x-1.60x)**        |
+| 2   | Model API                 | getProperty throughput                          | 72.7 µs   | 50.0 µs     | **1.46x faster (1.43x-1.49x)**        |
+| 3   | Property (sap.m.Text)     | Single-path update, 2000 bindings               | 0.544 ms  | 12.4 µs     | **43x faster (41x-46x)**              |
+| 4   | Property (sap.m.Text)     | Update all 2000 bindings (sync)                 | 1031 ms   | 17.15 ms    | **60x faster (59x-61x)**              |
+| 5   | Property (sap.m.Text)     | Update all 2000 bindings (bAsyncUpdate)         | 17.06 ms  | 16.79 ms    | marginally faster 1.02x (1.00x-1.03x) |
+| 6   | Property (sap.m.Text)     | Sparse update, 1 of 2000 (bAsyncUpdate)         | 0.537 ms  | 23.6 µs     | **23x faster (22x-24x)**              |
+| 7   | List (sap.m.List)         | List binding replace, 500 items                 | 39.68 ms  | 39.60 ms    | no clear difference (0.98x-1.05x)     |
+| 8   | List (sap.m.Table)        | Table binding replace, 500 rows                 | 12.88 ms  | 12.98 ms    | no clear difference (0.95x-1.04x)     |
+| 9   | List (sap.ui.table.Table) | Grid table binding replace, 2000 rows           | 1.15 ms   | 1.17 ms     | no clear difference (0.90x-1.02x)     |
+| 10  | Tree (sap.m.Tree)         | Tree binding replace, 200 nodes                 | 8.97 ms   | 8.55 ms     | no clear difference (0.98x-1.14x)     |
+| 11  | Expression (sap.m.Text)   | Expression binding, 500 controls                | 0.281 ms  | 15.1 µs     | **19x faster (18x-20x)**              |
+| 12  | Computed (sap.m.Text)     | Computed signals, 2000 computeds                | 0.462 ms  | 14.4 µs     | **31x faster (29x-33x)**              |
+| 13  | Computed (sap.m.Text)     | Computed (redefined), 2000 computeds            | 0.505 ms  | 17.0 µs     | **30x faster (28x-32x)**              |
+| 14  | Computed (sap.m.Text)     | Computed sub-path, 2000 computeds               | 0.527 ms  | 14.9 µs     | **35x faster (33x-37x)**              |
+| 15  | Computed (sap.m.Text)     | Computed redefine + sub-path, 2000 computeds    | 0.592 ms  | 16.2 µs     | **35x faster (33x-38x)**              |
+| 16  | Property (sap.m.Text)     | setData replace, 2000 bindings                  | 18.91 ms  | 18.41 ms    | marginally faster 1.04x (1.02x-1.05x) |
+| 17  | Property (sap.m.Text)     | setData merge (shallow), 2000 bindings          | 1.20 ms   | 60.1 µs     | **20x faster (19x-22x)**              |
+| 18  | Property (sap.m.Text)     | setData merge (deep), 2000 bindings             | 20.29 ms  | 18.76 ms    | marginally faster 1.08x (1.06x-1.10x) |
+| 19  | Property (sap.m.Text)     | setData merge (nested config), 2000 bindings    | 1.22 ms   | 14.7 µs     | **81x faster (77x-86x)**              |
+| 20  | Property (sap.m.Text)     | setData merge (large, pinpoint), 20000 items    | 17.69 ms  | 36.5 µs     | **490x faster (470x-510x)**           |
+| 21  | Property (sap.m.Text)     | Warning threshold: 29 sync calls, 3449 bindings | 25.10 ms  | 0.293 ms    | **87x faster (84x-91x)**              |
+| 22  | Property (sap.m.Text)     | Deep-path setProperty (no computeds), 2000      | 0.616 ms  | 13.5 µs     | **45x faster (42x-48x)**              |
+| 23  | Property (sap.m.Text)     | Replace all 2000 row objects (sync)             | 977 ms    | 20.17 ms    | **49x faster (48x-50x)**              |
+| 24  | Property (sap.m.Text)     | Replace all 2000 row objects (bAsyncUpdate)     | 19.82 ms  | 19.75 ms    | no clear difference (0.98x-1.01x)     |
 
 </details>
 
-20 faster, 0 slower, 4 no clear difference. Times are each model's median across runs; the comparison is the geometric mean of the per-run ratios with its 95% confidence interval. Raw data including all samples: [docs/benchmark-results.json](../../../../docs/benchmark-results.json).
+19 faster, 0 slower, 5 no clear difference. Times are each model's median across runs; the comparison is the geometric mean of the per-run ratios with its 95% confidence interval. Raw data including all samples: [docs/benchmark-results.json](../../../../docs/benchmark-results.json).
 
 <!-- bench:results:end -->
 
 ### Observations
 
-These notes interpret the generated results above (10 runs, 2,000 bindings). Ratios are quoted with their 95% confidence interval. Absolute times depend on machine state: a measurement taken while another program's test run loaded the machine was roughly 60% slower for both models (harness floor 9.7 µs instead of 7.5 µs), with compatible ratios. Nothing else was running during this one. Read the ratios, not the milliseconds.
+These notes interpret the generated results above (10 runs, 2,000 bindings). Ratios are quoted with their 95% confidence interval. Absolute times depend on machine state: a measurement taken while another program's test run loaded the machine was roughly 60% slower for both models (harness floor 9.7 µs instead of 7.6 µs), with compatible ratios. Nothing else was running during this one. Read the ratios, not the milliseconds.
 
 **The pattern: O(bindings) vs O(changed paths).**
 
-Every synchronous JSONModel write runs `checkUpdate` over all bindings of the model. With 2,000 bindings that is a fixed 0.3-0.7 ms per write no matter how little changed, and that fixed cost is what scenarios 3, 11-15 and 22 measure on the JSONModel side. SignalModel notifies only the bindings of the changed path and comes in at 13-17 µs, of which about 8 µs is the harness floor (`setText` plus the render pass). So those 19-46x ratios compare "floor + a pass over all bindings" with "floor + almost nothing"; they grow with the number of bindings on the model and shrink with the amount of rendering an update triggers.
+Every synchronous JSONModel write runs `checkUpdate` over all bindings of the model. With 2,000 bindings that is a fixed 0.3-0.7 ms per write no matter how little changed, and that fixed cost is what scenarios 3, 11-15 and 22 measure on the JSONModel side. SignalModel notifies only the bindings of the changed path and comes in at 12-17 µs, of which about 8 µs is the harness floor (`setText` plus the render pass). So those 19-45x ratios compare "floor + a pass over all bindings" with "floor + almost nothing"; they grow with the number of bindings on the model and shrink with the amount of rendering an update triggers.
 
 **Where it matters in absolute terms:**
 
-- "Update all 2000 bindings (sync)": 2,000 consecutive `setProperty` calls take ~1.0 s with JSONModel (2,000 x 2,000 = 4,000,000 binding checks, O(N²)) vs ~17 ms with SignalModel (O(N)): 59x faster (58x-60x). With `bAsyncUpdate`, JSONModel does the same work in ~17 ms (next section).
+- "Update all 2000 bindings (sync)": 2,000 consecutive `setProperty` calls take ~1.0 s with JSONModel (2,000 x 2,000 = 4,000,000 binding checks, O(N²)) vs ~17 ms with SignalModel (O(N)): 60x faster (59x-61x). With `bAsyncUpdate`, JSONModel does the same work in ~17 ms (next section).
 - "Replace all 2000 row objects (sync)": the same loop, but each write replaces the row object while the bindings point one level below it. ~1.0 s vs ~20 ms, 49x faster (48x-50x). Up to version 0.1.2 SignalModel scanned every signal on each object-valued write, which added about 75 ms to this loop in a model-only measurement; the registry's path index removed that (see [architecture](../../../../docs/architecture.md#write-cost-only-the-signals-a-write-can-affect)).
-- "Warning threshold" (3,449 bindings, 29 synchronous calls, just past the 100,000 cumulative binding checks at which UI5 logs its `checkPerformanceOfUpdate` warning): ~26 ms vs ~0.29 ms, 87x faster (85x-90x). The binding count is borrowed from an ODataModel report in issue 2600 that saw ~200 ms per call; this synthetic JSONModel + `sap.m.Text` setup measures ~0.9 ms per call and does not reproduce that figure.
-- "setData merge (large, pinpoint)": merging 3 items into 20,000 takes ~18 ms with JSONModel, whose `deepExtend` clones the whole array, vs ~37 µs for SignalModel's in-place merge that walks only the payload (O(n) vs O(k)): 480x faster (460x-500x).
+- "Warning threshold" (3,449 bindings, 29 synchronous calls, just past the 100,000 cumulative binding checks at which UI5 logs its `checkPerformanceOfUpdate` warning): ~25 ms vs ~0.29 ms, 87x faster (84x-91x). The binding count is borrowed from an ODataModel report in issue 2600 that saw ~200 ms per call; this synthetic JSONModel + `sap.m.Text` setup measures ~0.9 ms per call and does not reproduce that figure.
+- "setData merge (large, pinpoint)": merging 3 items into 20,000 takes ~18 ms with JSONModel, whose `deepExtend` clones the whole array, vs ~37 µs for SignalModel's in-place merge that walks only the payload (O(n) vs O(k)): 490x faster (470x-510x).
 
 In the other scenarios with a large ratio JSONModel is already at or below ~2 ms per update. The ratio is real, but the saving is at most ~2 ms per update.
 
@@ -267,15 +267,15 @@ In the other scenarios with a large ratio JSONModel is already at or below ~2 ms
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter that batches `checkUpdate` calls into a single `setTimeout` pass, collapsing O(N²) to O(N). This is the mitigation the UI5 team recommends. SignalModel tracks dirty paths and syncs them in a single `setTimeout` as well. Both timings include that `setTimeout(0)` hop.
 
-- Updating all 2,000 bindings this way: 17.2 ms vs 16.8 ms, 1.02x faster (1.01x-1.03x).
-- Replacing all 2,000 row objects this way: 19.9 ms vs 19.3 ms, 1.03x faster (1.01x-1.04x). The previous run could not separate the models in these two scenarios (0.99x-1.02x), so read them as equal to within a few percent.
-- A sparse update (1 of 2,000): 0.54 ms vs 22 µs, 24x faster (23x-26x), because SignalModel does not scan the unchanged bindings.
+- Updating all 2,000 bindings this way: 17.1 ms vs 16.8 ms, 1.02x faster (1.00x-1.03x).
+- Replacing all 2,000 row objects this way: 19.8 ms vs 19.8 ms, no clear difference (0.98x-1.01x). Read both as equal to within a few percent; which of the two comes out marginally faster changes from run to run.
+- A sparse update (1 of 2,000): 0.54 ms vs 24 µs, 23x faster (22x-24x), because SignalModel does not scan the unchanged bindings.
 
 **Where the models are close:**
 
-- `setData` replace: 18.8 ms vs 18.1 ms, 1.03x faster (1.02x-1.04x). Earlier measurements had this scenario 4% slower. That came from the scenario itself: its warm-up wrote the values the model already had, so no binding updated during warm-up and the measured sample was the first update each binding ever made. The warm-up now writes new values, like the other scenarios. Without controls a replace with 2,000 bindings costs about 0.8 ms with SignalModel and 1.1 ms with JSONModel; the rest of the time is control and DOM updates in both.
+- `setData` replace: 18.9 ms vs 18.4 ms, 1.04x faster (1.02x-1.05x). Earlier measurements had this scenario 4% slower. That came from the scenario itself: its warm-up wrote the values the model already had, so no binding updated during warm-up and the measured sample was the first update each binding ever made. The warm-up now writes new values, like the other scenarios. Without controls a replace with 2,000 bindings costs about 0.8 ms with SignalModel and 1.1 ms with JSONModel; the rest of the time is control and DOM updates in both.
 - Replacing a whole aggregation (list, table, grid table, tree) shows no clear difference, with intervals up to about 10% wide on either side of parity. One earlier run had the `sap.m.List` with 500 items 3% slower (1.01x-1.05x). That was not the model: with both lists in one page and 300 strictly alternating samples, the part from the write until all 500 items hold their new title takes 0.80 ms with either model, and both models make the list do the same work (one `updateItems`, 500 `setProperty`, 500 invalidations). The remaining ~33 ms is UI5's render pass over the same 500 items, whose median differed by up to 1.5 ms between repetitions, in either direction.
-- A deep merge covering all 2,000 items: 20.1 ms vs 18.6 ms, 1.08x faster (1.07x-1.09x). Both models are dominated by updating 2,000 controls.
+- A deep merge covering all 2,000 items: 20.3 ms vs 18.8 ms, 1.08x faster (1.06x-1.10x). Both models are dominated by updating 2,000 controls.
 
 With 24 intervals at 95%, about one is expected to miss the true value by chance, and a 2-3% difference is at the limit of what this benchmark resolves. No scenario shows SignalModel as slower.
 
@@ -285,7 +285,7 @@ Scenarios 12-15 compare a computed signal against a JSONModel formatter deriving
 
 **Deep paths:**
 
-"Deep-path setProperty (no computeds)" writes a 4-segment path with zero computed signals and lands in the same range as the single-path scenario (13.7 µs vs 12.7 µs), again within what the floor and run-to-run variation allow.
+"Deep-path setProperty (no computeds)" writes a 4-segment path with zero computed signals and lands in the same range as the single-path scenario (13.5 µs vs 12.4 µs), again within what the floor and run-to-run variation allow.
 
 **Raw model API:**
 
