@@ -18,6 +18,7 @@ import Message from "sap/ui/core/message/Message";
 import XMLView from "sap/ui/core/mvc/XMLView";
 import Column from "sap/ui/table/Column";
 import Table from "sap/ui/table/Table";
+import TreeTable from "sap/ui/table/TreeTable";
 import type DataState from "sap/ui/model/DataState";
 import type ListBinding from "sap/ui/model/ListBinding";
 import type PropertyBinding from "sap/ui/model/PropertyBinding";
@@ -32,7 +33,8 @@ import type TreeBinding from "sap/ui/model/TreeBinding";
  *   detection, suspended; tree bindings, also with a filter and a sorter;
  * - rendered controls with expression, composite, element, typed, two-way and aggregation
  *   bindings: their properties and their DOM. Among them a second and a named model, a
- *   growing list, a grouped list, a sap.ui.table.Table, a sap.m.Tree and an XML view;
+ *   growing list, a grouped list, a sap.ui.table.Table, a sap.ui.table.TreeTable, a
+ *   sap.m.Tree and two instances of an XML view on the one model;
  * - messages on a binding and on a control, and how often property and list bindings fire
  *   change;
  * - computeds, against the same function applied to JSONModel's data.
@@ -386,10 +388,35 @@ async function createControls(model: AnyModel): Promise<Controls> {
       template: new StandardTreeItem({ title: { path: "v", formatter: typed } }),
     },
   });
+  // Enough rows for every node: which ones a shorter table shows depends on the key order
+  const treeTable = new TreeTable({
+    visibleRowCount: 60,
+    rows: { path: "/" },
+    columns: [new Column({ template: new Text({ text: { path: "v", formatter: typed } }) })],
+  });
   const view = await XMLView.create({ definition: VIEW });
+  const secondView = await XMLView.create({ definition: VIEW });
   const created = [...expressions, composite, element, elementExpression, integer, named];
-  const texts = [...created, view.byId("expression") as Text, view.byId("element") as Text];
-  const all = [...created, input, list, mixed, growing, grouped, table, tree, view];
+  const texts = [
+    ...created,
+    ...[view, secondView].flatMap((each) => [
+      each.byId("expression") as Text,
+      each.byId("element") as Text,
+    ]),
+  ];
+  const all = [
+    ...created,
+    input,
+    list,
+    mixed,
+    growing,
+    grouped,
+    table,
+    treeTable,
+    tree,
+    view,
+    secondView,
+  ];
   const host = document.body.appendChild(document.createElement("div"));
   for (const control of all) {
     control.setModel(model);
@@ -428,32 +455,51 @@ async function createControls(model: AnyModel): Promise<Controls> {
           .map((row) => read(row.getCells()[0] as Text))
           .join(",")
       : "not an array";
+  const nodes = (read: (cell: Text) => string): string =>
+    treeTable
+      .getRows()
+      .filter((row) => row.getBindingContext())
+      .map((row) => `${row.getBindingContext()!.getPath()}=${read(row.getCells()[0] as Text)}`)
+      .toSorted()
+      .join(",");
   const dom = (control: { getDomRef: () => Element | null }): string =>
     control.getDomRef()?.textContent ?? "not rendered";
+  const dataState = (): string => {
+    const state = (
+      input.getBinding("value") as unknown as { getDataState(): DataState }
+    ).getDataState();
+    return [state.getValue(), state.getInvalidValue(), state.isDirty()].map(typed).join("|");
+  };
   return {
     texts: () => [
       ...texts.map((text) => text.getText()),
       `input:${input.getValue()}`,
       `input:${input.getValueState()} ${input.getValueStateText()}`,
+      `data state:${dataState()}`,
       rowsOf(list, (row) => row.getTitle()),
       rowsOf(mixed, (row) => row.getTitle()),
       rowsOf(growing, (row) => row.getTitle(), true),
       rowsOf(grouped, (row) => row.getTitle(), true),
       cells((cell) => cell.getText()),
+      nodes((cell) => cell.getText()),
       rowsOf(tree, (row) => `${row.getBindingContext()?.getPath()}=${row.getTitle()}`),
       rowsOf(view.byId("list") as List, (row) => row.getTitle()),
+      rowsOf(secondView.byId("list") as List, (row) => row.getTitle()),
     ],
     rendered: () => [
       ...texts.map(dom),
       `input:${(input.getFocusDomRef() as HTMLInputElement | null)?.value ?? "not rendered"}`,
       "input:",
+      "data state:",
       rowsOf(list, dom),
       rowsOf(mixed, dom),
       rowsOf(growing, dom, true),
       rowsOf(grouped, dom, true),
       cells(dom),
+      nodes(dom),
       rowsOf(tree, dom),
       rowsOf(view.byId("list") as List, dom),
+      rowsOf(secondView.byId("list") as List, dom),
     ],
     // What typing into the field does: the binding parses the text and writes the model
     type: (text) => input.setValue(text),
@@ -469,13 +515,28 @@ async function createControls(model: AnyModel): Promise<Controls> {
         )._oGrowingDelegate.requestNewPage();
       }
       if (action === "scroll") table.setFirstVisibleRow(argument % 3);
-      if (action === "expand") tree.expandToLevel(2);
-      if (action === "collapse") tree.collapseAll();
+      if (action === "expand") {
+        tree.expandToLevel(2);
+        treeTable.expandToLevel(2);
+      }
+      if (action === "collapse") {
+        tree.collapseAll();
+        treeTable.collapseAll();
+      }
       if (action === "refresh") {
-        for (const control of [list, mixed, growing, grouped, tree, view.byId("list") as List]) {
+        for (const control of [
+          list,
+          mixed,
+          growing,
+          grouped,
+          tree,
+          view.byId("list") as List,
+          secondView.byId("list") as List,
+        ]) {
           control.getBinding("items")?.refresh(true);
         }
         table.getBinding("rows")?.refresh(true);
+        treeTable.getBinding("rows")?.refresh(true);
       }
       if (action === "message") {
         model.setMessages(
@@ -598,13 +659,12 @@ function difference(actual: unknown, expected: unknown, path = ""): string {
   return same ? "" : `${path || "/"}: ${show(actual)}, JSONModel ${show(expected)}`;
 }
 
-/** Outcome of a write: accepted, rejected, or thrown (e.g. an invalid array length). */
+/** Outcome of a write: accepted, rejected, or thrown (a primitive parent, an invalid array length). */
 function attempt(write: () => boolean): string {
   try {
     return write() ? "accepted" : "rejected";
   } catch (error) {
-    // JSONModel throws a TypeError where SignalModel returns false: a primitive parent
-    return error instanceof TypeError ? "rejected" : (error as Error).name;
+    return (error as Error).name;
   }
 }
 

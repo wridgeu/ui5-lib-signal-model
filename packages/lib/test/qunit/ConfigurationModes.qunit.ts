@@ -51,7 +51,12 @@ QUnit.module("Configuration Modes", () => {
         { name: existing },
         { autoCreatePaths: true },
       );
-      assert.notOk(model.setProperty("/name/first", "x"), "direct parent: returns false");
+      if (existing) {
+        // a truthy primitive is written to, which throws: as in JSONModel
+        assert.throws(() => model.setProperty("/name/first", "x"), TypeError, "direct parent");
+      } else {
+        assert.notOk(model.setProperty("/name/first", "x"), "direct parent: returns false");
+      }
       assert.notOk(model.setProperty("/name/a/b", "x"), "further up: returns false");
       assert.strictEqual(model.getProperty("/name"), existing, "value kept");
       model.destroy();

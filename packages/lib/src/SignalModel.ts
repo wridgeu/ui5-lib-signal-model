@@ -1,5 +1,4 @@
 import ClientModel from "sap/ui/model/ClientModel";
-import JSONModel from "sap/ui/model/json/JSONModel";
 import Log from "sap/base/Log";
 import deepEqual from "sap/base/util/deepEqual";
 import deepExtend from "sap/base/util/deepExtend";
@@ -111,14 +110,35 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   /**
-   * With the `observe` option: gives the data JSONModel's getters and setters. A setter
-   * calls checkUpdate().
+   * With the `observe` option: replaces the properties of the data by getters and setters,
+   * as JSONModel's observeData() does. A setter observes the new value and calls
+   * checkUpdate().
    */
   private _observeData(): void {
-    if (this.observe) {
-      // Private in JSONModel; UI5's own test of bObserve runs against this (npm run test:ui5)
-      (JSONModel.prototype as unknown as { observeData(): void }).observeData.call(this);
-    }
+    if (!this.observe) return;
+    const observe = (value: unknown, parent?: object, key: string | number = ""): void => {
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) observe(value[i], value, i);
+      } else if (isPlainObject(value)) {
+        for (const name in value) observe(value[name], value, name);
+      }
+      if (!parent) return;
+      Object.defineProperty(
+        parent,
+        key,
+        // A function stays a plain value, as in JSONModel
+        typeof value === "function"
+          ? { value, writable: true }
+          : {
+              get: () => value,
+              set: (next: unknown) => {
+                observe(next, parent, key);
+                this.checkUpdate();
+              },
+            },
+      );
+    };
+    observe(this.oData);
   }
 
   /**
@@ -518,8 +538,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     let parent = this._getObject(objectPath) as Record<string, unknown> | undefined;
 
-    // Like JSONModel, a function can hold properties; other primitives cannot
-    if (!parent || (typeof parent !== "object" && typeof parent !== "function")) {
+    // A truthy primitive is written to, as in JSONModel: the assignment throws a TypeError
+    if (!parent) {
       const created = this.autoCreatePaths && this._createPath(objectPath);
       if (!created) {
         return false;
