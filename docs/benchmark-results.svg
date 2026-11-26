@@ -50,73 +50,73 @@
   <g transform="translate(32, 84)">
     <text class="label" x="0" y="12">#4 Update all 2000 bindings (sync)</text>
     <rect class="badge-bg" x="548" y="0" width="148" height="17" rx="4" />
-    <text class="badge-txt" x="622" y="12" text-anchor="middle">59x faster (57x-60x)</text>
+    <text class="badge-txt" x="622" y="12" text-anchor="middle">61x faster (60x-62x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">1083 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">1025 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="10" height="10" rx="4" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">18.35 ms</text>
+    <text class="val-sig" x="696" y="44" text-anchor="end">17.14 ms</text>
   </g>
 
   <g transform="translate(32, 144)">
     <text class="label" x="0" y="12">#21 Warning threshold: 29 sync calls, 3449 bindings</text>
     <rect class="badge-bg" x="548" y="0" width="148" height="17" rx="4" />
-    <text class="badge-txt" x="622" y="12" text-anchor="middle">88x faster (85x-92x)</text>
+    <text class="badge-txt" x="622" y="12" text-anchor="middle">86x faster (84x-89x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">26.35 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">25.75 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="7" height="10" rx="1.5" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">0.299 ms</text>
+    <text class="val-sig" x="696" y="44" text-anchor="end">0.294 ms</text>
   </g>
 
   <g transform="translate(32, 204)">
     <text class="label" x="0" y="12">#3 Single-path update, 2000 bindings</text>
     <rect class="badge-bg" x="548" y="0" width="148" height="17" rx="4" />
-    <text class="badge-txt" x="622" y="12" text-anchor="middle">49x faster (48x-50x)</text>
+    <text class="badge-txt" x="622" y="12" text-anchor="middle">42x faster (40x-45x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">0.575 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">0.543 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
-    <rect class="bar-sig" x="0" y="35" width="12" height="10" rx="4" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">11.6 µs</text>
+    <rect class="bar-sig" x="0" y="35" width="14" height="10" rx="4" />
+    <text class="val-sig" x="696" y="44" text-anchor="end">12.6 µs</text>
   </g>
 
   <g transform="translate(32, 264)">
     <text class="label" x="0" y="12">#20 setData merge (large, pinpoint), 20000 items</text>
     <rect class="badge-bg" x="528" y="0" width="168" height="17" rx="4" />
-    <text class="badge-txt" x="612" y="12" text-anchor="middle">560x faster (540x-590x)</text>
+    <text class="badge-txt" x="612" y="12" text-anchor="middle">580x faster (560x-590x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">18.55 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">17.69 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="3" height="10" rx="1.5" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">32.4 µs</text>
+    <text class="val-sig" x="696" y="44" text-anchor="end">30.4 µs</text>
   </g>
 
   <g transform="translate(32, 324)">
     <text class="label" x="0" y="12">#6 Sparse update, 1 of 2000 (bAsyncUpdate)</text>
     <rect class="badge-bg" x="548" y="0" width="148" height="17" rx="4" />
-    <text class="badge-txt" x="622" y="12" text-anchor="middle">27x faster (25x-28x)</text>
+    <text class="badge-txt" x="622" y="12" text-anchor="middle">25x faster (24x-26x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">0.566 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">0.557 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
-    <rect class="bar-sig" x="0" y="35" width="22" height="10" rx="4" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">21.2 µs</text>
+    <rect class="bar-sig" x="0" y="35" width="23" height="10" rx="4" />
+    <text class="val-sig" x="696" y="44" text-anchor="end">21.7 µs</text>
   </g>
 
   <g transform="translate(32, 384)">
     <text class="label" x="0" y="12">#5 Update all 2000 bindings (bAsyncUpdate)</text>
-    <rect class="badge-eq-bg" x="434" y="0" width="262" height="17" rx="4" />
-    <text class="badge-eq-txt" x="565" y="12" text-anchor="middle">marginally faster 1.02x (1.00x-1.04x)</text>
+    <rect class="badge-eq-bg" x="461" y="0" width="235" height="17" rx="4" />
+    <text class="badge-eq-txt" x="578.5" y="12" text-anchor="middle">no clear difference (0.99x-1.02x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">18.92 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">17.14 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="582" height="10" rx="4" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">18.66 ms</text>
+    <text class="val-sig" x="696" y="44" text-anchor="end">16.90 ms</text>
   </g>
 
   <text class="foot" x="32" y="448">Timed: model write → bound control updated → UI5 re-renders the DOM. Bars are scaled per scenario.</text>
