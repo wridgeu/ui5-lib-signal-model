@@ -66,6 +66,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   readonly _listBindings = new Set<SignalListBinding>();
   /** The model is assigning to its data: with `observe`, the setters must not check. */
   private _writing = false;
+  /**
+   * The data may hold what a merge drops (see _dropUndefined). False after a merge has
+   * looked, until something is written that could bring it back.
+   */
+  private _mayHoldUndefined = true;
   private autoCreatePaths: boolean;
   private strictLeafCheck: boolean;
   private observe: boolean;
@@ -130,6 +135,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         typeof value === "function"
           ? { value, writable: true }
           : {
+              // An array hole becomes a property here: a merge has to be able to cut it
+              configurable: true,
               get: () => value,
               set: (next: unknown) => {
                 observe(next, parent, key);
@@ -443,16 +450,20 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   setData(data: Partial<T>, merge: true): void;
   setData(data: T | Partial<T>, merge?: boolean): void {
     if (merge) {
+      // Nothing to merge in, but JSONModel still rebuilds its data: see _dropUndefined()
       if (!data || typeof data !== "object") {
-        return;
+        data = {};
       }
       if (!this.oData || typeof this.oData !== "object") {
-        this.oData = (Array.isArray(data) ? [] : {}) as T;
+        this.oData = {} as T;
       }
-      // In-place merge: walk the payload and apply changes directly to this.oData.
-      // O(k) where k = payload size, instead of O(n) deep clone of all data.
+      // In-place merge: walk the payload and apply changes directly to this.oData
       this._writing = true;
       try {
+        if (this._mayHoldUndefined) {
+          this._dropUndefined(this.oData, "/");
+          this._mayHoldUndefined = false;
+        }
         this._mergeInPlace(
           this.oData as Record<string, unknown>,
           data as Record<string, unknown>,
@@ -465,6 +476,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       this._observeData();
     } else {
       this.oData = data as T;
+      this._mayHoldUndefined = true;
       this._observeData();
       if (this.registry.size > 0) {
         this.registry.invalidateAll(this._readPath);
@@ -538,6 +550,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     let parent = this._getObject(objectPath) as Record<string, unknown> | undefined;
 
+    if (
+      value === undefined ||
+      (typeof value === "object" && value !== null) ||
+      propertyName === "length"
+    ) {
+      this._mayHoldUndefined = true;
+    }
     // A truthy primitive is written to, as in JSONModel: the assignment throws a TypeError
     if (!parent) {
       const created = this.autoCreatePaths && this._createPath(objectPath);
@@ -675,11 +694,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       let changed: boolean;
       this._writing = true;
       try {
-        changed = this._mergeInPlace(
-          existing as Record<string, unknown>,
-          value as Record<string, unknown>,
-          resolvedPath,
-        );
+        // Only this part of the data was looked at, so the flag stays
+        const dropped = this._mayHoldUndefined && this._dropUndefined(existing, resolvedPath);
+        changed =
+          this._mergeInPlace(
+            existing as Record<string, unknown>,
+            value as Record<string, unknown>,
+            resolvedPath,
+          ) || dropped;
       } finally {
         this._writing = false;
       }
@@ -774,6 +796,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): void {
     // The setter of observed data, called by a write of the model: the write notifies
     if (this._writing) return;
+    this._mayHoldUndefined = true;
     // Bindings are told about writes through the model. This is for data changed without
     // it (refresh() after a change to getData(), or an assignment to observed data): bring
     // the signals in line, then let every binding check, as JSONModel does.
@@ -1044,11 +1067,68 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   /**
+   * JSONModel's merge rebuilds the data and leaves out every key that holds undefined, and
+   * with them the trailing undefined entries of an array (other undefined entries become
+   * holes). Does the same in place at `path` and below.
+   *
+   * @returns Whether anything was dropped.
+   */
+  private _dropUndefined(root: object, path: string): boolean {
+    const keys: string[] = [];
+    let noticed = false;
+    const changed = (node: object, shorter: boolean): void => {
+      noticed = true;
+      if (this.registry.size === 0) return;
+      const below = path === "/" ? "" : path;
+      const at = keys.length > 0 ? `${below}/${keys.join("/")}` : path;
+      // A list above has a changed row. A list on a shorter array itself as well: it must
+      // not take that array for its own. Other keys of an array are nothing a list compares.
+      if (shorter || !Array.isArray(node)) {
+        for (const binding of this._listBindings) {
+          if (binding._isAbove(shorter ? `${at}/` : at)) binding._rowChanged = true;
+        }
+      }
+      this.registry.set(at, node);
+      if (Array.isArray(node)) this.registry.set(lengthPath(at), node.length);
+      this._invalidateParentSignals(at);
+    };
+    const visit = (child: unknown, key: string): void => {
+      if (typeof child !== "object" || child === null) return;
+      keys.push(key);
+      walk(child);
+      keys.pop();
+    };
+    const walk = (node: object): void => {
+      const list = Array.isArray(node);
+      if (!list && !isPlainObject(node)) return;
+      const entries = node as Record<string, unknown>;
+      let dropped = false;
+      let used = 0;
+      // for...in, as JSONModel's merge: it skips the holes of an array and sees its other keys
+      for (const key in entries) {
+        if (entries[key] === undefined || key === "__proto__") {
+          delete entries[key];
+          dropped = true;
+        } else {
+          // Only an array index counts for the length, not a key like "1.5"
+          const index = Number(key);
+          if (list && index >= used && String(index >>> 0) === key) used = index + 1;
+          visit(entries[key], key);
+        }
+      }
+      const shorter = list && used < node.length;
+      if (shorter) node.length = used;
+      if (dropped || shorter) changed(node, shorter);
+    };
+    walk(root);
+    return noticed;
+  }
+
+  /**
    * In-place merge + signal notification in a single pass.
    *
    * Walks the payload, compares against existing data, overwrites in-place,
-   * and fires signals for changed paths. O(k) where k = payload keys,
-   * instead of O(n) deep clone of the entire data tree.
+   * and fires signals for changed paths, instead of a deep clone of all data.
    *
    * Incoming object/array values are cloned via deepExtend to prevent
    * the caller from holding references into the model's internal data.

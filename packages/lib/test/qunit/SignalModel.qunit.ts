@@ -1012,6 +1012,135 @@ QUnit.module(
       model.destroy();
     });
 
+    QUnit.test("a merge drops keys that hold undefined, like JSONModel", async (assert) => {
+      const run = async (Model: typeof JSONModel | typeof SignalModel): Promise<string[]> => {
+        const named = Object.assign([1, undefined, 3], { extra: undefined });
+        const model = new Model({
+          a: undefined,
+          b: 1,
+          list: [1, undefined, undefined],
+          deep: { x: undefined, y: 1 },
+          rows: [{ n: 1, gone: undefined }, undefined],
+          named,
+        });
+        const fired: Record<string, number> = { length: 0, rows: 0, deepY: 0, list: 0 };
+        const list = model.bindList("/list");
+        list.attachChange(() => fired.list++);
+        list.initialize();
+        const length = model.bindProperty("/list/length");
+        length.attachChange(() => fired.length++);
+        length.initialize();
+        const rows = model.bindList("/rows");
+        rows.attachChange(() => fired.rows++);
+        rows.initialize();
+        const deepY = model.bindProperty("/deep/y");
+        deepY.attachChange(() => fired.deepY++);
+        deepY.initialize();
+        fired.length = fired.rows = fired.deepY = fired.list = 0;
+        // JSONModel's merge replaces the data object
+        const state = (): string => {
+          const data = model.getData() as Record<string, unknown[] & Record<string, unknown>>;
+          return JSON.stringify({
+            keys: Object.keys(data),
+            deep: Object.keys(data.deep),
+            list: [data.list.length, length.getValue()],
+            rows: [data.rows.length, Object.keys(data.rows[0] as object), rows.getLength()],
+            named: [Object.keys(data.named), 1 in data.named],
+            fired,
+          });
+        };
+        const log: string[] = [];
+
+        model.setData({ b: 2 }, true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        log.push(state());
+        // written again, and merged elsewhere: gone again, at the end of the keys when set
+        model.setProperty("/deep/y", undefined);
+        model.setProperty("/a", 1);
+        model.setData({ b: 3 }, true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        log.push(state());
+        model.destroy();
+        return log;
+      };
+      const [json, signal] = [await run(JSONModel), await run(SignalModel)];
+      assert.strictEqual(
+        signal[0],
+        '{"keys":["b","list","deep","rows","named"],"deep":["y"],"list":[1,1],"rows":[1,["n"],1],"named":[["0","2"],false],"fired":{"length":1,"rows":1,"deepY":0,"list":1}}',
+        "after the first merge",
+      );
+      assert.deepEqual(signal, json, "same data and change events as JSONModel");
+
+      const edge = async (Model: typeof JSONModel | typeof SignalModel): Promise<string> => {
+        const model = new Model({
+          a: undefined,
+          odd: Object.assign([1, undefined, undefined], { "1.5": "x" }),
+          map: { a: { v: 1 }, b: undefined },
+        });
+        let fired = 0;
+        const map = model.bindList("/map");
+        map.attachChange(() => fired++);
+        map.initialize();
+        // nothing to merge in: the keys go all the same
+        model.setData(null as unknown as object, true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const data = model.getData() as { odd: unknown[] };
+        // observed: the hole at the end is a property with a getter
+        const holey = [1];
+        holey.length = 2;
+        const observed = new Model({ list: holey }, true);
+        observed.setData({ x: 1 } as object, true);
+        const state = JSON.stringify([
+          Object.keys(data),
+          data.odd.length,
+          Object.keys(data.odd),
+          fired,
+          (observed.getData() as { list: unknown[] }).list.length,
+        ]);
+        model.destroy();
+        observed.destroy();
+        return state;
+      };
+      const signalEdge = await edge(SignalModel);
+      assert.strictEqual(signalEdge, '[["odd","map"],1,["0","1.5"],1,1]', "edge cases");
+      assert.strictEqual(signalEdge, await edge(JSONModel), "edge cases as in JSONModel");
+
+      const part = new SignalModel<Record<string, unknown>>({
+        here: { x: undefined, k: 1 },
+        there: { z: undefined },
+      });
+      part.mergeProperty("/here", { k: 2 });
+      assert.deepEqual(
+        [
+          Object.keys(part.getProperty("/here") as object),
+          "z" in (part.getProperty("/there") as object),
+        ],
+        [["k"], true],
+        "mergeProperty drops them in the part it merges",
+      );
+      let partFired = 0;
+      const rows = part.bindList("/");
+      rows.attachChange(() => partFired++);
+      rows.initialize();
+      part.setProperty("/here/k", undefined);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      partFired = 0;
+      part.mergeProperty("/here", {});
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(partFired, 1, "and a list above notices the dropped key");
+
+      // undefined that came in with new data, or without the model and a refresh
+      part.setData({}, true);
+      part.setData({ fresh: undefined });
+      part.setData({}, true);
+      assert.deepEqual(Object.keys(part.getData()), [], "dropped from new data");
+      part.getData().direct = undefined;
+      part.refresh();
+      part.setData({}, true);
+      assert.deepEqual(Object.keys(part.getData()), [], "dropped after a refresh");
+      part.destroy();
+    });
+
     QUnit.test("a merge with keys named like parts of the prototype chain", (assert) => {
       const payload = (): object =>
         JSON.parse(

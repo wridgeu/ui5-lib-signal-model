@@ -123,7 +123,7 @@ export default class SignalListBinding extends ClientListBinding {
     this._merged = this._rowChanged = false;
     const list = this.oModel._getObject(internal.sPath, internal.oContext);
     if (list) {
-      // Copied with the functions JSONListBinding uses: they drop undefined values
+      // Copied with the functions JSONListBinding uses
       if (Array.isArray(list)) {
         internal.oList = internal.bUseExtendedChangeDetection
           ? (deepExtend([], list) as unknown[])

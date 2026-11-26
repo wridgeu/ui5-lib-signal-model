@@ -175,8 +175,7 @@ const typed = (value: unknown): string => `${typeof value}:${String(value)}`;
 
 /**
  * Computeds on the SignalModel. JSONModel has none, so the expected value is the same
- * function applied to JSONModel's data. The functions accept any value and skip undefined
- * entries, which the two models keep differently after a merge (see difference()).
+ * function applied to JSONModel's data. The functions accept any value.
  */
 const COMPUTEDS: [path: string, deps: string[], fn: (...values: unknown[]) => unknown][] = [
   ["/cLabel", ["/s", "/n"], (s, n) => `${typed(s)}|${typed(n)}`],
@@ -185,12 +184,7 @@ const COMPUTEDS: [path: string, deps: string[], fn: (...values: unknown[]) => un
     ["/obj"],
     (obj) => ({
       kind: typeof obj,
-      keys: isContainer(obj)
-        ? Object.keys(obj)
-            .filter((key) => obj[key] !== undefined)
-            .toSorted()
-            .join(",")
-        : "",
+      keys: isContainer(obj) ? Object.keys(obj).join(",") : "",
       v: isContainer(obj) ? obj.v : undefined,
     }),
   ],
@@ -255,8 +249,6 @@ function createParents(json: JSONModel, path: string): boolean {
 
 /**
  * What strictLeafCheck adds to JSONModel: no new property on an existing parent.
- * Checked on SignalModel's data: after a merge only that still has the keys holding
- * undefined (see difference()).
  */
 function isNewLeaf(model: AnyModel, path: string): boolean {
   const cut = path.lastIndexOf("/");
@@ -307,8 +299,7 @@ const VIEW = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">
  * Expression bindings on Text controls. They use typeof where a value could not be turned
  * into text (a symbol), and read the default model, a named one and a second model.
  * None reads the content of an object through a binding on the object: JSONModel keeps
- * the old text there after a write below the object (a documented difference). None reads
- * the length of an array, which differs after a merge (see difference()).
+ * the old text there after a write below the object (a documented difference).
  */
 const EXPRESSIONS = [
   "{= ${/n} > 0 ? 'positive' : ${/flag} ? 'flag' : 'other' }",
@@ -388,7 +379,6 @@ async function createControls(model: AnyModel): Promise<Controls> {
       template: new StandardTreeItem({ title: { path: "v", formatter: typed } }),
     },
   });
-  // Enough rows for every node: which ones a shorter table shows depends on the key order
   const treeTable = new TreeTable({
     visibleRowCount: 60,
     rows: { path: "/" },
@@ -423,44 +413,19 @@ async function createControls(model: AnyModel): Promise<Controls> {
     control.placeAt(host);
   }
 
-  // After a merge the two models differ in key order and in trailing undefined array
-  // entries (see difference()). So rows are read without the undefined entries and sorted,
-  // and where the order decides what is shown (paging, group headers) only for an array.
-  const isArray = (): boolean => Array.isArray(model.getProperty("/list"));
-  const rowsOf = (
-    control: List | Tree,
-    read: (row: StandardListItem) => string,
-    orderDecides = false,
-  ): string => {
-    if (orderDecides && !isArray()) return "not an array";
-    const kept: StandardListItem[] = [];
-    let header: StandardListItem | undefined;
-    for (const row of control.getItems() as StandardListItem[]) {
-      if (row.getMetadata().getName() === "sap.m.GroupHeaderListItem") {
-        header = row;
-      } else if (row.getBindingContext()?.getObject() !== undefined) {
-        // A group header only with a row that counts
-        if (header) kept.push(header);
-        header = undefined;
-        kept.push(row);
-      }
-    }
-    return kept.map(read).toSorted().join(",");
-  };
+  const rowsOf = (control: List | Tree, read: (row: StandardListItem) => string): string =>
+    (control.getItems() as StandardListItem[]).map(read).join(",");
   const cells = (read: (cell: Text) => string): string =>
-    isArray()
-      ? table
-          .getRows()
-          .filter((row) => row.getBindingContext()?.getObject() !== undefined)
-          .map((row) => read(row.getCells()[0] as Text))
-          .join(",")
-      : "not an array";
+    table
+      .getRows()
+      .filter((row) => row.getBindingContext())
+      .map((row) => read(row.getCells()[0] as Text))
+      .join(",");
   const nodes = (read: (cell: Text) => string): string =>
     treeTable
       .getRows()
       .filter((row) => row.getBindingContext())
       .map((row) => `${row.getBindingContext()!.getPath()}=${read(row.getCells()[0] as Text)}`)
-      .toSorted()
       .join(",");
   const dom = (control: { getDomRef: () => Element | null }): string =>
     control.getDomRef()?.textContent ?? "not rendered";
@@ -478,8 +443,8 @@ async function createControls(model: AnyModel): Promise<Controls> {
       `data state:${dataState()}`,
       rowsOf(list, (row) => row.getTitle()),
       rowsOf(mixed, (row) => row.getTitle()),
-      rowsOf(growing, (row) => row.getTitle(), true),
-      rowsOf(grouped, (row) => row.getTitle(), true),
+      rowsOf(growing, (row) => row.getTitle()),
+      rowsOf(grouped, (row) => row.getTitle()),
       cells((cell) => cell.getText()),
       nodes((cell) => cell.getText()),
       rowsOf(tree, (row) => `${row.getBindingContext()?.getPath()}=${row.getTitle()}`),
@@ -493,8 +458,8 @@ async function createControls(model: AnyModel): Promise<Controls> {
       "data state:",
       rowsOf(list, dom),
       rowsOf(mixed, dom),
-      rowsOf(growing, dom, true),
-      rowsOf(grouped, dom, true),
+      rowsOf(growing, dom),
+      rowsOf(grouped, dom),
       cells(dom),
       nodes(dom),
       rowsOf(tree, dom),
@@ -566,16 +531,15 @@ const ACTIONS: [string, number][] = [
 ];
 
 /**
- * Whether what a binding notices after a merge can differ between the models: a key or an
- * array entry holds undefined. JSONModel's merge drops those (see difference()), and its
- * bindings can take that for a change, or miss a change over it.
+ * Whether a key or an array entry holds undefined. JSONModel's list and tree bindings
+ * compare with a copy that leaves those out, so they fire on every update of the model.
  */
-function mergeDiffers(value: unknown): boolean {
-  const merged = Array.isArray(value) || canMerge(value, value);
+function holdsUndefined(value: unknown): boolean {
+  const container = Array.isArray(value) || canMerge(value, value);
   // an array hole counts as undefined
   if (Array.isArray(value) && Object.keys(value).length < value.length) return true;
-  return (merged ? Object.values(value as object) : []).some(
-    (child) => child === undefined || mergeDiffers(child),
+  return (container ? Object.values(value as object) : []).some(
+    (child) => child === undefined || holdsUndefined(child),
   );
 }
 
@@ -624,10 +588,8 @@ const show = (value: unknown): string => {
 
 /**
  * First difference between two values as "path: actual, JSONModel expected", or "".
- *
- * A key holding undefined counts as absent: JSONModel's merge rebuilds the data and loses
- * such keys (and turns array holes into undefined), SignalModel merges in place and keeps
- * them. Reads cannot tell the two apart.
+ * A key that holds undefined and an absent key are a difference, and so are an array hole
+ * and another order of the keys.
  */
 // oxlint-disable-next-line complexity -- one recursive comparison, clearer in one piece
 function difference(actual: unknown, expected: unknown, path = ""): string {
@@ -642,14 +604,12 @@ function difference(actual: unknown, expected: unknown, path = ""): string {
       const found = difference(actual[key], expected[key], `${path}/${key}`);
       if (found) return found;
     }
-    // JSONModel's merge also drops trailing undefined entries of an array
-    const used = (list: unknown): number => {
-      let length = (list as unknown[]).length;
-      while (length > 0 && (list as unknown[])[length - 1] === undefined) length--;
-      return length;
-    };
-    return Array.isArray(actual) && used(actual) !== used(expected)
-      ? `${path}/length: ${used(actual)}, JSONModel ${used(expected)}`
+    const [own, expectedOwn] = [Object.keys(actual), Object.keys(expected)];
+    if (own.join() !== expectedOwn.join()) {
+      return `${path || "/"}: keys [${own.join()}], JSONModel [${expectedOwn.join()}]`;
+    }
+    return Array.isArray(actual) && actual.length !== (expected as unknown as unknown[]).length
+      ? `${path}/length: ${actual.length}, JSONModel ${(expected as unknown as unknown[]).length}`
       : "";
   }
   const same =
@@ -670,16 +630,13 @@ function attempt(write: () => boolean): string {
 
 /**
  * Paths of the contexts a list binding returns, or the name of the error it throws.
- * Without undefined entries, and sorted unless `ordered`: after a merge the two models
- * differ in key order and in trailing undefined array entries (see difference()).
  */
-function listShape(binding: ListBinding, ordered = false): string {
+function listShape(binding: ListBinding): string {
   try {
-    const paths = binding
+    return binding
       .getContexts(0, 100)
-      .filter((context) => context.getObject() !== undefined)
-      .map((context) => context.getPath());
-    return (ordered ? paths : paths.toSorted()).join(" ");
+      .map((context) => context.getPath())
+      .join(" ");
   } catch (error) {
     return (error as Error).name;
   }
@@ -687,7 +644,6 @@ function listShape(binding: ListBinding, ordered = false): string {
 
 /**
  * Paths of the first three levels of a tree binding, or the name of the error it throws.
- * Sorted, because the key order differs after a merge (see listShape()).
  */
 function treeShape(binding: TreeBinding): string {
   const walk = (contexts: Context[], depth: number): string =>
@@ -697,7 +653,6 @@ function treeShape(binding: TreeBinding): string {
           ? `${context.getPath()}(${walk(binding.getNodeContexts(context, 0, 100), depth + 1)})`
           : `${context.getPath()}:${binding.getChildCount(context)}${binding.hasChildren(context) ? "+" : ""}`,
       )
-      .toSorted()
       .join(" ");
   try {
     return walk(binding.getRootContexts(0, 100), 0);
@@ -877,7 +832,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         return true;
       }
       return (
-        mergeDiffers(value) ||
+        holdsUndefined(value) ||
         Object.values(value).some(
           (row) =>
             Number.isNaN(row) ||
@@ -977,7 +932,6 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       const key = path.split("/")[1];
       description = `setData({${key}: ${show(value())}}, merge)`;
       merging = true;
-      resync = mergeDiffers(signal.getData());
       json.setData({ [key]: value() }, true);
       signal.setData({ [key]: value() }, true);
     } else if (kind < 0.81) {
@@ -986,7 +940,6 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       merging = true;
       const existing = json.getProperty(path) as unknown;
       if (canMerge(existing, value())) {
-        resync = mergeDiffers(signal.getData());
         const merged = deepExtend(
           Array.isArray(existing) ? [] : {},
           existing as object,
@@ -1003,7 +956,6 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       const [url, merge] = pick(LOADS);
       description = `loadData(${url.slice(TESTDATA.length)}${merge ? ", merge" : ""})`;
       merging = true;
-      resync = merge && mergeDiffers(signal.getData());
       [jsonAccepted, signalAccepted] = await Promise.all(
         [json, signal].map((model) =>
           (model.loadData(url, undefined, true, "GET", merge) as Promise<unknown>).then(
@@ -1097,9 +1049,8 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     refreshed ||= resync;
     if (resync) {
       resync = false;
-      // What a binding notices differs in two cases: a merge of some data (see
-      // mergeDiffers()), and the autoCreatePaths rule, which is applied to JSONModel one
-      // parent at a time. Update both sides.
+      // What a binding notices differs with the autoCreatePaths rule, which is applied to
+      // JSONModel one parent at a time. Update both sides.
       LIST_BINDINGS.forEach((_, i) => {
         onBoth([jsonListBindings[i], listBindings[i]], (binding) => binding.refresh(true));
       });
@@ -1118,14 +1069,8 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     for (let i = 0; i < READ_PATHS.length && !failure; i++) {
       // Oracle: JSONModel's data at the path, i.e. what a fresh JSONModel binding shows.
       // (A long-lived JSONModel binding can keep an outdated object that was deep-equal.)
-      // An array's length is compared against SignalModel's own array: after a merge the two
-      // models' arrays may differ by trailing undefined entries (see difference()).
       const readPath = READ_PATHS[i];
-      const arrayPath = readPath.endsWith("/length") ? readPath.slice(0, -"/length".length) : "";
-      const ownArray = arrayPath && (signal.getProperty(arrayPath) as unknown);
-      const expected = Array.isArray(ownArray)
-        ? ownArray.length
-        : (json.getProperty(readPath) as unknown);
+      const expected = json.getProperty(readPath) as unknown;
       const found = difference(bindings[i].getValue(), expected);
       if (found) failure = `${where}: binding ${readPath} differs at ${found}`;
     }
@@ -1188,20 +1133,15 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       const actual = listShape(computedList);
       const expected = (expectedComputed("/cRows", json) as unknown[])
         .map((_, i) => `/cRows/${i}`)
-        .toSorted()
         .join(" ");
       if (actual !== expected) {
         failure = `${where}: list binding /cRows: [${actual}], expected [${expected}]`;
       }
     }
     for (let i = 0; i < LIST_BINDINGS.length && !failure; i++) {
-      const [listPath, contextPath, listKind] = LIST_BINDINGS[i];
-      // The order of a sorted object list depends on the key order: see listShape()
-      const ordered =
-        listKind === "sorted" &&
-        Array.isArray(signal.getProperty(listPath, contextAt(signal, contextPath)));
-      const actual = listShape(listBindings[i], ordered);
-      let expected = listShape(jsonListBindings[i], ordered);
+      const listKind = LIST_BINDINGS[i][2];
+      const actual = listShape(listBindings[i]);
+      let expected = listShape(jsonListBindings[i]);
       const [jsonFired, signalFired] = listFired[i];
       if (actual !== expected && jsonFired === 0 && firesAlways(i)) {
         // SignalModel alone updated (see firesAlways) and its filter or
@@ -1214,7 +1154,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
         } catch {
           // see above
         }
-        expected = listShape(jsonListBindings[i], ordered);
+        expected = listShape(jsonListBindings[i]);
       }
       if (actual !== expected) {
         failure = `${where}: list binding ${LIST_BINDINGS[i].join(",")}: [${actual}], JSONModel [${expected}]`;
@@ -1248,7 +1188,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     }
     TREE_BINDINGS.forEach(([treePath, , contextPath = ""], i) => {
       treeBlind[i] =
-        mergeDiffers(signal.getProperty(treePath, contextAt(signal, contextPath))) ||
+        holdsUndefined(signal.getProperty(treePath, contextAt(signal, contextPath))) ||
         (treeBlind[i] && treeFired[i][0] === 0);
     });
     for (let i = 0; i < suspendable.length && !failure; i++) {

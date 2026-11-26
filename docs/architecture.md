@@ -21,7 +21,7 @@ flowchart TD
 
 ## Unified Microtask Flush Queue
 
-Each binding type (property, list, tree) subscribes to its path in the registry. The registry is the only writer of state signals, so when it sets one to a changed value it queues the bindings of that path itself. A binding on plain data therefore needs no `Signal.subtle.Watcher`; only a binding that resolves through a computed has one, because a computed changes through its dependencies. For the same reason `set()` on a state signal from `getSignal()` does not set the signal directly: it calls `setProperty` for the signal's path, so the data, the bindings and the computeds stay in line. Data changed without the model (`getData()` and then `refresh()`) is picked up as in JSONModel: the model first delivers the updates still queued, then reads every signal's value again without notifying and lets all bindings check; such a check compares the values as JSONModel does. The `observe` option (JSONModel's `bObserve`) uses the same path: the setters JSONModel's routine puts on the data call it. Either way `checkUpdate()` is not called immediately. All bindings share a single flush queue (`FlushQueue.ts`) that batches updates into one `queueMicrotask`:
+Each binding type (property, list, tree) subscribes to its path in the registry. The registry is the only writer of state signals, so when it sets one to a changed value it queues the bindings of that path itself. A binding on plain data therefore needs no `Signal.subtle.Watcher`; only a binding that resolves through a computed has one, because a computed changes through its dependencies. For the same reason `set()` on a state signal from `getSignal()` does not set the signal directly: it calls `setProperty` for the signal's path, so the data, the bindings and the computeds stay in line. Data changed without the model (`getData()` and then `refresh()`) is picked up as in JSONModel: the model first delivers the updates still queued, then reads every signal's value again without notifying and lets all bindings check; such a check compares the values as JSONModel does. The `observe` option (JSONModel's `bObserve`) uses the same path: the setters put on the data (as JSONModel's `observeData` does) call it. Either way `checkUpdate()` is not called immediately. All bindings share a single flush queue (`FlushQueue.ts`) that batches updates into one `queueMicrotask`:
 
 ```mermaid
 sequenceDiagram
@@ -104,7 +104,7 @@ flowchart LR
   subgraph JSON["JSONModel.setData(partial, true) — O(n)"]
     J1["deepExtend(oData, partial)<br/>clones ALL n items"] --> J2["checkUpdate()<br/>diffs ALL bindings"]
   end
-  subgraph SIG["SignalModel.setData(partial, true) — O(k)"]
+  subgraph SIG["SignalModel.setData(partial, true) — O(k), see below"]
     S1["_mergeInPlace(oData, partial)<br/>walks ONLY k payload keys"] --> S2["Updates signals for<br/>changed paths only"]
   end
 ```
@@ -119,7 +119,9 @@ SignalModel replaces this with an **in-place recursive merge** (`_mergeInPlace`)
 
 The result matches `JSONModel.setData(data, true)`: payload keys whose value is `undefined` are skipped, and the merge descends only into arrays and plain objects. A `Date` or class instance in the payload replaces the existing value; class instances keep their identity and prototype.
 
-This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload size. The improvement is largest for shallow merges into large datasets, common in form-based Fiori apps that update a few fields at a time.
+JSONModel's rebuild also leaves out every key that holds `undefined` and the trailing `undefined` entries of every array, anywhere in the data. `_dropUndefined` does that in place before the merge, with one pass over the data. The pass runs only when the data may hold such a value: after new data, a `refresh()`, or a `setProperty` with an object, `undefined` or `length`. One pass over 20,000 rows of three properties takes about 1 ms; a merge after writes of primitives or after another merge skips it.
+
+This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload size, for every merge that can skip that pass. The improvement is largest for shallow merges into large datasets, common in form-based Fiori apps that update a few fields at a time.
 
 ## List Copies
 
