@@ -5,13 +5,13 @@ SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`.
 | Difference                                                                                      | Who notices                                                                                                      |
 | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | [A merge works on the data in place](#a-merge-works-on-the-data-in-place)                       | Code that keeps a reference to `getData()` or to an object it passed in, or changes data directly before a merge |
-| [Errors while bindings update](#errors-while-bindings-update)                                   | Code that catches a formatter's error around `setProperty`                                                       |
+| [Bindings update in a microtask](#bindings-update-in-a-microtask)                               | Code that reads a control right after a write, or catches a formatter's error around `setProperty`               |
 | [Change events for objects](#change-events-for-objects)                                         | Change handlers and formatters on a binding to an object or array                                                |
 | [Change events of list bindings around a merge](#change-events-of-list-bindings-around-a-merge) | List bindings that use the row object itself as change detection key                                             |
 
 ## How parity is tested
 
-A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted, filtered and suspended ones), computeds, messages, the change events of property and list bindings, and rendered controls. The controls cover expression, composite, typed, two-way, element and aggregation bindings, a second and a named model, a growing and a grouped list, `sap.ui.table.Table`, `sap.ui.table.TreeTable`, `sap.m.Tree` and two instances of an XML view on one model. UI5's own tests of the JSON model and its bindings (194 tests) run against SignalModel as well (`npm run test:ui5`), with the binding updates flushed at once because they assert right after a write. All pass except eleven that mock JSONModel's internals (`jQuery.ajax`, `checkUpdate` of the prototype, the binding's constructor); those are listed in `test/ui5native/expected-failures.json`.
+A randomized test runs the same operations against both models and compares them after every step: the data, property, list and tree bindings (including sorted, filtered and suspended ones), computeds, messages, the change events of property and list bindings, and rendered controls. The controls cover expression, composite, typed, two-way, element and aggregation bindings, a second and a named model, a growing and a grouped list, `sap.ui.table.Table`, `sap.ui.table.TreeTable`, `sap.m.Tree` and two instances of an XML view on one model. UI5's own tests of the JSON model and its bindings (194 tests) run against SignalModel as well (`npm run test:ui5`), with the binding updates flushed at once because they assert right after a write. All pass except eleven that mock JSONModel's internals (`jQuery.ajax`, `checkUpdate` of the prototype, the binding's constructor); those are listed in `packages/lib/test/ui5native/expected-failures.json`.
 
 ## A merge works on the data in place
 
@@ -19,8 +19,8 @@ After `setData(data, true)` or `mergeProperty` the data equals JSONModel's: same
 
 - `getData()` returns the same object as before the merge.
 - An object you passed to `setData` or `setProperty` earlier is merged into.
-- Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or frozen objects anywhere in the data. `getData()` is a new object then.
-- SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 40 µs otherwise). So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
+- Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or a frozen object that the merge has to write to. `getData()` is a new object then, and every binding checks its value, so bindings on objects fire.
+- SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 30 µs otherwise). So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
 
 **What to do.** Nothing new. After a direct change to `getData()` you call `refresh()` in JSONModel too, or its bindings stay stale; the same call covers this. Or write through the model (`setProperty`, `mergeProperty`), or use the `observe` option, which makes an assignment to an existing property count as a write.
 
@@ -30,11 +30,21 @@ model.refresh(); // needed for the bindings in both models; also lets the next m
 model.setData({ saved: true }, true);
 ```
 
-## Errors while bindings update
+## Bindings update in a microtask
 
-If a formatter, sorter or filter throws during an update, JSONModel throws the error out of `setProperty` and skips the remaining bindings. SignalModel updates bindings in a microtask: it logs the error and continues with the other bindings.
+JSONModel updates its bindings inside `setProperty`. SignalModel queues them and updates them in a microtask, once for all writes made until then. The data is written at once in both: `getProperty` returns the new value on the next line. What comes one microtask later is everything a binding does: the control's property, a formatter, a change handler.
 
-**What to do.** A `try`/`catch` around `setProperty` does not see such an error. Catch inside the formatter, sorter or filter, where the error belongs to one binding, and return a fallback value there.
+```js
+model.setProperty("/name", "Bob");
+model.getProperty("/name"); // "Bob"
+text.getText(); // still the old name
+await Promise.resolve();
+text.getText(); // "Bob"
+```
+
+For the same reason an error in a formatter, sorter or filter does not come out of `setProperty`. JSONModel throws it there and skips the remaining bindings; SignalModel logs it and continues with the other bindings.
+
+**What to do.** Read from the model, not from the control, in code that runs right after a write, or wait a microtask. Rendering is asynchronous in both models, so a test that waits for the render pass needs no change. A `try`/`catch` around `setProperty` does not see a formatter's error: catch inside the formatter, sorter or filter, where the error belongs to one binding, and return a fallback value there.
 
 ## Change events for objects
 

@@ -2,7 +2,7 @@
 
 Background to the [computed signals](../packages/lib/README.md#computed-signals) of SignalModel: what is notified when a computed re-evaluates, why a computed is one unit, and how to keep its dependencies narrow.
 
-When a computed re-evaluates, **all** bindings that resolve through it are notified, including sub-path bindings. Each notified binding compares its old value to its new value (`checkUpdate`), and only bindings whose value actually changed trigger a DOM update.
+When a computed re-evaluates, **all** bindings that resolve through it are notified, including sub-path bindings. Each notified binding on a primitive compares its old value to its new value, and only bindings whose value actually changed trigger a DOM update. A binding on an object or array always counts as changed.
 
 ```typescript
 model.createComputed("/computedRows", ["/sourceRows"], (rows) =>
@@ -17,7 +17,7 @@ model.createComputed("/computedRows", ["/sourceRows"], (rows) =>
 // 4. Only cells whose value actually changed trigger a DOM update
 ```
 
-**Rendering is correct** -- unchanged cells do not re-render. But every binding performs the comparison check. For a grid table with 2000 rows and 3 columns, 6000 bindings are checked even if only 1 value changed. This is the expected behavior, not a limitation.
+**Rendering is correct** -- unchanged cells do not re-render. But every binding performs the comparison check. For a table with 2000 rendered rows and 3 columns, 6000 bindings are checked even if only 1 value changed. This is the expected behavior, not a limitation.
 
 ## Why Computed Signals Are Atomic
 
@@ -53,7 +53,7 @@ When a computed re-evaluates, the notification cost is O(N) where N is the numbe
 3. Each binding's `checkUpdate` re-reads its value and compares with the previous value
 4. Only bindings whose value actually changed trigger a DOM update (O(k) where k ≤ N)
 
-For primitive leaf values (strings, numbers -- typical for table cells), the comparison is `Object.is`, which is effectively free and handles `NaN` accurately. For direct property bindings, the flush queue passes the already-read signal value directly to `checkUpdate`, avoiding redundant path traversal.
+For primitive leaf values (strings, numbers -- typical for table cells), the comparison is `Object.is`, which is effectively free and handles `NaN` accurately. For direct property bindings, the flush queue passes the already-read signal value directly to the binding, avoiding redundant path traversal.
 
 ## Dependency Granularity
 
@@ -65,14 +65,4 @@ model.createComputed("/computed", ["/sourceRows"], (rows) => transform(rows));
 
 model.setProperty("/sourceRows/3/name", "updated"); // invalidates /sourceRows -> computed re-evaluates
 model.setProperty("/sourceRows", [...newArray]); // invalidates /sourceRows -> computed re-evaluates
-```
-
-```typescript
-model.setProperty("/currentUser/name", "Bob"); // returns false -- computed path is read-only
-```
-
-To update the data, write to the **source** path. The computed re-derives automatically and all sub-path bindings update:
-
-```typescript
-model.setProperty("/users/0/name", "Bob"); // writes to source data -- /currentUser/name updates
 ```

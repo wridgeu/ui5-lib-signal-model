@@ -158,6 +158,7 @@ export default class SignalListBinding extends ClientListBinding {
   update(): void {
     const internal = asInternal(this);
     this._merged = this._rowChanged = this._ownRows = false;
+    this._sharedRows = undefined;
     const list = this.oModel._getObject(internal.sPath, internal.oContext);
     if (list) {
       // Copied with the functions JSONListBinding uses

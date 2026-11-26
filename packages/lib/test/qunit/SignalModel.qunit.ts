@@ -1163,6 +1163,11 @@ QUnit.module(
         const nested = new Model({ a: 1, o: Object.freeze({ x: 1, gone: undefined }) });
         nested.setData({ b: 2 } as object, true);
         nested.setData({ o: { x: 2 } } as object, true);
+        // not a plain object for UI5: replaced, not merged into
+        const tagged = new Model({ o: { a: 1, [Symbol.toStringTag]: "T" } });
+        tagged.setData({ o: { b: 2 } } as object, true);
+        const text = new Model({ a: 1 });
+        text.setData("xy" as unknown as object, true);
 
         // a suspended list: a change taken back by a second merge is none at resume()
         const model = new Model({ rows: [{ x: 1 }] });
@@ -1186,17 +1191,19 @@ QUnit.module(
           Object.getPrototypeOf(instance.getData()) === Object.prototype,
           frozen.getData(),
           nested.getData(),
+          tagged.getData(),
+          text.getData(),
           counts,
           typeof (model as unknown as { checkUpdate(): unknown }).checkUpdate(),
         ]);
-        for (const each of [instance, frozen, nested, model, other]) each.destroy();
+        for (const each of [instance, frozen, nested, tagged, text, model, other]) each.destroy();
         frame.remove();
         return state;
       };
       const signal = await run(SignalModel);
       assert.strictEqual(
         signal,
-        '[{"a":1,"b":2},{"o":{"a":1,"b":2}},true,{"a":2,"o":{"x":2}},{"a":1,"o":{"x":2},"b":2},[0,1],"number"]',
+        '[{"a":1,"b":2},{"o":{"a":1,"b":2}},true,{"a":2,"o":{"x":2}},{"a":1,"o":{"x":2},"b":2},{"o":{"b":2}},{"0":"x","1":"y","a":1},[0,1],"number"]',
         "class instance and frozen data are rebuilt, the list compares first and last state",
       );
       assert.strictEqual(signal, await run(JSONModel), "as in JSONModel");
@@ -1215,6 +1222,26 @@ QUnit.module(
         "mergeProperty into a frozen object writes a merged copy",
       );
       partly.destroy();
+
+      // all of it frozen, and a list whose row is merged before the frozen object is met
+      const deep = new SignalModel<Record<string, unknown>>(
+        Object.freeze({ a: Object.freeze({ items: [{ n: 1 }], z: Object.freeze({ x: 1 }) }) }),
+      );
+      let rowsFired = 0;
+      const items = deep.bindList("/a/items");
+      items.attachChange(() => rowsFired++);
+      items.initialize();
+      items.getContexts(0, 10);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      rowsFired = 0;
+      assert.ok(deep.mergeProperty("/a", { items: [{ n: 2 }], z: { x: 2 } }), "merged");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.deepEqual(
+        [deep.getData(), rowsFired],
+        [{ a: { items: [{ n: 2 }], z: { x: 2 } } }, 1],
+        "mergeProperty into data frozen at every level, and the list fires once",
+      );
+      deep.destroy();
 
       // mergeProperty below a row does not reach the list, suspended or not
       const part = new SignalModel({ rows: [{ deep: { v: 1 } }] });
@@ -1273,7 +1300,7 @@ QUnit.module(
       },
     );
 
-    QUnit.test("the recipes of the README for the differences from JSONModel", async (assert) => {
+    QUnit.test("the recipes of docs/jsonmodel-differences.md", async (assert) => {
       const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
       const model = new SignalModel({
         address: { street: "Main St 1", city: "Berlin" },

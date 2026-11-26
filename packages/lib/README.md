@@ -255,6 +255,16 @@ In a path like `/currentUser/name`, the model resolves `/currentUser` as a compu
 
 **Computed paths are read-only.** `setProperty`, `mergeProperty`, and two-way bindings on computed paths (or their sub-paths) return `false` and log a warning. This matches the industry consensus: [Vue](https://vuejs.org/guide/essentials/computed.html), [MobX](https://mobx.js.org/computeds.html), [SolidJS](https://docs.solidjs.com/reference/basic-reactivity/create-memo), and [Angular Signals](https://angular.dev/guide/signals) all treat computeds as read-only.
 
+```typescript
+model.setProperty("/currentUser/name", "Bob"); // returns false -- computed path is read-only
+```
+
+To update the data, write to the **source** path. The computed re-derives automatically and all sub-path bindings update:
+
+```typescript
+model.setProperty("/users/0/name", "Bob"); // writes to source data -- /currentUser/name updates
+```
+
 ### Computed Re-Evaluation and Sub-Path Notifications
 
 When a computed re-evaluates, all bindings that resolve through it are notified, including bindings on its sub-paths. Each compares its old value to the new one and updates only if it differs. A computed is one unit: it is re-evaluated as a whole when a dependency changes, so keep the dependencies as narrow as the value needs.
@@ -263,7 +273,7 @@ Why that is, what it costs and how to split a computed: [Computed Signals: Re-Ev
 
 ## Configuration Modes
 
-SignalModel defaults to **full JSONModel parity**: `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Two opt-in flags independently extend this behavior, each controlling a different level of the path:
+SignalModel defaults to **full JSONModel parity**: `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Three options independently extend this behavior, each controlling a different level of the path:
 
 ```
 model.setProperty("/a/b/c", value)
@@ -290,7 +300,7 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Four differences remain on purpose:
 
 - **A merge works on the data in place.** The data after `setData(data, true)` or `mergeProperty` equals JSONModel's, but the existing objects are changed instead of rebuilt: `getData()` stays the same object. Data you changed directly needs `refresh()` before a merge drops its `undefined` keys.
-- **Errors while bindings update** are logged instead of thrown out of `setProperty`, because bindings update in a microtask.
+- **Bindings update in a microtask**, not inside `setProperty`. A control shows the new value one microtask later, and an error in a formatter is logged instead of thrown out of `setProperty`.
 - **A binding on an object or array fires for every write below it.** A formatter that reads from the object always shows current content; JSONModel can keep the old text.
 - **A list binding keyed by the row object** does not fire after a merge that changed nothing. JSONModel's does, because its merge replaces every row object.
 
@@ -312,7 +322,7 @@ model.mergeProperty("/customer", { age: 30 });
 // Result: /customer = { name: "Alice", age: 30, city: "Berlin" }
 ```
 
-`mergeProperty` only fires signals for paths that actually changed (here, only `/customer/age`). Bindings to `/customer/name` and `/customer/city` are not notified.
+`mergeProperty` only fires signals for paths that actually changed (here, only `/customer/age`). Bindings to `/customer/name` and `/customer/city` are not notified. The exception is data that cannot be written to, like a frozen object: the data is then rebuilt and every binding checks.
 
 `setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally. Like that merge, `mergeProperty` merges only two arrays or two plain objects. Any other combination (a `Date`, a class instance, an array into an object) replaces the value, as `setProperty` does.
 

@@ -207,8 +207,17 @@ QUnit.module("Control Parity", () => {
       other.setModel(model);
       model.setProperty("/price", "no number");
       model.setProperty("/other", "b");
-      await settled();
-      assert.strictEqual(other.getText(), "b", "an unsafe formatter does not stop other bindings");
+      assert.deepEqual(
+        [model.getProperty("/other"), other.getText()],
+        ["b", "a"],
+        "the data is written at once, the control follows",
+      );
+      await Promise.resolve();
+      assert.strictEqual(
+        other.getText(),
+        "b",
+        "one microtask later, also after an unsafe formatter",
+      );
       for (const each of [price, other, model]) each.destroy();
     },
   );

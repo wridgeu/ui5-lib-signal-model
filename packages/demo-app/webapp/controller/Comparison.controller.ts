@@ -1,4 +1,5 @@
 import JSONModel from "sap/ui/model/json/JSONModel";
+import type Binding from "sap/ui/model/Binding";
 import type ListBinding from "sap/ui/model/ListBinding";
 import deepClone from "sap/base/util/deepClone";
 import deepEqual from "sap/base/util/deepEqual";
@@ -24,6 +25,7 @@ export default class Comparison extends BaseController {
   });
   private city = 0;
   private lists: ListBinding[] = [];
+  private bindings: Binding[] = [];
 
   override onInit(): void {
     // oxlint-disable-next-line typescript/no-non-null-assertion -- always defined in controller lifecycle
@@ -41,7 +43,7 @@ export default class Comparison extends BaseController {
         const path = `/${name}/${what}`;
         this.state.setProperty(path, (this.state.getProperty(path) as number) + 1);
       };
-      // The recipe from the README: a handler on an object that acts only on new content
+      // The recipe from docs/jsonmodel-differences.md: a handler on an object that acts only on new content
       const binding = model.bindProperty("/address");
       let last = deepClone(binding.getValue());
       binding.attachChange(() => {
@@ -63,6 +65,7 @@ export default class Comparison extends BaseController {
         list.getContexts(0, 10);
       });
       this.lists.push(list);
+      this.bindings.push(binding, list);
     }
   }
 
@@ -85,7 +88,7 @@ export default class Comparison extends BaseController {
     }
   }
 
-  /** The recipe from the README: an error is caught where it belongs to one binding */
+  /** The recipe from docs/jsonmodel-differences.md: an error is caught where it belongs to one binding */
   formatPrice(price: unknown): string {
     try {
       return (price as number).toFixed(2);
@@ -107,7 +110,7 @@ export default class Comparison extends BaseController {
     }
   }
 
-  /** The recipe from the README: force the change event */
+  /** The recipe from docs/jsonmodel-differences.md: force the change event */
   onRefreshLists(): void {
     for (const list of this.lists) list.refresh(true);
   }
@@ -132,6 +135,7 @@ export default class Comparison extends BaseController {
   }
 
   override onExit(): void {
+    for (const binding of this.bindings) binding.destroy();
     for (const model of Object.values(this.models)) model.destroy();
     this.state.destroy();
   }

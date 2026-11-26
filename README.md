@@ -64,7 +64,7 @@ For the full API reference, usage examples, computed signals, and configuration 
 packages/
   lib/          ui5.model.signal library (SignalModel + bindings)
   demo-app/     Demo app with 7 showcase pages
-docs/           Architecture notes, plans, and specs
+docs/           Differences from JSONModel, architecture notes, specs
 scripts/        Benchmark runners and CI helpers
 ```
 
@@ -86,7 +86,9 @@ npm run start:bench # benchmark page
 ### Tests
 
 ```bash
+npm test            # everything below
 npm run test:qunit  # QUnit via WDIO + headless Chrome
+npm run test:ui5    # UI5's own JSONModel tests against SignalModel (downloads them from GitHub)
 ```
 
 ### Quality checks

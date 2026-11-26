@@ -35,7 +35,7 @@
 	</Panel>
 	<Panel headerText="Where the two differ on purpose" class="sapUiContentPadding">
 		<MessageStrip
-			text="A binding on an object: SignalModel fires a change event for every write below the object, so a formatter that reads from it shows the new content. JSONModel compares the object with itself, finds no difference and keeps the old text."
+			text="A binding on an object: SignalModel fires a change event for every write below the object, so a formatter that reads from it shows the new content. JSONModel compares the object with itself, finds no difference and can keep the old text."
 			type="Information"
 			class="sapUiSmallMarginBottom" />
 		<HBox class="sapUiSmallMarginBottom">
@@ -65,7 +65,7 @@
 			type="Success"
 			class="sapUiSmallMarginBottom" />
 		<MessageStrip
-			text="A key that holds undefined, assigned to getData() directly, and then a merge: JSONModel's merge drops the key. SignalModel looks for such keys only after a write through the model or a refresh(), which the bindings need in both models anyway."
+			text="A key that holds undefined, assigned to getData() directly, and then a merge: JSONModel's merge drops the key. SignalModel looks for such keys only after an object or undefined was written through the model, or after a refresh(), which the bindings need in both models anyway."
 			type="Information"
 			class="sapUiSmallMarginBottom" />
 		<HBox class="sapUiSmallMarginBottom">

@@ -35,8 +35,11 @@ type LoadFailure = {
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null) return false;
   const proto = Object.getPrototypeOf(value) as unknown;
-  // UI5's check, which JSONModel uses, also takes an object of another window as plain
-  return proto === Object.prototype || proto === null || ui5IsPlainObject(value);
+  // The usual case first. UI5's check, which JSONModel uses, decides the rest: an object
+  // of another window is plain, one with a Symbol.toStringTag is not.
+  return (proto === Object.prototype || proto === null) && !(Symbol.toStringTag in value)
+    ? true
+    : ui5IsPlainObject(value);
 }
 
 /** Number of segments in an absolute path below the root: "/a" is 1, "/a/b" is 2. */
@@ -452,9 +455,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   setData(data: Partial<T>, merge: true): void;
   setData(data: T | Partial<T>, merge?: boolean): void {
     if (merge) {
-      // Nothing to merge in, but JSONModel still rebuilds its data: see _dropUndefined()
+      // Nothing to merge in, but JSONModel still rebuilds its data: see _dropUndefined().
+      // Of a string, the characters are merged in, as there.
       if (!data || typeof data !== "object") {
-        data = {};
+        data = Object(data ?? {}) as Partial<T>;
       }
       // Data that cannot be merged in place is rebuilt, as JSONModel does with all data:
       // no object or a class instance here, frozen data below
@@ -477,7 +481,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           "",
         );
       } catch (error) {
-        // A frozen object in the data. What was merged so far is merged again.
+        // Data that cannot be written to, like a frozen object. What was merged so far is
+        // merged again.
         if (!(error instanceof TypeError)) throw error;
         this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData, data) as T;
         if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
@@ -569,7 +574,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     ) {
       this._mayHoldUndefined = true;
     }
-    // A truthy primitive is written to, as in JSONModel: the assignment throws a TypeError
     if (!parent) {
       const created = this.autoCreatePaths && this._createPath(objectPath);
       if (!created) {
@@ -581,6 +585,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this.strictLeafCheck && !(propertyName in parent)) {
       return false;
     }
+    // Also to a truthy primitive, as in JSONModel: the assignment throws a TypeError
     this._assign(parent, propertyName, value);
 
     if (this.registry.size > 0) {
@@ -721,13 +726,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       } finally {
         this._writing = false;
       }
-      // A frozen object in this part of the data: write a merged copy instead
+      // Data that cannot be written to, like a frozen object: rebuild all data, as a merge
+      // with setData does, and merge into that
       if (frozen) {
-        return this.setProperty(
-          path,
-          deepExtend(Array.isArray(existing) ? [] : {}, existing, value),
-          context,
+        this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData) as T;
+        this._mergeInPlace(
+          this._getObject(resolvedPath) as Record<string, unknown>,
+          value as Record<string, unknown>,
+          resolvedPath,
         );
+        if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
+        for (const binding of this._listBindings) binding._onMerge("/");
+        this._observeData();
+        return true;
       }
       if (changed && this.registry.size > 0) {
         for (const binding of this._listBindings) binding._onMerge(resolvedPath);
@@ -815,6 +826,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /**
    * @param forceUpdate Whether to force bindings to re-evaluate
    * @param asyncMode Whether to update asynchronously
+   * @returns The number of bindings, as Model.checkUpdate
    * @since 0.1.0
    */
   checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): number {
@@ -1107,6 +1119,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       const at = keys.length > 0 ? `${below}/${keys.join("/")}` : path;
       // A list above has a changed row. A list on a shorter array itself as well: it must
       // not take that array for its own. Other keys of an array are nothing a list compares.
+      // Not _onRowChange(): the rows have changed already, a copy would be of the new ones.
       if (shorter || !Array.isArray(node)) {
         for (const binding of this._listBindings) {
           if (binding._isAbove(shorter ? `${at}/` : at)) binding._rowChanged = true;

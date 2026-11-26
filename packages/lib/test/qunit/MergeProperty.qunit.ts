@@ -94,11 +94,14 @@ QUnit.module("mergeProperty", () => {
     model.destroy();
   });
 
-  QUnit.test("setData with merge ignores non-object payloads", (assert) => {
+  QUnit.test("setData with merge and a payload that is no object", (assert) => {
     const model = new SignalModel<Record<string, unknown>>({ name: "Alice" });
-    model.setData("abc" as never, true);
     model.setData(null as never, true);
-    assert.deepEqual(model.getData(), { name: "Alice" }, "data unchanged");
+    model.setData(7 as never, true);
+    assert.deepEqual(model.getData(), { name: "Alice" }, "null and a number merge nothing in");
+    // as JSONModel: its merge takes the characters as keys
+    model.setData("ab" as never, true);
+    assert.deepEqual(model.getData(), { 0: "a", 1: "b", name: "Alice" }, "a string");
     model.destroy();
   });
 });
