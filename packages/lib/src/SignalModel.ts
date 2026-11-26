@@ -1120,7 +1120,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // A list above has a changed row. A list on a shorter array itself as well: it must
       // not take that array for its own. Other keys of an array are nothing a list compares.
       // Not _onRowChange(): the rows have changed already, a copy would be of the new ones.
-      if (shorter || !Array.isArray(node)) {
+      // The root is no row of any list.
+      if (shorter || (!Array.isArray(node) && at !== "/")) {
         for (const binding of this._listBindings) {
           if (binding._isAbove(shorter ? `${at}/` : at)) binding._rowChanged = true;
         }
@@ -1138,6 +1139,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const walk = (node: object): void => {
       const list = Array.isArray(node);
       if (!list && !isPlainObject(node)) return;
+      // JSONModel's rebuild leaves nothing frozen behind. Thrown like the write that such
+      // an object refuses: the merge then rebuilds the data. Not for mergeProperty, which
+      // rebuilds only if its own write fails.
+      if (path === "/" && !Object.isExtensible(node))
+        throw new TypeError("Data that cannot be written to");
       const entries = node as Record<string, unknown>;
       let dropped = false;
       let used = 0;

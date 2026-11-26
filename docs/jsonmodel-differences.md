@@ -19,7 +19,7 @@ After `setData(data, true)` or `mergeProperty` the data equals JSONModel's: same
 
 - `getData()` returns the same object as before the merge.
 - An object you passed to `setData` or `setProperty` earlier is merged into.
-- Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or a frozen object that the merge has to write to. `getData()` is a new object then, and every binding checks its value, so bindings on objects fire.
+- Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or a frozen object anywhere in the data (found when the merge looks for `undefined`, or when it has to write to it). `getData()` is a new object then, and every binding checks its value, so bindings on objects fire.
 - SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 30 µs otherwise). So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
 
 **What to do.** Nothing new. After a direct change to `getData()` you call `refresh()` in JSONModel too, or its bindings stay stale; the same call covers this. Or write through the model (`setProperty`, `mergeProperty`), or use the `observe` option, which makes an assignment to an existing property count as a write.

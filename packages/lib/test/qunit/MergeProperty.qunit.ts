@@ -94,6 +94,15 @@ QUnit.module("mergeProperty", () => {
     model.destroy();
   });
 
+  QUnit.test("frozen data that the merge does not write to is left alone", (assert) => {
+    const data = { o: { a: 1, f: Object.freeze({ x: 1 }) } };
+    const model = new SignalModel(data);
+    model.mergeProperty("/o", { a: 2 });
+    assert.strictEqual(model.getData(), data, "the data is not rebuilt");
+    assert.strictEqual(data.o.a, 2, "merged in place");
+    model.destroy();
+  });
+
   QUnit.test("setData with merge and a payload that is no object", (assert) => {
     const model = new SignalModel<Record<string, unknown>>({ name: "Alice" });
     model.setData(null as never, true);

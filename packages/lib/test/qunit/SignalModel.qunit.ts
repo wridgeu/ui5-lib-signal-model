@@ -1163,6 +1163,23 @@ QUnit.module(
         const nested = new Model({ a: 1, o: Object.freeze({ x: 1, gone: undefined }) });
         nested.setData({ b: 2 } as object, true);
         nested.setData({ o: { x: 2 } } as object, true);
+        // a merge elsewhere leaves nothing frozen behind
+        const thawed = new Model({ a: 1 });
+        thawed.setProperty("/o", Object.freeze({ x: 1 }));
+        thawed.setData({ a: 2 } as object, true);
+        thawed.setProperty("/o/x", 2);
+        // a list on the root, a key of the root dropped by a merge, then a change in a row
+        const rooted = new Model({ rows: [{ n: 1 }], gone: undefined });
+        let rootFired = 0;
+        const rootList = rooted.bindList("/");
+        rootList.attachChange(() => rootFired++);
+        rootList.initialize();
+        rootList.getContexts(0, 10);
+        rooted.setData({} as object, true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        rootFired = 0;
+        rooted.setProperty("/rows/0/n", 2);
+        await new Promise((resolve) => setTimeout(resolve, 0));
         // not a plain object for UI5: replaced, not merged into
         const tagged = new Model({ o: { a: 1, [Symbol.toStringTag]: "T" } });
         tagged.setData({ o: { b: 2 } } as object, true);
@@ -1192,18 +1209,21 @@ QUnit.module(
           frozen.getData(),
           nested.getData(),
           tagged.getData(),
+          thawed.getData(),
+          rootFired,
           text.getData(),
           counts,
           typeof (model as unknown as { checkUpdate(): unknown }).checkUpdate(),
         ]);
-        for (const each of [instance, frozen, nested, tagged, text, model, other]) each.destroy();
+        for (const each of [instance, frozen, nested, tagged, thawed, rooted, text, model, other])
+          each.destroy();
         frame.remove();
         return state;
       };
       const signal = await run(SignalModel);
       assert.strictEqual(
         signal,
-        '[{"a":1,"b":2},{"o":{"a":1,"b":2}},true,{"a":2,"o":{"x":2}},{"a":1,"o":{"x":2},"b":2},{"o":{"b":2}},{"0":"x","1":"y","a":1},[0,1],"number"]',
+        '[{"a":1,"b":2},{"o":{"a":1,"b":2}},true,{"a":2,"o":{"x":2}},{"a":1,"o":{"x":2},"b":2},{"o":{"b":2}},{"a":2,"o":{"x":2}},1,{"0":"x","1":"y","a":1},[0,1],"number"]',
         "class instance and frozen data are rebuilt, the list compares first and last state",
       );
       assert.strictEqual(signal, await run(JSONModel), "as in JSONModel");

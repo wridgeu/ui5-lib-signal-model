@@ -1,3 +1,4 @@
+import isPlainObject from "sap/base/util/isPlainObject";
 import SignalModel from "ui5/model/signal/SignalModel";
 import JSONModel from "sap/ui/model/json/JSONModel";
 import Context from "sap/ui/model/Context";
@@ -97,6 +98,10 @@ const VALUES: (() => unknown)[] = [
     sparse[2] = 3;
     return sparse;
   },
+  // Data a write cannot change, and an object that is not plain for UI5
+  () => Object.freeze({ v: 1, nested: Object.freeze({ v: 2 }) }),
+  () => Object.freeze([Object.freeze({ name: "a" })]),
+  () => ({ v: 1, [Symbol.toStringTag]: "Tagged" }),
 ];
 
 const WRITE_PATHS = [
@@ -171,7 +176,10 @@ const LIST_BINDINGS: [string, string, string][] = [
 const isContainer = (value: unknown): value is Record<string, unknown> =>
   (typeof value === "object" && value !== null) || typeof value === "function";
 
-const typed = (value: unknown): string => `${typeof value}:${String(value)}`;
+// A tagged object reads "[object Object]" like any other: which object a binding on an
+// object still holds is a documented difference
+const typed = (value: unknown): string =>
+  `${typeof value}:${String(value).replace(/^\[object \w+\]$/, "[object Object]")}`;
 
 /**
  * Computeds on the SignalModel. JSONModel has none, so the expected value is the same
@@ -258,9 +266,10 @@ function isNewLeaf(model: AnyModel, path: string): boolean {
 
 /** JSONModel's merge descends only into two arrays or two plain objects. */
 function canMerge(target: unknown, payload: unknown): boolean {
-  const isPlain = (value: unknown): boolean =>
-    isContainer(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
-  return (Array.isArray(target) && Array.isArray(payload)) || (isPlain(target) && isPlain(payload));
+  return (
+    (Array.isArray(target) && Array.isArray(payload)) ||
+    (isPlainObject(target as object) && isPlainObject(payload as object))
+  );
 }
 
 /** List filters by name. Operators that need strings throw for other values, in both models. */
@@ -318,6 +327,8 @@ const ROW_EXPRESSION = "{= ${name} === 'a' ? 'A' : ${/n} > 1 ? 'big' : typeof ${
 const ELEMENT_PATHS = ["/list/0", "/list/1", "/obj", "/missing", "/s"];
 
 type Controls = {
+  /** Index in texts() and rendered() of the first control with a list binding */
+  lists: number;
   texts: () => string[];
   rendered: () => string[];
   type: (text: string) => void;
@@ -436,6 +447,7 @@ async function createControls(model: AnyModel): Promise<Controls> {
     return [state.getValue(), state.getInvalidValue(), state.isDirty()].map(typed).join("|");
   };
   return {
+    lists: texts.length + 3,
     texts: () => [
       ...texts.map((text) => text.getText()),
       `input:${input.getValue()}`,
@@ -581,6 +593,8 @@ const initialData = (): Record<string, unknown> => ({
 const show = (value: unknown): string => {
   if (value instanceof Date) return `Date(${value.getTime()})`;
   if (typeof value !== "object" || value === null) return `${typeof value} ${String(value)}`;
+  if (Object.isFrozen(value)) return `frozen ${JSON.stringify(value)}`;
+  if (Symbol.toStringTag in value) return `tagged ${JSON.stringify(value)}`;
   const name = (Object.getPrototypeOf(value) as { constructor?: { name: string } } | null)
     ?.constructor?.name;
   return `${name ?? "Object"} ${JSON.stringify(value)}`;
@@ -857,10 +871,27 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
   let resync = false;
   // Set when JSONModel took more than one write for a step, so its bindings fired more often
   let stepwise = false;
+  let keysThrow = false;
   /** A write on JSONModel, with the rules of the options under test applied first. */
   const jsonWrite = (path: string, write: () => boolean): string => {
-    const created = autoCreatePaths && createParents(json, path);
-    if (created) resync = stepwise = true;
+    let created = false;
+    try {
+      created = autoCreatePaths && createParents(json, path);
+    } catch (error) {
+      // A frozen parent refuses the new object, in SignalModel as well
+      return (error as Error).name;
+    }
+    if (created) {
+      resync = stepwise = true;
+      // A list with change detection builds its keys with JSON.stringify, which throws for a
+      // BigInt. JSONModel's list then stops at the empty parent it saw first, SignalModel's
+      // at the state before: the list controls are not compared from here on.
+      try {
+        JSON.stringify(signal.getProperty("/list"));
+      } catch {
+        keysThrow = true;
+      }
+    }
     // A parent that was just created has no properties yet
     if (strictLeafCheck && (created || isNewLeaf(signal, path))) return "rejected";
     return attempt(write);
@@ -930,10 +961,13 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       signal.setData(initialData());
     } else if (kind < 0.76) {
       const key = path.split("/")[1];
-      description = `setData({${key}: ${show(value())}}, merge)`;
+      // Now and then the value itself as payload, whatever it is
+      const whole = random() < 0.2;
+      const payload = (): object => (whole ? value() : { [key]: value() }) as object;
+      description = `setData(${whole ? show(value()) : `{${key}: ${show(value())}}`}, merge)`;
       merging = true;
-      json.setData({ [key]: value() }, true);
-      signal.setData({ [key]: value() }, true);
+      jsonAccepted = attempt(() => (json.setData(payload(), true), true));
+      signalAccepted = attempt(() => (signal.setData(payload(), true), true));
     } else if (kind < 0.81) {
       // JSONModel has no mergeProperty: the expected result is its merge applied at the path
       description = `mergeProperty("${path}", ${show(value())})`;
@@ -946,7 +980,16 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
           value() as object,
         ) as unknown;
         // A merge that changes nothing leaves the data as it is
-        if (difference(merged, existing)) json.setProperty(path, merged);
+        if (difference(merged, existing)) {
+          try {
+            json.setProperty(path, merged);
+          } catch {
+            // The parent is frozen: SignalModel rebuilds the data as a setData merge does
+            const data = json.getData() as object;
+            json.setData(deepExtend(Array.isArray(data) ? [] : {}, data));
+            json.setProperty(path, merged);
+          }
+        }
         jsonAccepted = "accepted";
       } else {
         jsonAccepted = jsonWrite(path, () => json.setProperty(path, value()));
@@ -1218,12 +1261,16 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       const actual = controls[read]();
       const expected = jsonControls[read]();
       // While /n holds an object, SignalModel's binding fires on every update (a documented
-      // difference), which resets a text the user typed that could not be parsed
+      // difference), which resets a text the user typed that could not be parsed, in the input and in its
+      // data state
       const typedOver = isContainer(json.getProperty("/n"));
       const index = failure
         ? -1
         : actual.findIndex(
-            (text, i) => text !== expected[i] && !(typedOver && text.startsWith("input:")),
+            (text, i) =>
+              text !== expected[i] &&
+              !(typedOver && /^(input|data state):/.test(text)) &&
+              !(keysThrow && i >= controls.lists),
           );
       if (index !== -1) {
         failure = `${where}: control ${index} ${read}: "${actual[index]}", JSONModel "${expected[index]}"`;
