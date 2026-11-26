@@ -67,6 +67,10 @@ export default class SignalListBinding extends ClientListBinding {
   _rowChanged = false;
   /** Like _merged, but only until the bindings were updated after the merge */
   private _mergedNow = false;
+  /** The rows are a copy of the model's (see _copyRows), taken since the last update() */
+  private _ownRows = false;
+  /** The rows as they were before _onRowChange() copied them in the merge that is running */
+  private _sharedRows?: unknown[] | Record<string, unknown>;
 
   /**
    * A merge at `path` took place. JSONModel's merge rebuilds the merged data, so the row
@@ -86,19 +90,20 @@ export default class SignalListBinding extends ClientListBinding {
       own.startsWith(`${path}/`) ||
       // a row itself
       (path.startsWith(below) && !path.includes("/", below.length));
+    const internal = asInternal(this);
+    const shared = this._sharedRows;
+    this._sharedRows = undefined;
     if (!reached) {
       // A change the merge made below a row counts only with a merge that reaches the list
       if (!this._merged) this._rowChanged = false;
+      if (shared) {
+        internal.oList = shared;
+        this._ownRows = false;
+      }
       return;
     }
-    const internal = asInternal(this);
     if (!internal.bUseExtendedChangeDetection && !this._merged && !this._rowChanged) {
-      // The list shares its rows with the model, so its comparison is blind to a change in
-      // a row. JSONModel's list is left with the rows from before the merge: give this one
-      // its own rows too. They stay until the next update(), also over further merges.
-      internal.oList = deepExtend(Array.isArray(internal.oList) ? [] : {}, internal.oList) as
-        | unknown[]
-        | Record<string, unknown>;
+      this._copyRows();
     }
     this._merged = true;
     this._mergedNow = true;
@@ -106,6 +111,38 @@ export default class SignalListBinding extends ClientListBinding {
     queueMicrotask(() => {
       this._mergedNow = false;
     });
+  }
+
+  /**
+   * The list shares its rows with the model, so its comparison is blind to a change in a
+   * row. JSONModel's list is left with the rows from before the merge: give this one its
+   * own rows too. They stay until the next update(), also over further merges.
+   */
+  private _copyRows(): void {
+    if (this._ownRows) return;
+    const internal = asInternal(this);
+    internal.oList = deepExtend(Array.isArray(internal.oList) ? [] : {}, internal.oList) as
+      | unknown[]
+      | Record<string, unknown>;
+    this._ownRows = true;
+  }
+
+  /**
+   * A merge is about to change a value below this list. Used by SignalModel, not part of
+   * the public API.
+   *
+   * @internal
+   */
+  _onRowChange(): void {
+    const internal = asInternal(this);
+    if (internal.bSuspended && !internal.bUseExtendedChangeDetection) {
+      // Compared at resume() only, and as in JSONModel with the rows from before: a change
+      // that a later merge takes back is none
+      if (!this._ownRows) this._sharedRows = internal.oList;
+      this._copyRows();
+    } else {
+      this._rowChanged = true;
+    }
   }
 
   /**
@@ -120,7 +157,7 @@ export default class SignalListBinding extends ClientListBinding {
   /** @since 0.1.0 */
   update(): void {
     const internal = asInternal(this);
-    this._merged = this._rowChanged = false;
+    this._merged = this._rowChanged = this._ownRows = false;
     const list = this.oModel._getObject(internal.sPath, internal.oContext);
     if (list) {
       // Copied with the functions JSONListBinding uses

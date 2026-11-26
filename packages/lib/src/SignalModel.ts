@@ -2,6 +2,7 @@ import ClientModel from "sap/ui/model/ClientModel";
 import Log from "sap/base/Log";
 import deepEqual from "sap/base/util/deepEqual";
 import deepExtend from "sap/base/util/deepExtend";
+import ui5IsPlainObject from "sap/base/util/isPlainObject";
 import type Context from "sap/ui/model/Context";
 import SignalRegistry, { type Subscriber } from "./SignalRegistry";
 import { cancelFlush, flushNow, type FlushableBinding } from "./FlushQueue";
@@ -34,7 +35,8 @@ type LoadFailure = {
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null) return false;
   const proto = Object.getPrototypeOf(value) as unknown;
-  return proto === Object.prototype || proto === null;
+  // UI5's check, which JSONModel uses, also takes an object of another window as plain
+  return proto === Object.prototype || proto === null || ui5IsPlainObject(value);
 }
 
 /** Number of segments in an absolute path below the root: "/a" is 1, "/a/b" is 2. */
@@ -454,8 +456,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       if (!data || typeof data !== "object") {
         data = {};
       }
-      if (!this.oData || typeof this.oData !== "object") {
-        this.oData = {} as T;
+      // Data that cannot be merged in place is rebuilt, as JSONModel does with all data:
+      // no object, a class instance, or frozen
+      const current = this.oData as unknown;
+      if (!(Array.isArray(current) || isPlainObject(current)) || !Object.isExtensible(current)) {
+        this.oData = deepExtend({}, current as object) as T;
+        this._mayHoldUndefined = false;
+        if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
       }
       // In-place merge: walk the payload and apply changes directly to this.oData
       this._writing = true;
@@ -793,9 +800,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @param asyncMode Whether to update asynchronously
    * @since 0.1.0
    */
-  checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): void {
+  checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): number {
     // The setter of observed data, called by a write of the model: the write notifies
-    if (this._writing) return;
+    if (this._writing) return 0;
     this._mayHoldUndefined = true;
     // Bindings are told about writes through the model. This is for data changed without
     // it (refresh() after a change to getData(), or an assignment to observed data): bring
@@ -814,7 +821,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
       }
     }
-    (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
+    return (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
       this,
       forceUpdate,
       asyncMode,
@@ -1178,7 +1185,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         let rowChanged: boolean | undefined;
         for (const binding of this._listBindings) {
           if (binding._isAbove(childPath) && (rowChanged ??= !deepEqual(oldValue, newValue))) {
-            binding._rowChanged = true;
+            binding._onRowChange();
           }
         }
         // Clone incoming arrays and plain objects to prevent external mutation, with the

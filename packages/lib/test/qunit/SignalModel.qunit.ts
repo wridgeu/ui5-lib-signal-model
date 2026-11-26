@@ -1141,6 +1141,85 @@ QUnit.module(
       part.destroy();
     });
 
+    QUnit.test("a merge of data it cannot change in place, like JSONModel", async (assert) => {
+      class Row {
+        a = 1;
+        gone = undefined;
+      }
+      const run = async (Model: typeof JSONModel | typeof SignalModel): Promise<string> => {
+        const instance = new Model(new Row());
+        instance.setData({ b: 2 } as object, true);
+        // an object of another window is a plain object too
+        const frame = document.body.appendChild(document.createElement("iframe"));
+        const foreign = (frame.contentWindow as unknown as { JSON: JSON }).JSON.parse(
+          '{"a":1}',
+        ) as object;
+        const other = new Model({ o: foreign });
+        other.setData({ o: { b: 2 } } as object, true);
+        const frozen = new Model(Object.freeze({ a: 1, o: Object.freeze({ x: 1 }) }));
+        frozen.setData({ a: 2, o: { x: 2 } } as object, true);
+
+        // a suspended list: a change taken back by a second merge is none at resume()
+        const model = new Model({ rows: [{ x: 1 }] });
+        let fired = 0;
+        const list = model.bindList("/rows");
+        list.attachChange(() => fired++);
+        list.initialize();
+        const counts: number[] = [];
+        for (const last of [1, 3]) {
+          fired = 0;
+          list.suspend();
+          model.setData({ rows: [{ x: 2 }] }, true);
+          model.setData({ rows: [{ x: last }] }, true);
+          list.resume();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          counts.push(fired);
+        }
+        const state = JSON.stringify([
+          instance.getData(),
+          other.getData(),
+          Object.getPrototypeOf(instance.getData()) === Object.prototype,
+          frozen.getData(),
+          counts,
+          typeof (model as unknown as { checkUpdate(): unknown }).checkUpdate(),
+        ]);
+        for (const each of [instance, frozen, model, other]) each.destroy();
+        frame.remove();
+        return state;
+      };
+      const signal = await run(SignalModel);
+      assert.strictEqual(
+        signal,
+        '[{"a":1,"b":2},{"o":{"a":1,"b":2}},true,{"a":2,"o":{"x":2}},[0,1],"number"]',
+        "class instance and frozen data are rebuilt, the list compares first and last state",
+      );
+      assert.strictEqual(signal, await run(JSONModel), "as in JSONModel");
+
+      // mergeProperty below a row does not reach the list, suspended or not
+      const part = new SignalModel({ rows: [{ deep: { v: 1 } }] });
+      let fired = 0;
+      const list = part.bindList("/rows");
+      list.attachChange(() => fired++);
+      list.initialize();
+      // the first check of a list that was never read fires
+      part.mergeProperty("/rows/0/deep", { v: 9 });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      fired = 0;
+      part.mergeProperty("/rows/0/deep", { v: 2 });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const awake = fired;
+      list.suspend();
+      part.mergeProperty("/rows/0/deep", { v: 3 });
+      list.resume();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.deepEqual(
+        [awake, fired - awake],
+        [0, 0],
+        "mergeProperty in a row, awake and suspended",
+      );
+      part.destroy();
+    });
+
     QUnit.test("a merge with keys named like parts of the prototype chain", (assert) => {
       const payload = (): object =>
         JSON.parse(
