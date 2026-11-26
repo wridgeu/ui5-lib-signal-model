@@ -1,6 +1,6 @@
 # Differences from JSONModel
 
-SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Four differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the object binding and the direct change live, next to a JSONModel.
+SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Four differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows all four live, next to a JSONModel.
 
 | Difference                                                                                      | Who notices                                                                                                      |
 | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -19,10 +19,10 @@ After `setData(data, true)` or `mergeProperty` the data equals JSONModel's: same
 
 - `getData()` returns the same object as before the merge.
 - An object you passed to `setData` or `setProperty` earlier is merged into.
-- Data whose root is frozen or a class instance is rebuilt, as in JSONModel. A frozen object deeper in otherwise unfrozen data makes a merge throw.
+- Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or frozen objects anywhere in the data. `getData()` is a new object then.
 - SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 40 µs otherwise). So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
 
-**What to do.** Nothing new. After a direct change to `getData()` you call `refresh()` in JSONModel too, or its bindings stay stale; the same call covers this. Or write through the model (`setProperty`, `mergeProperty`), or use the `observe` option, which makes an assignment to an existing property count as a write. If a later merge has to work on frozen nested data, pass a copy when you set it (`setData(structuredClone(data))`).
+**What to do.** Nothing new. After a direct change to `getData()` you call `refresh()` in JSONModel too, or its bindings stay stale; the same call covers this. Or write through the model (`setProperty`, `mergeProperty`), or use the `observe` option, which makes an assignment to an existing property count as a write.
 
 ```js
 model.getData().draft = undefined; // direct change

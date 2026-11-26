@@ -82,6 +82,41 @@
 				<Text id="jsonKeys" text="{diff>/json/keys}" />
 			</f:SimpleForm>
 		</l:Grid>
+		<MessageStrip
+			text="A list binding that uses the row object itself as change detection key: JSONModel's merge replaces every row object, so the binding fires after a merge that changed nothing. SignalModel keeps the rows and stays quiet. The recipe: refresh(true) fires the event in both."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="mergeSameRows" text="Merge the same rows" press=".onMergeSameRows" class="sapUiSmallMarginEnd" />
+			<Button id="refreshLists" text="refresh(true)" press=".onRefreshLists" type="Emphasized" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Change events of the list" />
+				<Text id="signalListEvents" text="{diff>/signal/listEvents}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Change events of the list" />
+				<Text id="jsonListEvents" text="{diff>/json/listEvents}" />
+			</f:SimpleForm>
+		</l:Grid>
+		<MessageStrip
+			text="A formatter that throws: JSONModel throws the error out of setProperty, SignalModel logs it. The recipe works the same in both: catch in the formatter and return a fallback."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="writePrice" text="Toggle /price between 9.99 and 'abc'" press=".onWritePrice" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Formatted price" />
+				<Text id="signalPrice" text="{path: 'signalDiff>/price', formatter: '.formatPrice'}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Formatted price" />
+				<Text id="jsonPrice" text="{path: 'jsonDiff>/price', formatter: '.formatPrice'}" />
+			</f:SimpleForm>
+		</l:Grid>
 	</Panel>
 	</VBox>
 </mvc:View>

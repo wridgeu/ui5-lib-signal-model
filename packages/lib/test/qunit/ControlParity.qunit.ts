@@ -169,4 +169,47 @@ QUnit.module("Control Parity", () => {
     assert.ok(json.length === 8 && json[1] !== json[0], "the steps change what the views show");
     assert.deepEqual(signal, json, "same state after every step");
   });
+
+  QUnit.test(
+    "the recipe for a formatter that can throw: catch in the formatter",
+    async (assert) => {
+      const format = (value: unknown): string => (value as number).toFixed(2);
+      const safe = (value: unknown): string => {
+        try {
+          return format(value);
+        } catch {
+          return "n/a";
+        }
+      };
+      const [json, signal] = await withBoth(
+        () => ({ price: 1, other: "a" }),
+        async (model, record) => {
+          const price = new Text({ text: { path: "/price", formatter: safe } });
+          const other = new Text({ text: "{/other}" });
+          price.setModel(model);
+          other.setModel(model);
+          model.setProperty("/price", "no number");
+          model.setProperty("/other", "b");
+          await settled();
+          record("after a value the formatter cannot handle", [price.getText(), other.getText()]);
+          price.destroy();
+          other.destroy();
+        },
+      );
+      assert.deepEqual(signal, ['after a value the formatter cannot handle: ["n/a","b"]']);
+      assert.deepEqual(signal, json, "the same in both models");
+
+      // Without the recipe, the difference: no error out of setProperty, the other binding updates
+      const model = new SignalModel({ price: 1, other: "a" });
+      const price = new Text({ text: { path: "/price", formatter: format } });
+      const other = new Text({ text: "{/other}" });
+      price.setModel(model);
+      other.setModel(model);
+      model.setProperty("/price", "no number");
+      model.setProperty("/other", "b");
+      await settled();
+      assert.strictEqual(other.getText(), "b", "an unsafe formatter does not stop other bindings");
+      for (const each of [price, other, model]) each.destroy();
+    },
+  );
 });

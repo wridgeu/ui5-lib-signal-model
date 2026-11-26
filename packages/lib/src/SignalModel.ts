@@ -457,9 +457,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         data = {};
       }
       // Data that cannot be merged in place is rebuilt, as JSONModel does with all data:
-      // no object, a class instance, or frozen
+      // no object or a class instance here, frozen data below
       const current = this.oData as unknown;
-      if (!(Array.isArray(current) || isPlainObject(current)) || !Object.isExtensible(current)) {
+      if (!(Array.isArray(current) || isPlainObject(current))) {
         this.oData = deepExtend({}, current as object) as T;
         this._mayHoldUndefined = false;
         if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
@@ -476,6 +476,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           data as Record<string, unknown>,
           "",
         );
+      } catch (error) {
+        // A frozen object in the data. What was merged so far is merged again.
+        if (!(error instanceof TypeError)) throw error;
+        this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData, data) as T;
+        if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
       } finally {
         this._writing = false;
       }
@@ -698,7 +703,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       (isPlainObject(existing) && isPlainObject(value))
     ) {
       // In-place merge: walk the payload, compare, overwrite, and fire signals in one pass.
-      let changed: boolean;
+      let changed = false;
+      let frozen = false;
       this._writing = true;
       try {
         // Only this part of the data was looked at, so the flag stays
@@ -709,8 +715,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             value as Record<string, unknown>,
             resolvedPath,
           ) || dropped;
+      } catch (error) {
+        if (!(error instanceof TypeError)) throw error;
+        frozen = true;
       } finally {
         this._writing = false;
+      }
+      // A frozen object in this part of the data: write a merged copy instead
+      if (frozen) {
+        return this.setProperty(
+          path,
+          deepExtend(Array.isArray(existing) ? [] : {}, existing, value),
+          context,
+        );
       }
       if (changed && this.registry.size > 0) {
         for (const binding of this._listBindings) binding._onMerge(resolvedPath);

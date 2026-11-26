@@ -1160,6 +1160,9 @@ QUnit.module(
         other.setData({ o: { b: 2 } } as object, true);
         const frozen = new Model(Object.freeze({ a: 1, o: Object.freeze({ x: 1 }) }));
         frozen.setData({ a: 2, o: { x: 2 } } as object, true);
+        const nested = new Model({ a: 1, o: Object.freeze({ x: 1, gone: undefined }) });
+        nested.setData({ b: 2 } as object, true);
+        nested.setData({ o: { x: 2 } } as object, true);
 
         // a suspended list: a change taken back by a second merge is none at resume()
         const model = new Model({ rows: [{ x: 1 }] });
@@ -1182,20 +1185,36 @@ QUnit.module(
           other.getData(),
           Object.getPrototypeOf(instance.getData()) === Object.prototype,
           frozen.getData(),
+          nested.getData(),
           counts,
           typeof (model as unknown as { checkUpdate(): unknown }).checkUpdate(),
         ]);
-        for (const each of [instance, frozen, model, other]) each.destroy();
+        for (const each of [instance, frozen, nested, model, other]) each.destroy();
         frame.remove();
         return state;
       };
       const signal = await run(SignalModel);
       assert.strictEqual(
         signal,
-        '[{"a":1,"b":2},{"o":{"a":1,"b":2}},true,{"a":2,"o":{"x":2}},[0,1],"number"]',
+        '[{"a":1,"b":2},{"o":{"a":1,"b":2}},true,{"a":2,"o":{"x":2}},{"a":1,"o":{"x":2},"b":2},[0,1],"number"]',
         "class instance and frozen data are rebuilt, the list compares first and last state",
       );
       assert.strictEqual(signal, await run(JSONModel), "as in JSONModel");
+
+      const partly = new SignalModel<Record<string, unknown>>({
+        o: Object.freeze({ x: 1, deep: Object.freeze({ y: 1 }) }),
+      });
+      let seen: unknown;
+      const y = partly.bindProperty("/o/deep/y");
+      y.attachChange(() => (seen = y.getValue()));
+      partly.mergeProperty("/o", { deep: { y: 2 } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.deepEqual(
+        [partly.getProperty("/o"), seen],
+        [{ x: 1, deep: { y: 2 } }, 2],
+        "mergeProperty into a frozen object writes a merged copy",
+      );
+      partly.destroy();
 
       // mergeProperty below a row does not reach the list, suspended or not
       const part = new SignalModel({ rows: [{ deep: { v: 1 } }] });
