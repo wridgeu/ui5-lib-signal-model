@@ -4,6 +4,7 @@
 	xmlns="sap.m"
 	xmlns:f="sap.ui.layout.form"
 	xmlns:l="sap.ui.layout">
+	<VBox>
 	<Panel headerText="JSONModel vs SignalModel Comparison" class="sapUiContentPadding">
 		<l:Grid defaultSpan="L6 M6 S12">
 			<Panel headerText="SignalModel (default model)">
@@ -32,4 +33,55 @@
 			type="Information"
 			class="sapUiSmallMargin" />
 	</Panel>
+	<Panel headerText="Where the two differ on purpose" class="sapUiContentPadding">
+		<MessageStrip
+			text="A binding on an object: SignalModel fires a change event for every write below the object, so a formatter that reads from it shows the new content. JSONModel compares the object with itself, finds no difference and keeps the old text."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="writeCity" text="Write another city below /address" press=".onWriteCity" type="Emphasized" class="sapUiSmallMarginEnd" />
+			<Button id="writeEqual" text="Write an equal /address object" press=".onWriteEqualAddress" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Text bound to /address" />
+				<Text id="signalAddress" text="{path: 'signalDiff>/address', formatter: '.formatAddress'}" />
+				<Label text="Change events" />
+				<Text id="signalEvents" text="{diff>/signal/events}" />
+				<Label text="With new content (recipe)" />
+				<Text id="signalReal" text="{diff>/signal/real}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Text bound to /address" />
+				<Text id="jsonAddress" text="{path: 'jsonDiff>/address', formatter: '.formatAddress'}" />
+				<Label text="Change events" />
+				<Text id="jsonEvents" text="{diff>/json/events}" />
+				<Label text="With new content (recipe)" />
+				<Text id="jsonReal" text="{diff>/json/real}" />
+			</f:SimpleForm>
+		</l:Grid>
+		<MessageStrip
+			text="The recipe: a change handler that compares the content with its own copy runs its work only for new content. An equal object counts as an event, not as new content."
+			type="Success"
+			class="sapUiSmallMarginBottom" />
+		<MessageStrip
+			text="A key that holds undefined, assigned to getData() directly, and then a merge: JSONModel's merge drops the key. SignalModel looks for such keys only after a write through the model or a refresh(), which the bindings need in both models anyway."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="mergeNoRefresh" text="draft = undefined, then merge" press=".onMergeWithoutRefresh" class="sapUiSmallMarginEnd" />
+			<Button id="mergeRefresh" text="draft = undefined, refresh(), then merge" press=".onMergeWithRefresh" type="Emphasized" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Keys after the merge" />
+				<Text id="signalKeys" text="{diff>/signal/keys}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Keys after the merge" />
+				<Text id="jsonKeys" text="{diff>/json/keys}" />
+			</f:SimpleForm>
+		</l:Grid>
+	</Panel>
+	</VBox>
 </mvc:View>

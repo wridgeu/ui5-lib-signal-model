@@ -1,3 +1,5 @@
+import deepClone from "sap/base/util/deepClone";
+import deepEqual from "sap/base/util/deepEqual";
 import Sorter from "sap/ui/model/Sorter";
 import type { Signal } from "signal-polyfill";
 import SignalModel from "ui5/model/signal/SignalModel";
@@ -1251,6 +1253,51 @@ QUnit.module(
         assert.strictEqual(await run(SignalModel), await run(JSONModel));
       },
     );
+
+    QUnit.test("the recipes of the README for the differences from JSONModel", async (assert) => {
+      const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+      const model = new SignalModel({
+        address: { street: "Main St 1", city: "Berlin" },
+        rows: [{ n: 1 }],
+      });
+
+      // A handler on an object that acts only on new content
+      const binding = model.bindProperty("/address");
+      let last = deepClone(binding.getValue());
+      const seen = { events: 0, real: 0 };
+      binding.attachChange(() => {
+        seen.events++;
+        const value = binding.getValue() as unknown;
+        if (deepEqual(value, last)) return;
+        last = deepClone(value);
+        seen.real++;
+      });
+      model.setProperty("/address/city", "Paris");
+      await tick();
+      assert.strictEqual(JSON.stringify(seen), '{"events":1,"real":1}', "a write below the object");
+      model.setProperty("/address", { street: "Main St 1", city: "Paris" });
+      await tick();
+      assert.strictEqual(JSON.stringify(seen), '{"events":2,"real":1}', "an equal object");
+
+      // A list keyed by the row object after a merge that changed nothing
+      const list = model.bindList("/rows");
+      (
+        list as unknown as { enableExtendedChangeDetection(detect: boolean, key: string): void }
+      ).enableExtendedChangeDetection(false, "");
+      let fired = 0;
+      list.attachChange(() => fired++);
+      list.initialize();
+      list.getContexts(0, 10);
+      await tick();
+      fired = 0;
+      model.setData({ rows: [{ n: 1 }] }, true);
+      await tick();
+      assert.strictEqual(fired, 0, "no event by itself");
+      list.refresh(true);
+      await tick();
+      assert.strictEqual(fired, 1, "refresh(true) fires it");
+      model.destroy();
+    });
 
     QUnit.test("a merge with keys named like parts of the prototype chain", (assert) => {
       const payload = (): object =>
