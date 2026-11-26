@@ -1220,6 +1220,38 @@ QUnit.module(
       part.destroy();
     });
 
+    QUnit.test(
+      "a suspended list after a merge that drops undefined, like JSONModel",
+      async (assert) => {
+        const run = async (Model: typeof JSONModel | typeof SignalModel): Promise<string> => {
+          const counts: number[] = [];
+          for (const rows of [
+            [{ n: 1, gone: undefined }],
+            [{ n: 1, tags: [1, undefined] }],
+            [{ n: 1 }, undefined],
+            [{ n: 1 }],
+          ]) {
+            const model = new Model({ rows });
+            let fired = 0;
+            const list = model.bindList("/rows");
+            list.attachChange(() => fired++);
+            list.initialize();
+            list.getContexts();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            fired = 0;
+            list.suspend();
+            model.setData({ z: 1 } as object, true);
+            list.resume();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            counts.push(fired);
+            model.destroy();
+          }
+          return counts.join();
+        };
+        assert.strictEqual(await run(SignalModel), await run(JSONModel));
+      },
+    );
+
     QUnit.test("a merge with keys named like parts of the prototype chain", (assert) => {
       const payload = (): object =>
         JSON.parse(
