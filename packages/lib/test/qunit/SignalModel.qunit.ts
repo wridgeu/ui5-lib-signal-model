@@ -222,7 +222,27 @@ QUnit.module(
       model.destroy();
     });
 
-    QUnit.test("a merged list fires once for refreshes that find nothing", async (assert) => {
+    QUnit.test("a merge of an equal Date into a row is no change for a list", async (assert) => {
+      for (const Model of [JSONModel, SignalModel]) {
+        const model = new Model({ list: [{ at: new Date(0) }] });
+        const list = model.bindList("/list");
+        list.initialize();
+        let fired = 0;
+        list.attachChange(() => fired++);
+        const name = Model === JSONModel ? "JSONModel" : "SignalModel";
+        model.setData({ list: [{ at: new Date(0) }] }, true);
+        model.refresh();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.strictEqual(fired, 0, `${name}: an equal Date`);
+        model.setData({ list: [{ at: new Date(1) }] }, true);
+        model.refresh();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.strictEqual(fired, 1, `${name}: another Date`);
+        model.destroy();
+      }
+    });
+
+    QUnit.test("a merged list fires at a refresh only for a changed row", async (assert) => {
       for (const Model of [JSONModel, SignalModel]) {
         const name = Model === JSONModel ? "JSONModel" : "SignalModel";
         const model = new Model({ list: [{ x: 1 }], a: 1 });
@@ -233,8 +253,7 @@ QUnit.module(
         model.setData({ a: 2 }, true);
         model.refresh();
         await new Promise((resolve) => setTimeout(resolve, 0));
-        // SignalModel cannot tell whether a row changed without it, and fires once
-        assert.strictEqual(fired, 1 + (Model === JSONModel ? 0 : 1), `${name}: first refresh`);
+        assert.strictEqual(fired, 1, `${name}: first refresh`);
 
         fired = 0;
         model.refresh();
@@ -247,6 +266,15 @@ QUnit.module(
         model.refresh();
         await new Promise((resolve) => setTimeout(resolve, 0));
         assert.strictEqual(fired, 1, `${name}: once for a row changed without the model`);
+
+        // the rows of the first merge are kept over a second one
+        fired = 0;
+        model.setData({ a: 3 }, true);
+        (model.getData() as { list: { x: number }[] }).list[0].x = 3;
+        model.setData({ a: 4 }, true);
+        model.refresh();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.strictEqual(fired, 1, `${name}: a change between two merges`);
         model.destroy();
       }
     });

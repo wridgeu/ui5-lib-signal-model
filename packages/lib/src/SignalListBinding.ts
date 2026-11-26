@@ -60,7 +60,7 @@ export default class SignalListBinding extends ClientListBinding {
    */
   private _merged = false;
   /**
-   * A value below this list changed: by a merge, or by a write after one. Set by SignalModel.
+   * A merge changed a value below this list. Set by SignalModel.
    *
    * @internal
    */
@@ -91,9 +91,16 @@ export default class SignalListBinding extends ClientListBinding {
       if (!this._merged) this._rowChanged = false;
       return;
     }
+    const internal = asInternal(this);
+    if (!internal.bUseExtendedChangeDetection && !this._merged && !this._rowChanged) {
+      // The list shares its rows with the model, so its comparison is blind to a change in
+      // a row. JSONModel's list is left with the rows from before the merge: give this one
+      // its own rows too. They stay until the next update(), also over further merges.
+      internal.oList = deepExtend(Array.isArray(internal.oList) ? [] : {}, internal.oList) as
+        | unknown[]
+        | Record<string, unknown>;
+    }
     this._merged = true;
-    // Only the comparison without change detection needs to hear about later writes
-    if (!asInternal(this).bUseExtendedChangeDetection) this.oModel._mergedLists.add(this);
     this._mergedNow = true;
     // The merge has notified the bindings by now, so this runs after their update
     queueMicrotask(() => {
@@ -114,7 +121,6 @@ export default class SignalListBinding extends ClientListBinding {
   update(): void {
     const internal = asInternal(this);
     this._merged = this._rowChanged = false;
-    this.oModel._mergedLists.delete(this);
     const list = this.oModel._getObject(internal.sPath, internal.oContext);
     if (list) {
       // Copied with the functions JSONListBinding uses: they drop undefined values
@@ -175,17 +181,9 @@ export default class SignalListBinding extends ClientListBinding {
       | Record<string, unknown>;
 
     if (!internal.bUseExtendedChangeDetection) {
-      // The comparison cannot see a change in a row that the list shares with the model.
-      // After a merge JSONModel's list has its own rows, the ones from before. Here a write
-      // after a merge is reported (_rowChanged); at a refresh nothing is, so the list fires
-      // once and takes its own rows too, to see what changes after that.
-      const atRefresh = this.oModel._refreshing && !forceUpdate;
-      const visible = !deepEqual(internal.oList, list);
-      if (visible || (this._merged && (this._rowChanged || atRefresh)) || forceUpdate) {
+      // A merge that changed a row did so in place, where the comparison cannot see it
+      if (!deepEqual(internal.oList, list) || (this._merged && this._rowChanged) || forceUpdate) {
         this.update();
-        if (atRefresh && !visible) {
-          internal.oList = deepExtend(Array.isArray(list) ? [] : {}, list) as typeof list;
-        }
         internal._fireChange({ reason: ChangeReason.Change });
       }
       return;
@@ -254,7 +252,6 @@ export default class SignalListBinding extends ClientListBinding {
       this._below = "";
     }
     this.oModel._listBindings.delete(this);
-    this.oModel._mergedLists.delete(this);
     cancelFlush(this);
     this.watcher = teardownWatcher(this.watcher);
   }

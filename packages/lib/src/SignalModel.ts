@@ -65,10 +65,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private registry: SignalRegistry;
   /** The subscribed list bindings: a merge has to reach them. Used by SignalListBinding. @internal */
   readonly _listBindings = new Set<SignalListBinding>();
-  /** Those of them a merge has reached since their last update. @internal */
-  readonly _mergedLists = new Set<SignalListBinding>();
-  /** All bindings are checking because the data may have changed without the model. @internal */
-  _refreshing = false;
   /** The model is assigning to its data: with `observe`, the setters must not check. */
   private _writing = false;
   private autoCreatePaths: boolean;
@@ -534,14 +530,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this.strictLeafCheck && !(propertyName in parent)) {
       return false;
     }
-    const oldValue = parent[propertyName];
     this._assign(parent, propertyName, value);
-    let changed: boolean | undefined;
-    for (const binding of this._mergedLists) {
-      if (binding._isAbove(resolvedPath) && (changed ??= !deepEqual(oldValue, value))) {
-        binding._rowChanged = true;
-      }
-    }
 
     if (this.registry.size > 0) {
       if (asyncUpdate) {
@@ -782,17 +771,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
       }
     }
-    this._refreshing = !asyncMode;
-    try {
-      (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
-        this,
-        forceUpdate,
-        asyncMode,
-      );
-    } finally {
-      // A binding can throw (a formatter, a sorter)
-      this._refreshing = false;
-    }
+    (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
+      this,
+      forceUpdate,
+      asyncMode,
+    );
   }
 
   /** @since 0.1.0 */
@@ -1088,8 +1071,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
       } else if (!Object.is(oldValue, newValue)) {
         changed = true;
+        // A list binding compares values: another instance with the same content is no change
+        let rowChanged: boolean | undefined;
         for (const binding of this._listBindings) {
-          if (binding._isAbove(childPath)) binding._rowChanged = true;
+          if (binding._isAbove(childPath) && (rowChanged ??= !deepEqual(oldValue, newValue))) {
+            binding._rowChanged = true;
+          }
         }
         // Clone incoming arrays and plain objects to prevent external mutation, with the
         // function JSONModel's merge uses: class instances inside stay the same instances.
