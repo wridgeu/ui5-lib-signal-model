@@ -274,10 +274,10 @@ JSONModel's `setProperty` accepts a `bAsyncUpdate` parameter that batches `check
 **Where the models are close:**
 
 - `setData` replace: 18.9 ms vs 18.5 ms, 1.04x faster (1.02x-1.05x). Earlier measurements had this scenario 4% slower. That came from the scenario itself: its warm-up wrote the values the model already had, so no binding updated during warm-up and the measured sample was the first update each binding ever made. The warm-up now writes new values, like the other scenarios. Without controls a replace with 2,000 bindings costs about 0.8 ms with SignalModel and 1.1 ms with JSONModel; the rest of the time is control and DOM updates in both.
-- Replacing a whole aggregation: table, grid table and tree show no clear difference, with intervals up to about 10% wide on either side of parity. The `sap.m.List` with 500 items measures 41.6 ms vs 42.8 ms, 1.03x slower (1.01x-1.05x). The same scenario gave no clear difference (0.98x-1.01x) in the previous run on an idle machine, so the effect is at most a few percent of a time that is almost entirely rendering.
+- Replacing a whole aggregation: table, grid table and tree show no clear difference, with intervals up to about 10% wide on either side of parity. The `sap.m.List` with 500 items measures 41.6 ms vs 42.8 ms, 1.03x slower (1.01x-1.05x). That difference is not in the model: with both lists in one page and 300 strictly alternating samples, the part from the write until all 500 items hold their new title takes 0.80 ms with either model, and both models make the list do the same work (one `updateItems`, 500 `setProperty`, 500 invalidations). The remaining ~33 ms is UI5's render pass over the same 500 items, whose median differed by up to 1.5 ms between repetitions, in either direction. The previous run of this benchmark had the scenario at no clear difference (0.98x-1.01x).
 - A deep merge covering all 2,000 items: 20.1 ms vs 18.8 ms, 1.06x faster (1.05x-1.08x). Both models are dominated by updating 2,000 controls.
 
-With 24 intervals at 95%, about one is expected to miss the true value by chance, and a 2-3% difference is at the limit of what this benchmark resolves. The one scenario that shows SignalModel as slower, the list replace, is of that size.
+With 24 intervals at 95%, about one is expected to miss the true value by chance, and a 2-3% difference is at the limit of what this benchmark resolves. The one scenario that shows SignalModel as slower, the list replace, is of that size and lies in the render pass, as described above.
 
 **Computed signals:**
 

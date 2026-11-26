@@ -179,11 +179,11 @@ export default class SignalListBinding extends ClientListBinding {
       // After a merge JSONModel's list has its own rows, the ones from before. Here a write
       // after a merge is reported (_rowChanged); at a refresh nothing is, so the list fires
       // once and takes its own rows too, to see what changes after that.
-      const guessed = this._merged && !this._rowChanged && this.oModel._refreshing && !forceUpdate;
+      const atRefresh = this.oModel._refreshing && !forceUpdate;
       const visible = !deepEqual(internal.oList, list);
-      if (visible || (this._merged && (this._rowChanged || guessed)) || forceUpdate) {
+      if (visible || (this._merged && (this._rowChanged || atRefresh)) || forceUpdate) {
         this.update();
-        if (guessed && !visible) {
+        if (atRefresh && !visible) {
           internal.oList = deepExtend(Array.isArray(list) ? [] : {}, list) as typeof list;
         }
         internal._fireChange({ reason: ChangeReason.Change });
