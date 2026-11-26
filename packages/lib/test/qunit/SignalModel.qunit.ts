@@ -1,3 +1,4 @@
+import Sorter from "sap/ui/model/Sorter";
 import type { Signal } from "signal-polyfill";
 import SignalModel from "ui5/model/signal/SignalModel";
 import JSONModel from "sap/ui/model/json/JSONModel";
@@ -142,6 +143,223 @@ QUnit.module(
           model.refresh(true);
           await new Promise((resolve) => setTimeout(resolve, 0));
           assert.strictEqual(wholeChanges, 1, `${name}: one change event for a forced refresh`);
+          model.destroy();
+        }
+      },
+    );
+
+    QUnit.test(
+      "refresh() compares like JSONModel and keeps what a handler writes",
+      async (assert) => {
+        for (const Model of [JSONModel, SignalModel]) {
+          const name = Model === JSONModel ? "JSONModel" : "SignalModel";
+          const model = new Model({ obj: { x: 1 }, list: [{ x: 1 }], a: 1, b: 1 });
+          const counts = { obj: 0, list: 0 };
+          const obj = model.bindProperty("/obj");
+          obj.attachChange(() => counts.obj++);
+          obj.initialize();
+          const list = model.bindList("/list");
+          list.attachChange(() => counts.list++);
+          list.initialize();
+          // registered before the binding whose handler writes to its path
+          const b = model.bindProperty("/b");
+          b.attachChange(() => {});
+          b.initialize();
+          const a = model.bindProperty("/a");
+          a.attachChange(() => model.setProperty("/b", 2));
+          a.initialize();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          counts.obj = counts.list = 0;
+
+          model.refresh();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          assert.strictEqual(counts.obj, 0, `${name}: an unchanged object does not fire`);
+          assert.strictEqual(counts.list, 0, `${name}: nor does an unchanged list`);
+
+          // a merge that changes nothing, then a row changed without the model
+          model.setData({ a: 1 }, true);
+          const data = model.getData() as { a: number; list: { x: number }[] };
+          data.list[0].x = 2;
+          data.a = 3;
+          model.refresh();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          assert.strictEqual(counts.list, 1, `${name}: the list notices the row`);
+          assert.strictEqual(b.getValue(), 2, `${name}: the write of a change handler arrives`);
+
+          // a refresh that finds nothing new in the rows leaves the list as after the merge
+          model.setData({ a: 1 }, true);
+          model.refresh();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          counts.list = 0;
+          model.setProperty("/list/0/x", 5);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          assert.strictEqual(counts.list, 1, `${name}: the list notices the next row write`);
+          model.destroy();
+        }
+      },
+    );
+
+    QUnit.test("a refresh that throws leaves no trace in a merged list", async (assert) => {
+      const model = new SignalModel({ list: [{ x: 1 }], a: 1 });
+      const list = model.bindList("/list");
+      let fired = 0;
+      list.attachChange(() => fired++);
+      list.initialize();
+      const thrower = model.bindProperty("/a");
+      const fail = (): never => {
+        throw new Error("handler");
+      };
+      thrower.attachChange(fail);
+
+      model.getData().a = 2;
+      assert.throws(() => model.refresh(), /handler/, "the error of the handler");
+      thrower.detachChange(fail);
+      fired = 0;
+      model.setData({ a: 2 }, true);
+      model.setProperty("/list/0/x", 1);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(fired, 0, "no change event for a write of the same value");
+      model.destroy();
+    });
+
+    QUnit.test("a merged list fires once for refreshes that find nothing", async (assert) => {
+      for (const Model of [JSONModel, SignalModel]) {
+        const name = Model === JSONModel ? "JSONModel" : "SignalModel";
+        const model = new Model({ list: [{ x: 1 }], a: 1 });
+        const list = model.bindList("/list");
+        let fired = 0;
+        list.attachChange(() => fired++);
+        list.initialize();
+        model.setData({ a: 2 }, true);
+        model.refresh();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        // SignalModel cannot tell whether a row changed without it, and fires once
+        assert.strictEqual(fired, 1 + (Model === JSONModel ? 0 : 1), `${name}: first refresh`);
+
+        fired = 0;
+        model.refresh();
+        model.refresh();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.strictEqual(fired, 0, `${name}: not at the next ones`);
+
+        (model.getData() as { list: { x: number }[] }).list[0].x = 2;
+        model.refresh();
+        model.refresh();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.strictEqual(fired, 1, `${name}: once for a row changed without the model`);
+        model.destroy();
+      }
+    });
+
+    QUnit.test("observed data: a merge updates bindings once it is complete", async (assert) => {
+      assert.strictEqual(
+        new SignalModel({ a: 1 }, null as unknown as undefined).getProperty("/a"),
+        1,
+        "null as options is accepted",
+      );
+      for (const Model of [JSONModel, SignalModel]) {
+        const name = Model === JSONModel ? "JSONModel" : "SignalModel";
+        const model = new Model({ items: [{ name: "b" }, { name: "a" }], a: 1, b: 1 }, true);
+        const list = model.bindList("/items", undefined, new Sorter("name"));
+        let fired = 0;
+        list.attachChange(() => fired++);
+        list.initialize();
+        const seen: string[] = [];
+        const a = model.bindProperty("/a");
+        a.attachChange(() =>
+          seen.push(`a=${model.getProperty("/a")} b=${model.getProperty("/b")}`),
+        );
+        a.initialize();
+        seen.length = fired = 0;
+
+        model.setData({ items: [{ name: "z" }], a: 2, b: 2 }, true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.deepEqual(seen, ["a=2 b=2"], `${name}: a handler sees the whole merge`);
+        assert.strictEqual(
+          `${list
+            .getContexts()
+            .map((context) => context.getPath())
+            .join(" ")}, ${fired}`,
+          "/items/1 /items/0, 1",
+          `${name}: a sorted list sorts again, once`,
+        );
+        model.destroy();
+      }
+    });
+
+    QUnit.test("refresh() updates a binding on a computed once", async (assert) => {
+      const model = new SignalModel({ price: 2 });
+      model.createComputed("/pair", ["/price"], (price) => ({ double: (price as number) * 2 }));
+      const binding = model.bindProperty("/pair");
+      let changes = 0;
+      binding.attachChange(() => changes++);
+      binding.initialize();
+      changes = 0;
+
+      model.getData().price = 3;
+      model.refresh();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.deepEqual(binding.getValue(), { double: 6 }, "the new value");
+      assert.strictEqual(changes, 1, "one change event");
+      model.destroy();
+    });
+
+    QUnit.test(
+      "the observe option updates bindings on assignment, like bObserve",
+      async (assert) => {
+        for (const model of [
+          new JSONModel({ name: "a", obj: { x: 1 }, list: [{ x: 1 }] }, true),
+          new SignalModel({ name: "a", obj: { x: 1 }, list: [{ x: 1 }] }, true),
+          new SignalModel({ name: "a", obj: { x: 1 }, list: [{ x: 1 }] }, { observe: true }),
+        ]) {
+          const label = model instanceof JSONModel ? "JSONModel" : "SignalModel";
+          const fired: string[] = [];
+          const bindings = ["/name", "/obj", "/obj/x", "/list/0/x"].map((path) => {
+            const binding = model.bindProperty(path);
+            binding.attachChange(() => fired.push(path));
+            binding.initialize();
+            return binding;
+          });
+          fired.length = 0;
+          const data = model.getData() as {
+            name: string;
+            obj: { x: number };
+            list: { x: number }[];
+          };
+
+          data.name = "b";
+          data.obj.x = 2;
+          data.list[0].x = 3;
+          assert.deepEqual(
+            bindings.map((binding) => binding.getValue() as unknown),
+            ["b", data.obj, 2, 3],
+            `${label}: values right after the assignments`,
+          );
+          data.obj = { x: 4 };
+          assert.strictEqual(bindings[2].getValue(), 4, `${label}: a new object is observed`);
+          data.obj.x = 5;
+          assert.strictEqual(bindings[2].getValue(), 5, `${label}: also below it`);
+          model.setData({ name: "c", obj: { x: 6 }, list: [{ x: 6 }] });
+          (model.getData() as typeof data).name = "d";
+          assert.strictEqual(bindings[0].getValue(), "d", `${label}: after setData`);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          assert.deepEqual(
+            fired,
+            [
+              "/name",
+              "/obj/x",
+              "/list/0/x",
+              "/obj",
+              "/obj/x",
+              "/obj/x",
+              "/name",
+              "/obj",
+              "/obj/x",
+              "/list/0/x",
+              "/name",
+            ],
+            `${label}: change events`,
+          );
           model.destroy();
         }
       },

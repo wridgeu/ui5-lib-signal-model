@@ -882,6 +882,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
     let merging = false;
     let sorting = false;
     let refreshed = false;
+    let listsRefreshed = false;
     if (kind < 0.1) {
       const [action, variants] = pick(ACTIONS);
       const argument = Math.floor(random() * variants);
@@ -1039,6 +1040,8 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       }
       // A forced refresh fires every binding
       refreshed = forced;
+      // A merged list fires at a refresh, whether or not a row changed without the model
+      listsRefreshed = true;
     } else {
       const [computedPath, deps, fn] = pick(COMPUTEDS);
       description = `redefine computed ${computedPath}`;
@@ -1177,6 +1180,7 @@ async function runSeed(seed: number, steps: number, mode: Mode): Promise<string>
       } else if (
         !stepwise &&
         !refreshed &&
+        !(listsRefreshed && signalFired > jsonFired) &&
         !listFiredAlways[i] &&
         !firesAlways(i) &&
         // After a merge JSONModel's rows are new objects. A binding that compares the rows

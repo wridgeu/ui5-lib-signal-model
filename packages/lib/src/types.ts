@@ -86,4 +86,11 @@ export interface SignalModelOptions {
    * computed signal throws instead of warning.
    */
   strictLeafCheck?: boolean;
+  /**
+   * Observe the data, like JSONModel's `bObserve` constructor argument: an assignment to a
+   * property of the data object (`model.getData().name = "x"`) updates the bindings.
+   * The data's properties are replaced by getters and setters, and every such assignment
+   * checks all bindings, so writes get slower.
+   */
+  observe?: boolean;
 }

@@ -89,9 +89,9 @@ export default class SignalRegistry {
     }
   }
 
-  /** Sets a state signal and queues the update of the bindings on its path. */
-  private write(path: string, signal: PathState, value: unknown): void {
-    const changed = !signalEquals(signal.get(), value);
+  /** Sets a state signal and, with `notify`, queues the update of the bindings on its path. */
+  private write(path: string, signal: PathState, value: unknown, notify = true): void {
+    const changed = notify && !signalEquals(signal.get(), value);
     signal.apply(value);
     if (!changed) return;
     const current = this.subscribers.get(path);
@@ -136,15 +136,6 @@ export default class SignalRegistry {
       }
     }
     return signal;
-  }
-
-  /**
-   * @param path - Property path to retrieve a state signal for.
-   * @returns The state signal, or `undefined` if not registered.
-   * @since 0.1.0
-   */
-  getState(path: string): Signal.State<unknown> | undefined {
-    return this.signals.get(path);
   }
 
   /**
@@ -197,11 +188,12 @@ export default class SignalRegistry {
 
   /**
    * @param resolver - Callback that returns the current value for a given path.
+   * @param notify - `false` if the caller lets every binding check itself.
    * @since 0.1.0
    */
-  invalidateAll(resolver: ValueResolver): void {
+  invalidateAll(resolver: ValueResolver, notify = true): void {
     for (const [path, signal] of this.signals) {
-      this.write(path, signal, resolver(path));
+      this.write(path, signal, resolver(path), notify);
     }
   }
 

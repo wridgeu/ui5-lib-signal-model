@@ -669,7 +669,45 @@ QUnit.module("loadData", () => {
         `${name}: events`,
       );
       model.destroy();
+      assert.strictEqual(
+        model.loadData(SAMPLE_URL, undefined, false) as unknown,
+        undefined,
+        `${name}: no promise after destroy either`,
+      );
     }
+  });
+
+  QUnit.test("a response without content is a success without data", async (assert) => {
+    const originalFetch = window.fetch;
+    window.fetch = () => Promise.resolve(new Response(null, { status: 204 }));
+    const model = new SignalModel<Record<string, unknown>>({ name: "old" });
+    let completed: unknown;
+    model.attachRequestCompleted((event) => (completed = event.getParameter("success")));
+    await model.loadData(SAMPLE_URL);
+    window.fetch = originalFetch;
+    assert.strictEqual(completed, true, "requestCompleted reports success");
+    assert.strictEqual(
+      model.getData(),
+      undefined,
+      "the data is replaced by nothing, as in JSONModel",
+    );
+    model.destroy();
+  });
+
+  QUnit.test("an abort while the body is read is reported as abort", async (assert) => {
+    const originalFetch = window.fetch;
+    window.fetch = () =>
+      Promise.resolve({
+        status: 200,
+        statusText: "OK",
+        text: () => Promise.reject(new DOMException("Aborted", "AbortError")),
+      } as Response);
+    const model = new SignalModel<Record<string, unknown>>();
+    let failure: { message?: string; statusCode?: number } = {};
+    await model.loadData(SAMPLE_URL).catch((error: typeof failure) => (failure = error));
+    window.fetch = originalFetch;
+    assert.strictEqual(`${failure.message} ${failure.statusCode}`, "abort 0");
+    model.destroy();
   });
 
   QUnit.test("a failed load does not block the next one", async (assert) => {

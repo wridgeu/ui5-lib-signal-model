@@ -52,13 +52,19 @@ export default class SignalListBinding extends ClientListBinding {
   declare oModel: SignalModel;
   watcher: Signal.subtle.Watcher | null = null;
   private _subscribedPath: string | null = null;
+  /** The subscribed path with a trailing slash: what the paths below this list start with */
+  private _below = "";
   /**
    * A merge reached this list since the last update(). JSONModel then compares with the
    * rows from before the merge, so it notices the next change in a row.
    */
   private _merged = false;
-  /** A value below this list changed: by a merge, or by a write after one */
-  private _rowChanged = false;
+  /**
+   * A value below this list changed: by a merge, or by a write after one. Set by SignalModel.
+   *
+   * @internal
+   */
+  _rowChanged = false;
   /** Like _merged, but only until the bindings were updated after the merge */
   private _mergedNow = false;
 
@@ -73,16 +79,21 @@ export default class SignalListBinding extends ClientListBinding {
   _onMerge(path: string): void {
     const own = this._subscribedPath;
     if (!own) return;
-    const below = own === "/" ? "/" : `${own}/`;
+    const below = this._below;
     const reached =
       path === "/" ||
       path === own ||
       own.startsWith(`${path}/`) ||
       // a row itself
       (path.startsWith(below) && !path.includes("/", below.length));
-    if (!reached) return;
+    if (!reached) {
+      // A change the merge made below a row counts only with a merge that reaches the list
+      if (!this._merged) this._rowChanged = false;
+      return;
+    }
     this._merged = true;
-    this.oModel._mergedLists.add(this);
+    // Only the comparison without change detection needs to hear about later writes
+    if (!asInternal(this).bUseExtendedChangeDetection) this.oModel._mergedLists.add(this);
     this._mergedNow = true;
     // The merge has notified the bindings by now, so this runs after their update
     queueMicrotask(() => {
@@ -91,13 +102,12 @@ export default class SignalListBinding extends ClientListBinding {
   }
 
   /**
-   * A value at `path` changed. Used by SignalModel, not part of the public API.
+   * Whether `path` is below this list. Used by SignalModel, not part of the public API.
    *
    * @internal
    */
-  _onChange(path: string): void {
-    const own = this._subscribedPath;
-    if (own && (own === "/" || path.startsWith(`${own}/`))) this._rowChanged = true;
+  _isAbove(path: string): boolean {
+    return path.startsWith(this._below);
   }
 
   /** @since 0.1.0 */
@@ -165,13 +175,18 @@ export default class SignalListBinding extends ClientListBinding {
       | Record<string, unknown>;
 
     if (!internal.bUseExtendedChangeDetection) {
-      // The comparison cannot see a change in a row that the copy shares with the model
-      const mergedRows = this._merged && this._rowChanged;
-      if (!deepEqual(internal.oList, list) || mergedRows || forceUpdate) {
+      // The comparison cannot see a change in a row that the list shares with the model.
+      // After a merge JSONModel's list has its own rows, the ones from before. Here a write
+      // after a merge is reported (_rowChanged); at a refresh nothing is, so the list fires
+      // once and takes its own rows too, to see what changes after that.
+      const guessed = this._merged && !this._rowChanged && this.oModel._refreshing && !forceUpdate;
+      const visible = !deepEqual(internal.oList, list);
+      if (visible || (this._merged && (this._rowChanged || guessed)) || forceUpdate) {
         this.update();
+        if (guessed && !visible) {
+          internal.oList = deepExtend(Array.isArray(list) ? [] : {}, list) as typeof list;
+        }
         internal._fireChange({ reason: ChangeReason.Change });
-      } else if (!this._merged) {
-        this._rowChanged = false;
       }
       return;
     }
@@ -226,6 +241,7 @@ export default class SignalListBinding extends ClientListBinding {
     }
 
     this._subscribedPath = resolvedPath;
+    this._below = resolvedPath === "/" ? "/" : `${resolvedPath}/`;
     this.oModel._listBindings.add(this);
     this.oModel._subscribe(resolvedPath, this);
   }
@@ -235,6 +251,7 @@ export default class SignalListBinding extends ClientListBinding {
     if (this._subscribedPath) {
       this.oModel._unsubscribe(this._subscribedPath, this);
       this._subscribedPath = null;
+      this._below = "";
     }
     this.oModel._listBindings.delete(this);
     this.oModel._mergedLists.delete(this);

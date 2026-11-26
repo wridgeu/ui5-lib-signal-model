@@ -4,8 +4,7 @@
     "loadData: calls _ajax with jsonp=false",
     "setProperty calls checkPerformanceOfUpdate",
     "test JSONModel destroy",
-    "test JSONModel loadData after destroy",
-    "test model observation"
+    "test JSONModel loadData after destroy"
   ],
   "JSONPropertyBinding": [
     "checkUpdate performs no update as the binding is the same",

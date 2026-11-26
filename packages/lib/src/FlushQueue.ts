@@ -45,47 +45,60 @@ export function scheduleFlush(
     flushScheduled = true;
     queueMicrotask(() => {
       flushScheduled = false;
-      // Swap the map so new notifications during checkUpdate() are
-      // queued for the next flush cycle, not processed in this one.
-      const batch = pendingUpdates;
-      pendingUpdates = new Map();
-      flushing = batch;
-      // A binding destroyed or re-subscribed by an earlier update of this batch has been
-      // removed from it by cancelFlush(): its queued signal is no longer the one it shows.
-      for (const [b, s] of batch) {
-        let value: unknown;
-        let readFailed = false;
-        try {
-          value = s.get();
-        } catch (e) {
-          readFailed = true;
-          Log.error(
-            "SignalModel: signal read failed during flush",
-            e as Error,
-            "ui5.model.signal.FlushQueue",
-          );
-        }
-        // Always re-arm watcher before checkUpdate (and even if s.get() threw)
-        // so the binding can recover on subsequent dependency changes.
-        b.watcher?.watch();
-        if (readFailed) continue;
-        try {
-          if (b._checkUpdateFromSignal) {
-            b._checkUpdateFromSignal(value);
-          } else {
-            b.checkUpdate();
-          }
-        } catch (e) {
-          Log.error(
-            "SignalModel: checkUpdate failed for binding",
-            e as Error,
-            "ui5.model.signal.FlushQueue",
-          );
-        }
-      }
-      flushing = null;
+      flush();
     });
   }
+}
+
+function flush(): void {
+  // Swap the map so new notifications during checkUpdate() are
+  // queued for the next flush cycle, not processed in this one.
+  const batch = pendingUpdates;
+  pendingUpdates = new Map();
+  flushing = batch;
+  // A binding destroyed or re-subscribed by an earlier update of this batch has been
+  // removed from it by cancelFlush(): its queued signal is no longer the one it shows.
+  for (const [b, s] of batch) {
+    let value: unknown;
+    let readFailed = false;
+    try {
+      value = s.get();
+    } catch (e) {
+      readFailed = true;
+      Log.error(
+        "SignalModel: signal read failed during flush",
+        e as Error,
+        "ui5.model.signal.FlushQueue",
+      );
+    }
+    // Always re-arm watcher before checkUpdate (and even if s.get() threw)
+    // so the binding can recover on subsequent dependency changes.
+    b.watcher?.watch();
+    if (readFailed) continue;
+    try {
+      if (b._checkUpdateFromSignal) {
+        b._checkUpdateFromSignal(value);
+      } else {
+        b.checkUpdate();
+      }
+    } catch (e) {
+      Log.error(
+        "SignalModel: checkUpdate failed for binding",
+        e as Error,
+        "ui5.model.signal.FlushQueue",
+      );
+    }
+  }
+  flushing = null;
+}
+
+/**
+ * Delivers the queued updates now, those of all models. Used before all bindings of a model
+ * check themselves (refresh), so that no update is delivered after that check. Does nothing
+ * while a flush is running.
+ */
+export function flushNow(): void {
+  if (!flushing && pendingUpdates.size > 0) flush();
 }
 
 /**

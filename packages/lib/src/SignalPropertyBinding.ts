@@ -52,7 +52,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
 
     const value = self._getValue();
-    this._applyUpdate(self, value, forceUpdate);
+    // No signal has reported a write here, so the values are compared as in JSONModel
+    this._applyUpdate(self, value, forceUpdate || !deepEqual(value, self.oValue));
   }
 
   /**
@@ -68,21 +69,21 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
 
     const value = this._isDirectSignal ? signalValue : self._getValue();
-    this._applyUpdate(self, value, false);
+    // An object stays the same object when something below it is written
+    const changed = (typeof value === "object" && value !== null) || !Object.is(self.oValue, value);
+    this._applyUpdate(self, value, changed);
   }
 
   private _applyUpdate(
     self: ClientPropertyBindingInternal,
     value: unknown,
-    forceUpdate?: boolean,
+    hasChanged: boolean,
   ): void {
-    const hasChanged =
-      typeof value === "object" && value !== null ? true : !Object.is(self.oValue, value);
     const isRelative = this.isRelative();
     const currentResolvedPath = isRelative ? this.getResolvedPath() : undefined;
     const pathChanged = isRelative && this._previousResolvedPath !== currentResolvedPath;
 
-    if (hasChanged || pathChanged || forceUpdate) {
+    if (hasChanged || pathChanged) {
       self.oValue = value;
       self.getDataState().setValue(self.oValue);
       self.checkDataState();
