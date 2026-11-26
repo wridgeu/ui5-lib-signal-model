@@ -1012,24 +1012,46 @@ QUnit.module(
       model.destroy();
     });
 
-    QUnit.test("mergeProperty skips __proto__, constructor, prototype keys", (assert) => {
-      const model = new SignalModel({ target: { a: 1 } });
-      model.mergeProperty(
-        "/target",
+    QUnit.test("a merge with keys named like parts of the prototype chain", (assert) => {
+      const payload = (): object =>
         JSON.parse(
-          '{"__proto__": {"x": 1}, "constructor": {"y": 2}, "prototype": {"z": 3}, "a": 99}',
-        ),
-      );
-      assert.strictEqual(model.getProperty("/target/a"), 99, "normal key merged");
+          '{"__proto__": {"x": 1}, "constructor": {"prototype": {"y": 2}}, "prototype": {"z": 3}, "a": 99}',
+        ) as object;
+      const results = [new JSONModel({ a: 1 }), new SignalModel({ a: 1 })].map((model) => {
+        model.setData(payload(), true);
+        // into the key the first merge created
+        model.setData({ constructor: { again: 4 } } as never, true);
+        // the payload's __proto__ must not become the prototype of the data either
+        const data = JSON.stringify(model.getData()) + String(model.getProperty("/x"));
+        model.destroy();
+        return data;
+      });
       assert.strictEqual(
-        (Object.prototype as Record<string, unknown>)["x"],
-        undefined,
-        "__proto__ key skipped",
+        results[1],
+        '{"a":99,"constructor":{"prototype":{"y":2},"again":4},"prototype":{"z":3}}undefined',
+        "own keys, without __proto__",
       );
-      const target = model.getProperty("/target") as object;
-      assert.notOk(Object.hasOwn(target, "constructor"), "constructor key skipped");
-      assert.notOk(Object.hasOwn(target, "prototype"), "prototype key skipped");
-      model.destroy();
+      assert.strictEqual(results[1], results[0], "same data as JSONModel");
+      const probe = Object.prototype as Record<string, unknown>;
+      assert.deepEqual(
+        [probe.x, probe.y, (Object as unknown as Record<string, unknown>).again],
+        [undefined, undefined, undefined],
+        "nothing written to Object or its prototype",
+      );
+
+      const created = new SignalModel<Record<string, unknown>>({}, { autoCreatePaths: true });
+      created.setProperty("/new/constructor/x", 1);
+      assert.strictEqual(
+        JSON.stringify(created.getData()),
+        '{"new":{"constructor":{"x":1}}}',
+        "autoCreatePaths creates an own key",
+      );
+      assert.strictEqual(
+        (Object as unknown as Record<string, unknown>).x,
+        undefined,
+        "not on Object",
+      );
+      created.destroy();
     });
 
     QUnit.test("setProperty('/') checks computed ancestor before root write", (assert) => {

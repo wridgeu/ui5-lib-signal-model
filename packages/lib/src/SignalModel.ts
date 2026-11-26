@@ -1003,10 +1003,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     let current = "";
 
     for (const part of path.substring(1).split("/")) {
-      if (part === "" || part === "__proto__" || part === "constructor" || part === "prototype") {
+      if (part === "" || part === "__proto__") {
         continue;
       }
-      if (node[part] == null) {
+      // Own properties only: "constructor" must not lead into Object
+      if (!Object.hasOwn(node, part) || node[part] == null) {
         this._assign(node, part, {});
         createdAt ||= current + "/" + part;
         // A new element can grow the array
@@ -1063,11 +1064,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const hasSignals = this.registry.size > 0;
 
     for (const key of Object.keys(source)) {
-      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      // Like JSONModel's merge
+      if (key === "__proto__") {
         continue;
       }
       const childPath = basePath ? `${basePath}/${key}` : `/${key}`;
-      const oldValue = target[key];
+      // Own properties only: an inherited one ("constructor") is not merged into
+      const oldValue = Object.hasOwn(target, key) ? target[key] : undefined;
       const newValue = source[key];
       // Like JSONModel's deepExtend: an undefined value in the payload changes nothing
       if (newValue === undefined) {
