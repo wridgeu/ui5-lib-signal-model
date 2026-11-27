@@ -531,10 +531,9 @@ QUnit.module("JSONModel Parity", () => {
     }, 50);
   });
 
-  QUnit.test("setProperty through a prototype path -- parity with JSONModel", (assert) => {
-    // Neither model filters "__proto__" or "constructor/prototype" path segments in
-    // setProperty: both write through to Object.prototype. This pins the shared behaviour,
-    // so a change on either side shows up. Never build such paths from untrusted input.
+  QUnit.test("setProperty through a prototype path -- refused, unlike JSONModel", (assert) => {
+    // JSONModel writes through "__proto__" and "constructor/prototype" to Object.prototype.
+    // SignalModel refuses (a documented difference). This pins both sides.
     const probe = Object.prototype as Record<string, unknown>;
     const run = (model: JSONModel | SignalModel<Record<string, unknown>>) => {
       const result: unknown[] = [];
@@ -556,7 +555,7 @@ QUnit.module("JSONModel Parity", () => {
     const signal = run(new SignalModel<Record<string, unknown>>({}));
 
     assert.deepEqual(json, [true, 1, true, 2], "JSONModel writes through the prototype path");
-    assert.deepEqual(signal, json, "SignalModel behaves the same");
+    assert.deepEqual(signal, [false, undefined, false, undefined], "SignalModel refuses");
     assert.strictEqual(probe.parityProbeA, undefined, "Object.prototype cleaned up");
     assert.strictEqual(probe.parityProbeB, undefined, "Object.prototype cleaned up");
   });

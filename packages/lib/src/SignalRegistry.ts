@@ -67,7 +67,7 @@ export default class SignalRegistry {
    * State signals that stay without a binding: someone outside holds them (getSignal) or a
    * computed reads them. Any other state signal goes with its last binding.
    */
-  private readonly pinned = new Set<string>();
+  private readonly pinned = new Map<string, number>();
   /** Paths of dropped state signals that the index still lists, until the next sweep. */
   private readonly dropped = new Set<string>();
   /**
@@ -111,6 +111,8 @@ export default class SignalRegistry {
   /** Removes the state signal of `path`. Its index entries go with a later sweep. */
   private drop(path: string): void {
     if (!this.signals.delete(path)) return;
+    // The last binding has left a path whose computed was removed: a path like any other
+    if (!this.replaced.has(path)) this.released.delete(path);
     this.dropped.add(path);
     // Amortised: a sweep visits every index entry, so only once half of them are stale
     if (this.dropped.size <= this.signals.size + 64) return;
@@ -126,8 +128,14 @@ export default class SignalRegistry {
   }
 
   /** Sets a state signal and, with `notify`, queues the update of the bindings on its path. */
-  private write(path: string, signal: PathState, value: unknown, notify = true): void {
-    const changed = notify && !signalEquals(signal.get(), value);
+  private write(
+    path: string,
+    signal: PathState,
+    value: unknown,
+    notify = true,
+    force = false,
+  ): void {
+    const changed = notify && (force || !signalEquals(signal.get(), value));
     signal.apply(value);
     if (!changed) return;
     const current = this.subscribers.get(path);
@@ -139,10 +147,46 @@ export default class SignalRegistry {
     }
   }
 
-  /** Sets the state signal of `path`, if there is one, to the value the resolver returns. */
-  refresh(path: string, resolver: ValueResolver): void {
+  /**
+   * Sets the state signal of `path`, if there is one, to the value the resolver returns.
+   * With `force` its bindings are told also when the signal already holds that value: a
+   * binding may show another one.
+   */
+  refresh(path: string, resolver: ValueResolver, force = false): void {
     const signal = this.signals.get(path);
-    if (signal) this.write(path, signal, resolver(path));
+    if (signal) this.write(path, signal, resolver(path), true, force);
+  }
+
+  /** Whether something is kept for a computed that `path` holds or held. */
+  remembers(path: string): boolean {
+    return this.released.has(path) || this.replaced.has(path);
+  }
+
+  /**
+   * No computed reads `path` or a path below it any more: what was kept to tell them about
+   * a computed created or removed there goes. That the path held a computed is kept as long
+   * as a binding is on it, so that a computed can be created there again.
+   */
+  forget(path: string): void {
+    if (this.computeds.has(path)) return;
+    this.replaced.delete(path);
+    if (!this.signals.has(path) && !this.subscribers.has(path)) this.released.delete(path);
+  }
+
+  /** Drops the state signal of `path` if nothing holds it: no pin and no binding. */
+  release(path: string): void {
+    if (!this.pinned.has(path) && !this.subscribers.has(path)) this.drop(path);
+  }
+
+  /** Takes one pin back: without any left, the state signal goes with its last binding. */
+  unpin(path: string): void {
+    const pins = (this.pinned.get(path) ?? 0) - 1;
+    if (pins > 0) {
+      this.pinned.set(path, pins);
+      return;
+    }
+    this.pinned.delete(path);
+    if (!this.subscribers.has(path)) this.drop(path);
   }
 
   /**
@@ -156,7 +200,8 @@ export default class SignalRegistry {
       const signal = this.signals.get(each);
       if (!signal) continue;
       const value = resolver(each);
-      this.write(each, signal, value, !Object.is(signal.get(), value));
+      // Not written at all: a write of an object makes the computeds that read it run again
+      if (!Object.is(signal.get(), value)) this.write(each, signal, value);
     }
   }
 
@@ -168,7 +213,7 @@ export default class SignalRegistry {
    * @since 0.1.0
    */
   getOrCreate(path: string, initialValue: unknown, pin = false): Signal.State<unknown> {
-    if (pin) this.pinned.add(path);
+    if (pin) this.pinned.set(path, (this.pinned.get(path) ?? 0) + 1);
     let signal = this.signals.get(path);
     if (!signal) {
       signal = new PathState(initialValue, path, this.writeThrough);
@@ -313,7 +358,8 @@ export default class SignalRegistry {
     this.released.add(path);
     // What a computed that depends on the path follows from now on. Created first: such a
     // computed may run again while the signals below are set.
-    if (this.replaced.has(path)) this.getOrCreate(path, read?.(path), true);
+    // Not pinned here: the model pins it for each computed that reads exactly this path.
+    if (this.replaced.has(path)) this.getOrCreate(path, read?.(path));
     this.signalReplaced(path, read);
     return true;
   }

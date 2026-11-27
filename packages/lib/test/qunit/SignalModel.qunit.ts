@@ -1427,12 +1427,38 @@ QUnit.module(
       created.destroy();
     });
 
-    QUnit.test("setProperty('/') checks computed ancestor before root write", (assert) => {
+    QUnit.test("a write that leads into a prototype is refused", (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: {}, constructor: { own: 1 } });
+      const plain = new SignalModel<Record<string, unknown>>({ a: {} });
+      const polluted = (): unknown => ({}) as Record<string, unknown>;
+      try {
+        for (const path of [
+          "/__proto__/polluted",
+          "/a/__proto__/polluted",
+          "/a/constructor/prototype/polluted",
+        ]) {
+          assert.strictEqual(model.setProperty(path, 1), false, path);
+        }
+        assert.strictEqual(plain.setProperty("/constructor/prototype/polluted", 1), false);
+        assert.strictEqual(plain.mergeProperty("/__proto__", { polluted: 1 }), false);
+        assert.strictEqual(plain.mergeProperty("/constructor/prototype", { polluted: 1 }), false);
+        assert.strictEqual((polluted() as { polluted?: number }).polluted, undefined);
+      } finally {
+        delete (Object.prototype as { polluted?: number }).polluted;
+      }
+      // A key of the data with that name is data
+      assert.strictEqual(model.setProperty("/constructor/own", 2), true);
+      assert.strictEqual(model.getProperty("/constructor/own"), 2);
+      assert.strictEqual(plain.setProperty("/a/constructor", "x"), true, "as a new key");
+      assert.deepEqual(plain.getData(), { a: { constructor: "x" } });
+      model.destroy();
+      plain.destroy();
+    });
+
+    QUnit.test("a computed at the root is refused", (assert) => {
       const model = new SignalModel({ val: 1 });
-      model.createComputed("/", ["/val"], (v) => v);
-      const result = model.setProperty("/", { val: 2 });
-      assert.strictEqual(result, false, "setProperty('/') blocked by root computed");
-      model.removeComputed("/");
+      assert.throws(() => model.createComputed("/", ["/val"], (v) => v), TypeError);
+      assert.strictEqual(model.setProperty("/", { val: 2 }), true, "the root stays writable");
       model.destroy();
     });
   },

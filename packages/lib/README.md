@@ -245,9 +245,9 @@ model.createComputed("/greeting", ["/currentUser/name"], (name) => `Hello ${name
 // /greeting follows /currentUser, also after /currentUser is redefined or removed.
 ```
 
-One limit: **a binding on exactly the path, or a computed that depends on it, before the first `createComputed`** makes that call throw (define-once, see above). Create the computed before the view binds to it and before the computeds that depend on it, for example in `onInit` or in the component.
+One limit: **a binding on exactly the path, or a computed that depends on it, before the first `createComputed`** makes that call throw (define-once, see above). Create the computed before the view binds to it and before the computeds that depend on it, for example in `onInit` or in the component. After `removeComputed`, a computed can be created at the path again as long as a binding stays on it; once the path has lost its bindings, it is a path like any other. A computed at the root path `/` is refused.
 
-**Cost.** Per `createComputed` or `removeComputed`, one pass over the paths that have bindings and over the state signals below the path. A computed that no other computed depends on costs nothing extra, and nothing but its path is kept after `removeComputed`; one that others depend on (itself or a path inside it) gets one small signal that tells them when it was replaced.
+**Cost.** Per `createComputed` or `removeComputed`, one pass over the paths that have bindings and over the state signals below the path; `removeComputed` also passes over the other computeds once. A computed that no other computed depends on costs nothing extra, and nothing but its path is kept after `removeComputed`; one that others depend on (itself or a path inside it) gets one small signal that tells them when it was replaced.
 
 ### Computed Sub-Path Traversal
 
@@ -311,7 +311,7 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Six differences remain on purpose:
+The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Seven differences remain on purpose:
 
 - **A merge works on the data in place.** The data after `setData(data, true)` or `mergeProperty` equals JSONModel's, but the existing objects are changed instead of rebuilt: `getData()` stays the same object. Data you changed directly needs `refresh()` before a merge drops its `undefined` keys.
 - **Bindings update in a microtask**, not inside `setProperty`. A control shows the new value one microtask later, and an error in a formatter is logged instead of thrown out of `setProperty`.
@@ -319,6 +319,7 @@ The same operations run against both models in a randomized test, and UI5's own 
 - **A list binding keyed by the row object** does not fire after a merge that changed nothing. JSONModel's does, because its merge replaces every row object.
 - **Data changed directly in `getData()` needs `refresh()`.** JSONModel checks all bindings on every write and so finds such a change with the next write anywhere; SignalModel tells only the bindings at, above and below the written path.
 - **An asynchronous `loadData` uses `fetch`**, not `jQuery.ajax`: `MockServer` and a fake `XMLHttpRequest` do not see the request. They do see a synchronous load (`loadData(url, params, false)`).
+- **A write into a prototype is refused.** `setProperty("/__proto__/x", 1)` returns `false`; JSONModel writes to `Object.prototype`.
 
 Details, the reason for each and what to do about it: [Differences from JSONModel](https://github.com/wridgeu/ui5-lib-signal-model/blob/main/docs/jsonmodel-differences.md).
 

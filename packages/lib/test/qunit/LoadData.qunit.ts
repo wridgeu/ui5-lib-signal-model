@@ -905,4 +905,86 @@ QUnit.module("loadData", () => {
       );
     },
   );
+
+  QUnit.test("HEAD carries its parameters in the URL, as GET", async (assert) => {
+    const originalFetch = window.fetch;
+    const calls: unknown[] = [];
+    window.fetch = (url, init) => {
+      calls.push([url, init?.method, init?.body]);
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    };
+    const model = new SignalModel();
+    try {
+      await model.loadData("/x.json", { a: "1" }, true, "HEAD");
+    } finally {
+      window.fetch = originalFetch;
+    }
+    assert.deepEqual(calls, [["/x.json?a=1", "HEAD", undefined]]);
+    model.destroy();
+  });
+
+  QUnit.test("an abort with a reason is reported as an abort", async (assert) => {
+    const model = new SignalModel();
+    const controller = new AbortController();
+    const expected = {
+      message: "abort",
+      statusCode: 0,
+      statusText: "abort",
+      responseText: undefined,
+    };
+    let failed: unknown;
+    model.attachRequestFailed((event) => (failed = event.getParameters()));
+    const loaded = model.loadData(
+      SAMPLE_URL,
+      undefined,
+      true,
+      "GET",
+      false,
+      true,
+      undefined,
+      controller.signal,
+    );
+    controller.abort("reason");
+    await loaded.then(
+      () => assert.ok(false, "must reject"),
+      (error: unknown) => assert.deepEqual(error, expected),
+    );
+    assert.deepEqual(failed, expected);
+    model.destroy();
+  });
+
+  QUnit.test(
+    "destroy() in a requestSent handler: no error, the promise stays pending",
+    async (assert) => {
+      const model = new SignalModel();
+      model.attachRequestSent(() => model.destroy());
+      const loaded = model.loadData(SAMPLE_URL);
+      const state = await Promise.race([
+        loaded.then(
+          () => "resolved",
+          () => "rejected",
+        ),
+        new Promise((resolve) => setTimeout(() => resolve("pending"), 50)),
+      ]);
+      assert.strictEqual(state, "pending", "as JSONModel");
+      const sync = new SignalModel();
+      sync.attachRequestSent(() => sync.destroy());
+      assert.strictEqual(sync.loadData(SAMPLE_URL, undefined, false), undefined);
+    },
+  );
+
+  QUnit.test("a synchronous load with an aborted signal makes no request", (assert) => {
+    const model = new SignalModel({ old: true });
+    const events: string[] = [];
+    model.attachRequestCompleted((event) =>
+      events.push(`completed ${event.getParameter("success")}`),
+    );
+    model.attachRequestFailed((event) => events.push(`failed ${event.getParameter("message")}`));
+    const controller = new AbortController();
+    controller.abort();
+    model.loadData(SAMPLE_URL, undefined, false, "GET", false, true, undefined, controller.signal);
+    assert.deepEqual(events, ["completed false", "failed abort"]);
+    assert.deepEqual(model.getData(), { old: true }, "the data stays");
+    model.destroy();
+  });
 });

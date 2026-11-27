@@ -1,6 +1,6 @@
 # Differences from JSONModel
 
-SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Six differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first five live, next to a JSONModel.
+SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Seven differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first five live, next to a JSONModel.
 
 | Difference                                                                                        | Who notices                                                                                                                 |
 | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -10,6 +10,7 @@ SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`.
 | [Change events of list bindings around a merge](#change-events-of-list-bindings-around-a-merge)   | List bindings that use the row object itself as change detection key                                                        |
 | [Data changed without the model needs `refresh()`](#data-changed-without-the-model-needs-refresh) | Code that changes `getData()` directly and relies on a later write to update the bindings                                   |
 | [`loadData` uses `fetch`](#loaddata-uses-fetch)                                                   | Tests and apps that intercept an asynchronous load with `MockServer` or a fake `XMLHttpRequest`, or configure `jQuery.ajax` |
+| [A write into a prototype is refused](#a-write-into-a-prototype-is-refused)                       | Nobody on purpose: JSONModel changes `Object.prototype` there                                                               |
 
 ## How parity is tested
 
@@ -112,3 +113,11 @@ JSONModel loads with `jQuery.ajax`. SignalModel loads asynchronously with `fetch
 For both kinds of load, `jQuery.ajaxSetup`, prefilters and global ajax events do not apply.
 
 **What to do.** In a test with `MockServer` or a fake `XMLHttpRequest`, load synchronously, or stub `window.fetch`, or serve the file. In an app, mock at the network level (a service worker or the dev server), or load the data yourself and pass it to `setData`. Send headers you need with the `headers` parameter of `loadData`.
+
+## A write into a prototype is refused
+
+JSONModel follows a path wherever it leads. `setProperty("/__proto__/isAdmin", true)` or `setProperty("/constructor/prototype/isAdmin", true)` therefore writes to `Object.prototype`, and every object in the page has the property afterwards. A path built from user input or from a backend key is enough for that.
+
+SignalModel refuses such a write: `setProperty` and `mergeProperty` return `false` and log a warning when the path has a `__proto__` segment, or goes on through a `constructor` that the data only inherits. A key named `constructor` that the data holds itself is data and stays writable. Reading is unchanged.
+
+**What to do.** Nothing, unless code relied on reaching a prototype through the model; change the prototype directly then.

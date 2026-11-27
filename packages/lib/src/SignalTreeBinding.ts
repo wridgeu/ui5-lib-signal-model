@@ -67,7 +67,14 @@ export default class SignalTreeBinding extends ClientTreeBinding {
    * @param forceUpdate - Whether to fire a change event regardless of value comparison.
    */
   override refresh(forceUpdate?: boolean): void {
-    if (this._subscribedPath) this.oModel._syncSignals(this._subscribedPath);
+    // As JSONModel: a suspended binding does nothing unless forced
+    if (this.isSuspended() && !forceUpdate) return;
+    if (this._subscribedPath) {
+      this.oModel._syncSignals(this._subscribedPath);
+      // The check below covers this binding: a queued update would be a second event
+      cancelFlush(this);
+      this.watcher?.watch();
+    }
     super.refresh(forceUpdate);
   }
 
@@ -110,8 +117,9 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     if (!this._subscribedPath) {
       this.subscribe();
     }
-    // Fire initial change so controls (e.g. sap.m.Tree) populate their aggregation
-    asInternal(this)._fireChange({ reason: ChangeReason.Change });
+    // Fire initial change so controls (e.g. sap.m.Tree) populate their aggregation; not
+    // while suspended, as Binding.initialize
+    if (!this.isSuspended()) asInternal(this)._fireChange({ reason: ChangeReason.Change });
     return this;
   }
 

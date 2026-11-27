@@ -138,7 +138,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * as JSONModel's observeData() does. A setter observes the new value and calls
    * checkUpdate().
    */
-  private _observeData(): void {
+  private _observeData(root: unknown = this.oData): void {
     if (!this.observe) return;
     const observe = (value: unknown, parent?: object, key: string | number = ""): void => {
       if (Array.isArray(value)) {
@@ -164,7 +164,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             },
       );
     };
-    observe(this.oData);
+    observe(root);
   }
 
   /**
@@ -176,7 +176,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * Calls are chained sequentially, matching JSONModel's `pSequentialImportCompleted` behavior.
    *
    * @param url URL to load JSON from
-   * @param parameters Query parameters (appended to URL for GET, sent as body for POST)
+   * @param parameters Query parameters (appended to the URL for GET and HEAD, sent as body otherwise)
    * @param async `false` loads synchronously, as in JSONModel (deprecated there as well)
    * @param type HTTP method: "GET" (default) or "POST"
    * @param merge Whether to merge loaded data instead of replacing
@@ -234,15 +234,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const info = "cache=" + effectiveCache + ";bMerge=" + merge;
     const infoObject = { cache: effectiveCache, merge };
 
-    // Append parameters to URL for GET, matching JSONModel behavior
-    if (parameters && method === "GET") {
+    // Requests without a body carry the parameters in the URL, as jQuery.ajax
+    const inUrl = method === "GET" || method === "HEAD";
+    if (parameters && inUrl) {
       const paramString =
         typeof parameters === "string" ? parameters : new URLSearchParams(parameters).toString();
       fullURL += (url.includes("?") ? "&" : "?") + paramString;
     }
 
     // Only where a browser would cache, as jQuery.ajax
-    if (effectiveCache === false && (method === "GET" || method === "HEAD")) {
+    if (effectiveCache === false && inUrl) {
       fullURL += (fullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
     }
 
@@ -257,7 +258,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Content-Type: application/x-www-form-urlencoded. String params are sent as-is.
     // Callers wanting JSON POST must stringify manually and set Content-Type via customHeaders.
     let body: string | undefined;
-    if (method !== "GET" && parameters) {
+    if (!inUrl && parameters) {
       body =
         typeof parameters === "string" ? parameters : new URLSearchParams(parameters).toString();
       if (!Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
@@ -273,6 +274,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       info,
       infoObject,
     });
+    // A requestSent handler has destroyed the model: the promise stays pending, as JSONModel's
+    if (asInternal(this).bDestroyed) {
+      return isAsync ? new Promise<void>(() => {}) : undefined;
+    }
 
     // The same error object as JSONModel, which takes the message from jQuery.ajax
     const parse = (statusCode: number, statusText: string, responseText: string): T | undefined => {
@@ -336,6 +341,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     };
 
     if (!isAsync) {
+      // A blocking request cannot be aborted while it runs, only before it starts
+      if (abortSignal?.aborted) {
+        fail(noResponse("abort"));
+        return undefined;
+      }
       // fetch cannot block, so this is the request JSONModel makes. The response is
       // taken from the load event, as jQuery.ajax does: it fires during send().
       const request = new XMLHttpRequest();
@@ -378,10 +388,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       body,
     })
       .then(async (res) => parse(res.status, res.statusText, await res.text()))
-      .catch((error: Error | LoadFailure) => {
-        // A failure of the request itself, also while the body is read
-        if (!(error instanceof Error)) throw error;
-        throw noResponse(error.name === "AbortError" ? "abort" : "error");
+      .catch((error: unknown) => {
+        if (typeof error === "object" && error !== null && "statusCode" in error) throw error;
+        // A failure of the request itself, also while the body is read. An abort rejects
+        // with its reason, which can be any value.
+        const aborted = combinedSignal.aborted || (error as Error | null)?.name === "AbortError";
+        throw noResponse(aborted ? "abort" : "error");
       });
 
     // It may fail while an earlier request is still loading: handled below, once the chain
@@ -585,6 +597,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       return false;
     }
 
+    if (this._leadsIntoPrototype(resolvedPath)) {
+      Log.warning(
+        `Cannot write at "${resolvedPath}": the path leads into a prototype`,
+        undefined,
+        "ui5.model.signal.SignalModel",
+      );
+      return false;
+    }
+
     if (resolvedPath === "/") {
       this.setData(value as T);
       return true;
@@ -631,7 +652,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
         this._scheduleBulkSync();
       } else {
-        this.registry.set(resolvedPath, value);
+        // What the data holds now: a setter or a typed array can store another value
+        this.registry.set(resolvedPath, parent[propertyName]);
         this._invalidateParentSignals(resolvedPath);
         // Also for primitives: a binding may point below one (e.g. "/name/length")
         this.registry.invalidateChildren(resolvedPath, this._readPath);
@@ -686,7 +708,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const invalidatedParents = new Set<string>();
 
     for (const path of dirty) {
-      this.registry.refresh(path, this._readPath);
+      // Forced: a binding that wrote the path itself (setValue) shows that value, while the
+      // signal may already hold the one written since
+      this.registry.refresh(path, this._readPath, true);
       this.registry.invalidateChildren(path, this._readPath);
       if (this.registry.minDepth >= depthOf(path)) {
         continue; // no signal above this path
@@ -735,6 +759,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           (computedAncestor === resolvedPath
             ? "path is a computed signal (read-only)"
             : `ancestor "${computedAncestor}" is a computed signal (read-only)`),
+        undefined,
+        "ui5.model.signal.SignalModel",
+      );
+      return false;
+    }
+
+    if (this._leadsIntoPrototype(resolvedPath)) {
+      Log.warning(
+        `Cannot write at "${resolvedPath}": the path leads into a prototype`,
         undefined,
         "ui5.model.signal.SignalModel",
       );
@@ -791,6 +824,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         for (const binding of this._listBindings) binding._onMerge(resolvedPath);
         this._invalidateParentSignals(resolvedPath);
       }
+      // Objects the merge added are observed too
+      if (changed) this._observeData(existing);
 
       return true;
     }
@@ -897,11 +932,26 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
       }
     }
-    return (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
-      this,
-      forceUpdate,
-      asyncMode,
-    );
+    try {
+      return (ClientModel.prototype as unknown as ClientModelInternal).checkUpdate.call(
+        this,
+        forceUpdate,
+        asyncMode,
+      );
+    } catch (error) {
+      // A change handler threw, so the bindings after it were not checked. A computed that
+      // is not read again never notifies its watcher again: read those now.
+      for (const binding of asInternal(this).getBindings()) {
+        for (const pending of binding.watcher?.getPending() ?? []) {
+          try {
+            pending.get();
+          } catch {
+            // a failing computed throws again at its next read
+          }
+        }
+      }
+      throw error;
+    }
   }
 
   /** @since 0.1.0 */
@@ -941,6 +991,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     return computed || this.registry.getOrCreate(path, this._getObject(path), pin);
   }
 
+  /** Per computed: its dependencies, and the state signals among them that it keeps alive */
+  private readonly _deps = new Map<string, { all: string[]; pinned: string[] }>();
+
   /** @since 0.1.0 */
   createComputed(
     path: string,
@@ -950,12 +1003,21 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Ensure dependency signals exist before creating the computed.
     // Skip deps that already exist -- they may be computed signals from
     // a chained computed, and getOrCreate would shadow them with orphaned state signals.
-    for (const dep of deps) {
-      if (!this.registry.isComputed(dep)) {
-        this.registry.getOrCreate(dep, this._getObject(dep), true);
-      }
+    if (path === "/") {
+      // Reads and bindings below the root would not follow it
+      throw new TypeError('Cannot create computed signal at "/": the root holds the data');
     }
-    const result = this.registry.addComputed(path, deps, fn, this._readPath);
+    const pinned = deps.filter((dep) => !this.registry.isComputed(dep));
+    for (const dep of pinned) this.registry.getOrCreate(dep, this._getObject(dep), true);
+    let result: Signal.Computed<unknown>;
+    try {
+      result = this.registry.addComputed(path, deps, fn, this._readPath);
+    } catch (error) {
+      // Nothing has changed: the signals created for its dependencies go again
+      for (const dep of pinned) this.registry.unpin(dep);
+      throw error;
+    }
+    this._deps.set(path, { all: deps, pinned });
     // Bindings at this path or below it have to follow the new computed
     this._firePathResubscribe(path);
     return result;
@@ -967,6 +1029,25 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    */
   removeComputed(path: string): void {
     if (!this.registry.removeComputed(path, this._readPath)) return;
+    const own = this._deps.get(path);
+    this._deps.delete(path);
+    // The computeds that read exactly this path follow its state signal from now on, and
+    // keep it alive as they do with their other dependencies
+    for (const other of this._deps.values()) {
+      if (other.all.includes(path)) {
+        this.registry.getOrCreate(path, this._getObject(path), true);
+        other.pinned.push(path);
+      }
+    }
+    this.registry.release(path);
+    for (const dep of own?.pinned ?? []) this.registry.unpin(dep);
+    // What the registry keeps for the readers of a path goes with the last of them: here
+    // for the path itself, and for the paths this computed read
+    for (const start of [path, ...(own?.all ?? [])]) {
+      for (let at = start; at.length > 1; at = at.substring(0, at.lastIndexOf("/"))) {
+        if (this.registry.remembers(at) && !this._isRead(at)) this.registry.forget(at);
+      }
+    }
     // Bindings at the path or below it follow the data again
     this._firePathResubscribe(path);
   }
@@ -980,6 +1061,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   _syncSignals(path: string): void {
     this._mayHoldUndefined = true;
     this.registry.sync(path, this._readPath);
+  }
+
+  /** Whether a computed reads `path` or a path below it. */
+  private _isRead(path: string): boolean {
+    const prefix = path + "/";
+    for (const { all } of this._deps.values()) {
+      if (all.some((dep) => dep === path || dep.startsWith(prefix))) return true;
+    }
+    return false;
   }
 
   /** Used by binding classes to check whether a signal is registered directly at `path`. @internal */
@@ -1110,6 +1200,32 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       }
     }
     return null;
+  }
+
+  /**
+   * Whether a write at `path` would land in a prototype instead of in the data: through a
+   * `__proto__` segment, or through a `constructor` the data only inherits. JSONModel makes
+   * such a write.
+   */
+  private _leadsIntoPrototype(path: string): boolean {
+    // Runs on every write, and nearly every path ends here
+    if (!path.includes("__proto__") && !path.includes("constructor")) return false;
+    const parts = path.substring(1).split("/");
+    let node: unknown = this.oData;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === "__proto__") return true;
+      if ((typeof node !== "object" || node === null) && typeof node !== "function") return false;
+      // As the last segment it becomes a property of the data
+      if (
+        parts[i] === "constructor" &&
+        i < parts.length - 1 &&
+        !Object.hasOwn(node, "constructor")
+      ) {
+        return true;
+      }
+      node = (node as Record<string, unknown>)[parts[i]];
+    }
+    return false;
   }
 
   /**
@@ -1319,6 +1435,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         if (hasSignals) {
           this.registry.set(childPath, target[key]);
           this.registry.invalidateChildren(childPath, this._readPath);
+          // A merged length decides which elements exist
+          if (key === "length" && Array.isArray(target)) {
+            this.registry.invalidateChildren(basePath || "/", this._readPath);
+          }
         }
       }
     }
@@ -1374,6 +1494,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Abort all in-flight loadData requests (matching JSONModel's XHR abort behavior)
     this._abortController?.abort();
     this._abortController = null;
+    // No change event after destroy()
+    for (const binding of asInternal(this).getBindings()) cancelFlush(binding);
+    this._listBindings.clear();
     this.registry.destroy();
     super.destroy();
   }

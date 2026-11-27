@@ -82,8 +82,7 @@ export interface SignalModelOptions {
   /**
    * Reject setProperty writes to leaf properties that don't exist on the parent object.
    * When false (default): new properties are created on existing parents (JSONModel behavior).
-   * When true: writing to a nonexistent leaf returns false, and replacing an existing
-   * computed signal throws instead of warning.
+   * When true: writing to a nonexistent leaf returns false.
    */
   strictLeafCheck?: boolean;
   /**

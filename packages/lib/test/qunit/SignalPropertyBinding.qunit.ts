@@ -614,4 +614,242 @@ QUnit.module("SignalPropertyBinding", () => {
     assert.strictEqual(again.getValue(), 70, "a binding on a path that had a signal before");
     model.destroy();
   });
+
+  // From here on: one scenario per review finding, run in both models
+  type AnyModel = typeof JSONModel | typeof SignalModel;
+  type Data = Record<string, unknown>;
+  const later = (ms = 0): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+  const inBoth = async (
+    assert: Assert,
+    expected: string,
+    run: (Model: AnyModel) => Promise<unknown[]>,
+  ): Promise<void> => {
+    assert.strictEqual((await run(SignalModel)).join(), expected);
+    assert.strictEqual((await run(JSONModel)).join(), expected, "as JSONModel");
+  };
+
+  QUnit.test("refresh() of a binding fires one change event at most", async (assert) => {
+    await inBoth(assert, "1,1,1,0", async (Model) => {
+      const data: Data = { o: { a: 1 }, x: 1 };
+      const model = new Model(data);
+      const object = model.bindProperty("/o");
+      const suspended = model.bindProperty("/x");
+      const other = model.bindProperty("/x");
+      for (const each of [object, suspended, other]) each.initialize();
+      let events = 0;
+      let otherEvents = 0;
+      object.attachChange(() => events++);
+      suspended.attachChange(() => {});
+      other.attachChange(() => otherEvents++);
+      data.o = { a: 2 };
+      object.refresh();
+      await later();
+      const shown = [events];
+      // Another object with the same content is no change
+      data.o = { a: 2 };
+      object.refresh();
+      await later();
+      shown.push(events);
+      // A suspended binding does nothing, also not for the other bindings on its path
+      data.x = 2;
+      suspended.suspend();
+      suspended.refresh();
+      await later();
+      shown.push(other.getValue(), otherEvents);
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test(
+    "a list keyed by its row objects sees a merge made while suspended",
+    async (assert) => {
+      await inBoth(assert, "0,1", async (Model) => {
+        const data: Data = { rows: [{ n: 1 }, { n: 2 }] };
+        const model = new Model(data);
+        const list = model.bindList("/rows");
+        (
+          list as unknown as { enableExtendedChangeDetection(detect: boolean, key: string): void }
+        ).enableExtendedChangeDetection(false, "");
+        list.initialize();
+        list.getContexts(0, 10);
+        let events = 0;
+        list.attachChange(() => events++);
+        list.suspend();
+        model.setData({ rows: [{ n: 9 }] }, true);
+        await later();
+        const shown = [events];
+        list.resume();
+        await later();
+        shown.push(events);
+        model.destroy();
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test(
+    "an asynchronous write of the old value after setValue reaches the binding",
+    async (assert) => {
+      await inBoth(assert, "1,1,1", async (Model) => {
+        const data: Data = { x: 1 };
+        const model = new Model(data);
+        const binding = model.bindProperty("/x");
+        binding.initialize();
+        let events = 0;
+        binding.attachChange(() => events++);
+        binding.setValue(2);
+        model.setProperty("/x", 1, undefined, true);
+        await later(20);
+        const shown = [binding.getValue(), model.getProperty("/x"), events];
+        model.destroy();
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test(
+    "a propertyChange handler that writes an object to the path: one event",
+    async (assert) => {
+      await inBoth(assert, '1,1,{"a":3}', async (Model) => {
+        const data: Data = { o: { a: 1 } };
+        const model = new Model(data);
+        const binding = model.bindProperty("/o");
+        const other = model.bindProperty("/o");
+        binding.initialize();
+        other.initialize();
+        let events = 0;
+        let otherEvents = 0;
+        binding.attachChange(() => events++);
+        other.attachChange(() => otherEvents++);
+        model.attachEventOnce("propertyChange", () => model.setProperty("/o", { a: 3 }));
+        binding.setValue({ a: 2 });
+        await later();
+        const shown = [events, otherEvents, JSON.stringify(binding.getValue())];
+        model.destroy();
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test("observe: an object added by a merge is observed", async (assert) => {
+    await inBoth(assert, "2", async (Model) => {
+      const data: Data = { o: {} };
+      let model: JSONModel | SignalModel;
+      if (Model === SignalModel) {
+        model = new SignalModel(data, { observe: true });
+        (model as SignalModel).mergeProperty("/o", { child: { v: 1 } });
+      } else {
+        model = new JSONModel(data, true);
+        model.setData({ o: { child: { v: 1 } } }, true);
+      }
+      const binding = model.bindProperty("/o/child/v");
+      binding.initialize();
+      binding.attachChange(() => {});
+      (model.getData() as { o: { child: { v: number } } }).o.child.v = 2;
+      await later();
+      const shown = [binding.getValue()];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test(
+    "a merged length of a root array reaches the bindings of its elements",
+    async (assert) => {
+      await inBoth(assert, "undefined,1,[1]", async (Model) => {
+        const model = new Model([1, 2, 3] as unknown as Data);
+        const element = model.bindProperty("/2");
+        const length = model.bindProperty("/length");
+        for (const each of [element, length]) {
+          each.initialize();
+          each.attachChange(() => {});
+        }
+        model.setData({ length: 1 }, true);
+        await later();
+        const shown = [
+          String(element.getValue()),
+          length.getValue(),
+          JSON.stringify(model.getData()),
+        ];
+        model.destroy();
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test("no change event after destroy()", async (assert) => {
+    await inBoth(assert, "0", async (Model) => {
+      const data: Data = { x: 1, rows: [1] };
+      const model = new Model(data);
+      const binding = model.bindProperty("/x");
+      const list = model.bindList("/rows");
+      binding.initialize();
+      list.initialize();
+      let destroyed = false;
+      let after = 0;
+      binding.attachChange(() => destroyed && after++);
+      list.attachChange(() => destroyed && after++);
+      model.setProperty("/x", 2);
+      model.setProperty("/rows", [1, 2]);
+      model.destroy();
+      destroyed = true;
+      await later();
+      return [after];
+    });
+  });
+
+  QUnit.test("initialize() of a suspended binding fires no change event", async (assert) => {
+    await inBoth(assert, "0,0,0", async (Model) => {
+      const data: Data = { x: 1, rows: [1], tree: { nodes: [{}] } };
+      const model = new Model(data);
+      const shown: number[] = [];
+      for (const binding of [
+        model.bindProperty("/x"),
+        model.bindList("/rows"),
+        model.bindTree("/tree", undefined, [], { arrayNames: ["nodes"] }),
+      ]) {
+        let events = 0;
+        binding.attachChange(() => events++);
+        binding.suspend();
+        binding.initialize();
+        await later();
+        shown.push(events);
+      }
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test(
+    "bindings show what the data holds after a write, not what was written",
+    async (assert) => {
+      await inBoth(assert, "44,44,ABC", async (Model) => {
+        const data: Data = {
+          bytes: new Uint8Array(2),
+          o: {
+            get name(): string {
+              return (this as unknown as { stored: string }).stored;
+            },
+            set name(value: string) {
+              (this as unknown as { stored: string }).stored = value.toUpperCase();
+            },
+          },
+        };
+        const model = new Model(data);
+        const bindings = ["/bytes/0", "/bytes/0", "/o/name"].map((path) => {
+          const binding = model.bindProperty(path);
+          binding.initialize();
+          binding.attachChange(() => {});
+          return binding;
+        });
+        model.setProperty("/bytes/0", 300);
+        model.setProperty("/o/name", "abc");
+        await later();
+        const shown = bindings.map((binding) => binding.getValue());
+        model.destroy();
+        return shown;
+      });
+    },
+  );
 });

@@ -56,6 +56,14 @@ function flush(): void {
   const batch = pendingUpdates;
   pendingUpdates = new Map();
   flushing = batch;
+  try {
+    deliver(batch);
+  } finally {
+    flushing = null;
+  }
+}
+
+function deliver(batch: typeof pendingUpdates): void {
   // A binding destroyed or re-subscribed by an earlier update of this batch has been
   // removed from it by cancelFlush(): its queued signal is no longer the one it shows.
   for (const [b, s] of batch) {
@@ -89,7 +97,6 @@ function flush(): void {
       );
     }
   }
-  flushing = null;
 }
 
 /**

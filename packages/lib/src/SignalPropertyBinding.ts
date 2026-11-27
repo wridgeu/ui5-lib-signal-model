@@ -117,6 +117,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
         // The model can hold something else than was written, e.g. the length of an array
         if (!Object.is(self._getValue(), value)) {
           this.checkUpdate();
+          // A propertyChange handler wrote to the path: the check has covered that write
+          cancelFlush(this);
         }
       }
     }
@@ -130,7 +132,14 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
    * @param forceUpdate - Whether to fire a change event regardless of value comparison.
    */
   override refresh(forceUpdate?: boolean): void {
-    if (this._subscribedPath) this.oModel._syncSignals(this._subscribedPath);
+    // As JSONModel: a suspended binding does nothing unless forced
+    if (this.isSuspended() && !forceUpdate) return;
+    if (this._subscribedPath) {
+      this.oModel._syncSignals(this._subscribedPath);
+      // The check below covers this binding: a queued update would be a second event
+      cancelFlush(this);
+      this.watcher?.watch();
+    }
     super.refresh(forceUpdate);
   }
 
@@ -181,7 +190,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     if (!this._subscribedPath) {
       this.subscribe();
     }
-    this.checkUpdate(true);
+    // Not while suspended, as Binding.initialize
+    if (!asInternal(this).bSuspended) this.checkUpdate(true);
     return this;
   }
 

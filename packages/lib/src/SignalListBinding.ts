@@ -107,10 +107,15 @@ export default class SignalListBinding extends ClientListBinding {
     }
     this._merged = true;
     this._mergedNow = true;
-    // The merge has notified the bindings by now, so this runs after their update
-    queueMicrotask(() => {
-      this._mergedNow = false;
-    });
+    // Until the bindings were updated after the merge. Two hops, so that an update queued
+    // later in this task still runs first. A suspended list is checked at resume().
+    if (!internal.bSuspended) {
+      queueMicrotask(() =>
+        queueMicrotask(() => {
+          this._mergedNow = false;
+        }),
+      );
+    }
   }
 
   /**
@@ -238,6 +243,8 @@ export default class SignalListBinding extends ClientListBinding {
       this.update();
     }
 
+    this._mergedNow = false;
+
     const contexts = internal._getContexts(internal.iLastStartIndex, internal.iLastLength);
     if (internal.aLastContexts) {
       if (internal.aLastContexts.length !== contexts.length) {
@@ -267,7 +274,14 @@ export default class SignalListBinding extends ClientListBinding {
    * @param forceUpdate - Whether to fire a change event regardless of value comparison.
    */
   override refresh(forceUpdate?: boolean): void {
-    if (this._subscribedPath) this.oModel._syncSignals(this._subscribedPath);
+    // As JSONModel: a suspended binding does nothing unless forced
+    if (this.isSuspended() && !forceUpdate) return;
+    if (this._subscribedPath) {
+      this.oModel._syncSignals(this._subscribedPath);
+      // The check below covers this binding: a queued update would be a second event
+      cancelFlush(this);
+      this.watcher?.watch();
+    }
     super.refresh(forceUpdate);
   }
 
@@ -315,8 +329,10 @@ export default class SignalListBinding extends ClientListBinding {
     if (!this._subscribedPath) {
       this.subscribe();
     }
-    // Fire initial change so controls (e.g. sap.m.List) populate their aggregation
-    asInternal(this)._fireChange({ reason: ChangeReason.Change });
+    // Fire initial change so controls (e.g. sap.m.List) populate their aggregation; not
+    // while suspended, as Binding.initialize
+    const internal = asInternal(this);
+    if (!internal.bSuspended) internal._fireChange({ reason: ChangeReason.Change });
     return this;
   }
 
