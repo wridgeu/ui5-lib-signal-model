@@ -1363,6 +1363,26 @@ QUnit.module(
       await tick();
       assert.strictEqual(fired, 1, "refresh(true) fires it");
       model.destroy();
+
+      // Data changed without the model
+      const shown = async (Model: typeof JSONModel | typeof SignalModel): Promise<string> => {
+        const direct = new Model({ items: [1], busy: true });
+        const items = direct.bindList("/items");
+        items.attachChange(() => {});
+        items.getContexts(0, 10);
+        const rows: number[] = [];
+        (direct.getData() as { items: number[] }).items.push(2);
+        direct.setProperty("/busy", false);
+        await tick();
+        rows.push(items.getContexts(0, 10).length);
+        direct.refresh();
+        await tick();
+        rows.push(items.getContexts(0, 10).length);
+        direct.destroy();
+        return rows.join();
+      };
+      assert.strictEqual(await shown(JSONModel), "2,2", "JSONModel: found by any write");
+      assert.strictEqual(await shown(SignalModel), "1,2", "SignalModel: found by refresh()");
     });
 
     QUnit.test("a merge with keys named like parts of the prototype chain", (assert) => {

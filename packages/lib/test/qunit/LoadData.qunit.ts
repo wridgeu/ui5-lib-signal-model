@@ -573,12 +573,14 @@ QUnit.module("loadData", () => {
       return model;
     };
     model.loadData(SAMPLE_URL);
-    model.loadData(SAMPLE_URL);
+    let settled = false;
+    void model.loadData(SAMPLE_URL)?.finally(() => (settled = true));
     window.fetch = originalFetch;
 
     setTimeout(() => {
       model.destroy(); // aborts the first request, which releases the second
       setTimeout(() => {
+        assert.notOk(settled, "its promise stays pending, as JSONModel's after destroy");
         const data = model.getData() as Record<string, unknown> | undefined;
         assert.notStrictEqual(data?.name, "late", "queued response was not applied");
         assert.strictEqual(failedFired, 0, "aborted request fires no requestFailed after destroy");
@@ -768,4 +770,68 @@ QUnit.module("loadData", () => {
     );
     model.destroy();
   });
+
+  QUnit.test("the method in lower case and the cache-buster, as jQuery.ajax", async (assert) => {
+    const requests: string[] = [];
+    const originalFetch = window.fetch;
+    window.fetch = (input, init) => {
+      requests.push(`${init?.method} ${String(input)} ${String(init?.body)}`);
+      return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+    };
+    const model = new SignalModel<Record<string, unknown>>();
+    try {
+      await model.loadData(SAMPLE_URL, { q: "1" }, true, "get");
+      await model.loadData(SAMPLE_URL, { q: "1" }, true, "post", false, false);
+    } finally {
+      window.fetch = originalFetch;
+    }
+    assert.deepEqual(requests, [`GET ${SAMPLE_URL}?q=1 undefined`, `POST ${SAMPLE_URL} q=1`]);
+    model.destroy();
+  });
+
+  QUnit.test("a load that fails while an earlier one is loading", async (assert) => {
+    let unhandled = 0;
+    const onUnhandled = (): void => {
+      unhandled++;
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    const originalFetch = window.fetch;
+    let release = (): void => {};
+    window.fetch = (input, init) =>
+      String(input) === SAMPLE_URL
+        ? new Promise<void>((resolve) => (release = resolve)).then(() => originalFetch(input, init))
+        : originalFetch(input, init);
+    const model = new SignalModel<Record<string, unknown>>();
+    void model.loadData(SAMPLE_URL);
+    void model.loadData(BAD_URL);
+    window.fetch = originalFetch;
+    // The second request has failed by now, the first is still loading
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    release();
+    await model.dataLoaded();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.removeEventListener("unhandledrejection", onUnhandled);
+    assert.strictEqual(unhandled, 0, "no unhandled rejection");
+    assert.strictEqual(model.getProperty("/name"), "Alice", "the first one applied");
+    model.destroy();
+  });
+
+  QUnit.test(
+    "the promise of a load stays pending after destroy, as JSONModel's",
+    async (assert) => {
+      const results: string[] = [];
+      for (const Model of [JSONModel, SignalModel]) {
+        const model = new Model();
+        let settled = "pending";
+        void (model.loadData(SAMPLE_URL) as Promise<unknown>).then(
+          () => (settled = "resolved"),
+          () => (settled = "rejected"),
+        );
+        model.destroy();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        results.push(settled);
+      }
+      assert.deepEqual(results, ["pending", "pending"]);
+    },
+  );
 });

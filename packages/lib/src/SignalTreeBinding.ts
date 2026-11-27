@@ -66,7 +66,7 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;
 
-    const signal = this.oModel.getSignal(resolvedPath);
+    const signal = this.oModel._getSignal(resolvedPath);
 
     // The model tells the bindings on a state signal itself; only a computed needs a watcher
     if (!(signal instanceof Signal.State)) {

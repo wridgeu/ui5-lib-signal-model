@@ -64,6 +64,13 @@ export default class SignalRegistry {
    */
   private readonly descendants = new Map<string, string[]>();
   /**
+   * State signals that stay without a binding: someone outside holds them (getSignal) or a
+   * computed reads them. Any other state signal goes with its last binding.
+   */
+  private readonly pinned = new Set<string>();
+  /** Paths of dropped state signals that the index still lists, until the next sweep. */
+  private readonly dropped = new Set<string>();
+  /**
    * Depth of the shallowest state signal ("/" is 0, "/a" is 1, "/a/b" is 2). A write at
    * this depth or above has no signal among its ancestors, so the ancestor walk is skipped.
    */
@@ -98,6 +105,24 @@ export default class SignalRegistry {
       if (index !== -1) current.splice(index, 1);
       if (current.length === 0) this.subscribers.delete(path);
     }
+    if (!this.subscribers.has(path) && !this.pinned.has(path)) this.drop(path);
+  }
+
+  /** Removes the state signal of `path`. Its index entries go with a later sweep. */
+  private drop(path: string): void {
+    if (!this.signals.delete(path)) return;
+    this.dropped.add(path);
+    // Amortised: a sweep visits every index entry, so only once half of them are stale
+    if (this.dropped.size <= this.signals.size + 64) return;
+    for (const [ancestor, below] of this.descendants) {
+      const kept = below.filter((entry) => !this.dropped.has(entry));
+      if (kept.length === 0) {
+        this.descendants.delete(ancestor);
+      } else if (kept.length < below.length) {
+        this.descendants.set(ancestor, kept);
+      }
+    }
+    this.dropped.clear();
   }
 
   /** Sets a state signal and, with `notify`, queues the update of the bindings on its path. */
@@ -123,17 +148,22 @@ export default class SignalRegistry {
   /**
    * @param path - Property path to look up or create.
    * @param initialValue - Value used when creating a new signal.
+   * @param pin - Whether the signal stays when no binding is on its path.
    * @returns The existing or newly created state signal.
    * @since 0.1.0
    */
-  getOrCreate(path: string, initialValue: unknown): Signal.State<unknown> {
+  getOrCreate(path: string, initialValue: unknown, pin = false): Signal.State<unknown> {
+    if (pin) this.pinned.add(path);
     let signal = this.signals.get(path);
     if (!signal) {
       signal = new PathState(initialValue, path, this.writeThrough);
       this.signals.set(path, signal);
+      // Dropped and not swept yet: the index still lists the path
+      const indexed = this.dropped.delete(path);
       let depth = path === "/" ? 0 : 1;
       for (let idx = path.lastIndexOf("/"); idx > 0; idx = path.lastIndexOf("/", idx - 1)) {
         depth++;
+        if (indexed) continue;
         const ancestor = path.substring(0, idx);
         const below = this.descendants.get(ancestor);
         if (below) {
@@ -156,6 +186,11 @@ export default class SignalRegistry {
    */
   get(path: string): Signal.State<unknown> | Signal.Computed<unknown> | undefined {
     return this.computeds.get(path) ?? this.signals.get(path);
+  }
+
+  /** @returns The computed at exactly `path`, if there is one. */
+  getComputed(path: string): Signal.Computed<unknown> | undefined {
+    return this.computeds.get(path);
   }
 
   /**
@@ -192,7 +227,7 @@ export default class SignalRegistry {
     const below = this.descendants.get(parentPath);
     if (below) {
       for (const path of below) {
-        this.set(path, resolver(path));
+        this.refresh(path, resolver);
       }
     }
   }
@@ -221,20 +256,11 @@ export default class SignalRegistry {
     fn: (...args: unknown[]) => unknown,
     read?: ValueResolver,
   ): Signal.Computed<unknown> {
-    if (this.signals.has(path)) {
-      if (!this.released.has(path)) {
-        throw new TypeError(
-          `Cannot create computed signal at "${path}": path already holds raw data`,
-        );
-      }
-      // The state signal the bindings went to when the computed was removed
-      this.signals.delete(path);
-      for (let idx = path.lastIndexOf("/"); idx > 0; idx = path.lastIndexOf("/", idx - 1)) {
-        const below = this.descendants.get(path.substring(0, idx));
-        below?.splice(below.indexOf(path), 1);
-      }
+    if (this.signals.has(path) && !this.released.has(path)) {
+      throw new TypeError(
+        `Cannot create computed signal at "${path}": path already holds raw data`,
+      );
     }
-    this.released.delete(path);
 
     if (this.computeds.has(path)) {
       throw new TypeError(
@@ -251,8 +277,13 @@ export default class SignalRegistry {
     // Without this, a Watcher attached to an unevaluated computed cannot
     // detect when upstream signals change (the computed has no subscriptions
     // to its dependencies until its first .get() call).
+    // If it throws, nothing has changed.
     computed.get();
 
+    // The state signal the bindings went to when the computed was removed
+    this.pinned.delete(path);
+    this.drop(path);
+    this.released.delete(path);
     this.computeds.set(path, computed);
     this.signalReplaced(path, read);
     return computed;
@@ -265,6 +296,9 @@ export default class SignalRegistry {
   removeComputed(path: string, read?: ValueResolver): boolean {
     if (!this.computeds.delete(path)) return false;
     this.released.add(path);
+    // What a computed that depends on the path follows from now on. Created first: such a
+    // computed may run again while the signals below are set.
+    if (this.replaced.has(path)) this.getOrCreate(path, read?.(path), true);
     this.signalReplaced(path, read);
     return true;
   }
@@ -338,6 +372,8 @@ export default class SignalRegistry {
     this.released.clear();
     this.replaced.clear();
     this.descendants.clear();
+    this.pinned.clear();
+    this.dropped.clear();
     this.subscribers.clear();
     this.minDepth = Infinity;
   }

@@ -180,7 +180,7 @@ model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => 
 
 ### Computed Signal Immutability
 
-Computed signals are **define-once**: `createComputed` throws a `TypeError` on a path that already holds a computed, and on a path that was already read as plain data through a binding or `getSignal` on exactly that path. A binding on a path below it (`/user/name` before `createComputed("/user", …)`) is fine and follows the computed. To redefine a computed, call `removeComputed` first; a path that had a computed can get a new one at any time, also while bindings are on it.
+Computed signals are **define-once**: `createComputed` throws a `TypeError` on a path that already holds a computed, and on a path that was already read as plain data on exactly that path: through a binding, through `getSignal`, or as a dependency of another computed. So create a computed before the computeds that depend on it. A binding on a path below it (`/user/name` before `createComputed("/user", …)`) is fine and follows the computed. To redefine a computed, call `removeComputed` first; a path that had a computed can get a new one at any time, also while bindings are on it.
 
 ```typescript
 model.createComputed("/total", ["/price", "/tax"], (p, t) => p * (1 + t));
@@ -203,7 +203,7 @@ An error thrown by a computed's function is not turned into a value:
 
 - `getProperty`, `getObject` and a new binding on the path rethrow the error until a dependency changes and the function succeeds again. This is how `Signal.Computed` behaves, and how JSONModel behaves when a formatter throws.
 - A binding that already shows a value keeps it. The error is logged, and other bindings update as usual.
-- `createComputed` runs the function once. If that first run throws, `createComputed` throws and no computed is registered, so the function must handle the data the model holds at that moment (for example before `loadData` has finished).
+- `createComputed` runs the function once. If that first run throws, `createComputed` throws and nothing changes (after a `removeComputed`, the bindings keep following the data), so the function must handle the data the model holds at that moment (for example before `loadData` has finished).
 
 ### Creating, Removing and Redefining While Bound
 
@@ -245,9 +245,9 @@ model.createComputed("/greeting", ["/currentUser/name"], (name) => `Hello ${name
 // /greeting follows /currentUser, also after /currentUser is redefined or removed.
 ```
 
-One limit: **a binding on exactly the path before the first `createComputed`** makes that call throw (define-once, see above). Create the computed before the view binds to it, for example in `onInit` or in the component.
+One limit: **a binding on exactly the path, or a computed that depends on it, before the first `createComputed`** makes that call throw (define-once, see above). Create the computed before the view binds to it and before the computeds that depend on it, for example in `onInit` or in the component.
 
-**Cost.** Per `createComputed` or `removeComputed`, one pass over the paths that have bindings and over the state signals below the path. A computed that no other computed depends on costs nothing extra; one that others depend on (itself or a path inside it) gets one small signal that tells them when it was replaced.
+**Cost.** Per `createComputed` or `removeComputed`, one pass over the paths that have bindings and over the state signals below the path. A computed that no other computed depends on costs nothing extra, and nothing but its path is kept after `removeComputed`; one that others depend on (itself or a path inside it) gets one small signal that tells them when it was replaced.
 
 ### Computed Sub-Path Traversal
 
@@ -287,7 +287,7 @@ Why that is, what it costs and how to split a computed: [Computed Signals: Re-Ev
 
 ## Configuration Modes
 
-SignalModel defaults to **full JSONModel parity**: `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Three options independently extend this behavior, each controlling a different level of the path:
+SignalModel defaults to **full JSONModel parity**: `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Three options extend this behavior. Two of them control a level of the path each; the third (`observe`) is JSONModel's `bObserve`:
 
 ```
 model.setProperty("/a/b/c", value)
@@ -311,12 +311,14 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Four differences remain on purpose:
+The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Six differences remain on purpose:
 
 - **A merge works on the data in place.** The data after `setData(data, true)` or `mergeProperty` equals JSONModel's, but the existing objects are changed instead of rebuilt: `getData()` stays the same object. Data you changed directly needs `refresh()` before a merge drops its `undefined` keys.
 - **Bindings update in a microtask**, not inside `setProperty`. A control shows the new value one microtask later, and an error in a formatter is logged instead of thrown out of `setProperty`.
 - **A binding on an object or array fires for every write below it.** A formatter that reads from the object always shows current content; JSONModel can keep the old text.
 - **A list binding keyed by the row object** does not fire after a merge that changed nothing. JSONModel's does, because its merge replaces every row object.
+- **Data changed directly in `getData()` needs `refresh()`.** JSONModel checks all bindings on every write and so finds such a change with the next write anywhere; SignalModel only looks at the written path.
+- **`loadData` uses `fetch`**, not `jQuery.ajax`: `MockServer`, a fake `XMLHttpRequest` and `jQuery.ajaxSetup` do not see the request.
 
 Details, the reason for each and what to do about it: [Differences from JSONModel](https://github.com/wridgeu/ui5-lib-signal-model/blob/main/docs/jsonmodel-differences.md).
 
@@ -338,7 +340,7 @@ model.mergeProperty("/customer", { age: 30 });
 
 `mergeProperty` only fires signals for paths that actually changed (here, only `/customer/age`). Bindings to `/customer/name` and `/customer/city` are not notified. The exception is data that cannot be written to, like a frozen object: the data is then rebuilt and every binding checks.
 
-`setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally. Like that merge, `mergeProperty` merges only two arrays or two plain objects. Any other combination (a `Date`, a class instance, an array into an object) replaces the value, as `setProperty` does.
+`setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally. Below the root, `mergeProperty` merges only two arrays or two plain objects, like that merge does with the values inside the data. Any other combination (a `Date`, a class instance, an array into an object) replaces the value, as `setProperty` does.
 
 A sorted, filtered or grouped list sorts and filters again after a merge that changed one of its rows, as it does with JSONModel. A plain `setProperty` on a row does not make it sort again, in either model; call `refresh()` on the list binding for that.
 
@@ -403,6 +405,11 @@ signal.set(1); // on a state signal: the same as model.setProperty("/path", 1); 
 model.destroy(); // aborts in-flight requests, clears all subscriptions
 ```
 
+Two things to know about a signal you keep:
+
+- Below a computed, `getSignal` returns that computed: `getSignal("/user/name")` with a computed at `/user` is the signal of the whole `/user` value.
+- A state signal is the signal of plain data. If a computed is created at its path or above it later, the signal no longer follows; call `getSignal` again.
+
 ### Binding Classes
 
 | Class                   | Extends                 | Purpose                                              |
@@ -422,7 +429,7 @@ model.destroy(); // aborts in-flight requests, clears all subscriptions
 | **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                                              |
 | **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                                                         |
 | **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)                                           |
-| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                                                         |
+| **Two-way binding**            | Supported                                                         | Supported (same behavior)                                                                              |
 | **Declarative XML binding**    | Supported                                                         | Supported (full lifecycle: one-way, two-way, list, tree)                                               |
 | **Named models**               | `{modelName>/path}`                                               | Identical                                                                                              |
 | **Binding modes**              | OneWay, TwoWay, OneTime                                           | Same (inherits from ClientModel)                                                                       |

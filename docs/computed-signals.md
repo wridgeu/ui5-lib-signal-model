@@ -21,7 +21,7 @@ model.createComputed("/computedRows", ["/sourceRows"], (rows) =>
 
 ## Why Computed Signals Are Atomic
 
-The [TC39 Signals proposal](https://github.com/tc39/proposal-signals) explicitly defines `Signal.Computed` as a single, atomic reactive node. A computed produces one value, compares it as a whole via `Object.is`, and notifies all downstream consumers uniformly. There is no concept of sub-path or partial notification in the specification.
+The [TC39 Signals proposal](https://github.com/tc39/proposal-signals) explicitly defines `Signal.Computed` as a single, atomic reactive node. A computed produces one value, compares it as a whole (by default with `Object.is`; SignalModel's computeds count every object or array as changed, see below), and notifies all downstream consumers uniformly. There is no concept of sub-path or partial notification in the specification.
 
 This is a deliberate design choice shared across the signals ecosystem:
 

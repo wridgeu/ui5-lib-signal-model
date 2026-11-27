@@ -132,7 +132,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
     if (!resolvedPath) return;
 
-    const signal = this.oModel.getSignal(resolvedPath);
+    const signal = this.oModel._getSignal(resolvedPath);
     const self = asInternal(this);
     const propName = self.sPath.substring(self.sPath.lastIndexOf("/") + 1);
     this._isDirectSignal =

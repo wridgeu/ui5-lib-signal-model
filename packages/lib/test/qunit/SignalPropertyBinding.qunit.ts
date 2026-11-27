@@ -1,3 +1,4 @@
+import JSONModel from "sap/ui/model/json/JSONModel";
 import SignalModel from "ui5/model/signal/SignalModel";
 
 QUnit.module("SignalPropertyBinding", () => {
@@ -489,6 +490,82 @@ QUnit.module("SignalPropertyBinding", () => {
     binding.checkUpdate(true);
     assert.strictEqual(changeCount, 1, "forced update fires while suspended");
     assert.strictEqual(binding.getValue(), "Bob", "forced update refreshes the value");
+    model.destroy();
+  });
+
+  QUnit.test("a write back in the task of a two-way write reaches the binding", async (assert) => {
+    const run = async (Model: typeof JSONModel | typeof SignalModel): Promise<string> => {
+      const model = new Model({ x: 1, form: { y: 1 } });
+      const results: unknown[] = [];
+      for (const [path, reset] of [
+        ["/x", (): unknown => model.setProperty("/x", 1)],
+        ["/form/y", (): unknown => model.setProperty("/form", { y: 1 })],
+        ["/form/y", (): unknown => model.setData({ form: { y: 1 } }, true)],
+      ] as const) {
+        const binding = model.bindProperty(path);
+        let fired = 0;
+        binding.attachChange(() => fired++);
+        binding.initialize();
+        fired = 0;
+        // What a control does with user input, and a handler that takes it back
+        binding.setValue(2);
+        reset();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        results.push(binding.getValue(), fired);
+        binding.destroy();
+      }
+      model.destroy();
+      return results.join();
+    };
+    assert.strictEqual(
+      await run(SignalModel),
+      "1,1,1,1,1,1",
+      "the binding shows the model's value",
+    );
+    assert.strictEqual(await run(SignalModel), await run(JSONModel), "as JSONModel");
+  });
+
+  QUnit.test("a state signal goes with its last binding", async (assert) => {
+    const model = new SignalModel({ rows: Array.from({ length: 2000 }, (_, n) => ({ n })) });
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    const registry = (model as any).registry as {
+      signals: Map<string, unknown>;
+      descendants: Map<string, string[]>;
+    };
+    const kept = model.getSignal("/rows/0/n");
+    model.createComputed("/sum", ["/rows/1/n"], (n) => n);
+    // A table that is scrolled: the same bindings, on other rows each time
+    const first = model.bindProperty("/rows/0/n");
+    const second = model.bindProperty("/rows/0/n");
+    model.bindProperty("/rows/1/n").destroy();
+    // Dropped and created again before the index is swept
+    model.bindProperty("/rows/3/n").destroy();
+    const live = model.bindProperty("/rows/3/n");
+    for (let row = 4; row < 2000; row++) {
+      const binding = model.bindProperty(`/rows/${row}/n`);
+      assert.strictEqual(binding.getValue(), row);
+      binding.destroy();
+    }
+    first.destroy();
+    assert.ok(registry.signals.has("/rows/0/n"), "not while another binding is on the path");
+    second.destroy();
+    model.setProperty("/rows/3", { n: 33 });
+    assert.strictEqual(live.getValue(), 3, "not yet");
+    await Promise.resolve();
+    assert.strictEqual(live.getValue(), 33, "a write above a binding that was there all along");
+    live.destroy();
+    assert.deepEqual(
+      [...registry.signals.keys()],
+      ["/rows/0/n", "/rows/1/n"],
+      "left: the signal handed out by getSignal and the dependency of a computed",
+    );
+    assert.ok((registry.descendants.get("/rows") ?? []).length < 200, "the path index is swept");
+    model.setProperty("/rows/0/n", 5);
+    assert.strictEqual(kept.get(), 5, "the signal handed out still follows the model");
+    const again = model.bindProperty("/rows/7/n");
+    model.setProperty("/rows/7", { n: 70 });
+    await Promise.resolve();
+    assert.strictEqual(again.getValue(), 70, "a binding on a path that had a signal before");
     model.destroy();
   });
 });

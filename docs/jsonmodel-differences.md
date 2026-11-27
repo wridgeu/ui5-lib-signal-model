@@ -1,13 +1,15 @@
 # Differences from JSONModel
 
-SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Four differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows all four live, next to a JSONModel.
+SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Six differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first four live, next to a JSONModel.
 
-| Difference                                                                                      | Who notices                                                                                                      |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [A merge works on the data in place](#a-merge-works-on-the-data-in-place)                       | Code that keeps a reference to `getData()` or to an object it passed in, or changes data directly before a merge |
-| [Bindings update in a microtask](#bindings-update-in-a-microtask)                               | Code that reads a control right after a write, or catches a formatter's error around `setProperty`               |
-| [Change events for objects](#change-events-for-objects)                                         | Change handlers and formatters on a binding to an object or array                                                |
-| [Change events of list bindings around a merge](#change-events-of-list-bindings-around-a-merge) | List bindings that use the row object itself as change detection key                                             |
+| Difference                                                                                        | Who notices                                                                                                      |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| [A merge works on the data in place](#a-merge-works-on-the-data-in-place)                         | Code that keeps a reference to `getData()` or to an object it passed in, or changes data directly before a merge |
+| [Bindings update in a microtask](#bindings-update-in-a-microtask)                                 | Code that reads a control right after a write, or catches a formatter's error around `setProperty`               |
+| [Change events for objects](#change-events-for-objects)                                           | Change handlers and formatters on a binding to an object or array                                                |
+| [Change events of list bindings around a merge](#change-events-of-list-bindings-around-a-merge)   | List bindings that use the row object itself as change detection key                                             |
+| [Data changed without the model needs `refresh()`](#data-changed-without-the-model-needs-refresh) | Code that changes `getData()` directly and relies on a later write to update the bindings                        |
+| [`loadData` uses `fetch`](#loaddata-uses-fetch)                                                   | Tests and apps that intercept `XMLHttpRequest` or configure `jQuery.ajax`                                        |
 
 ## How parity is tested
 
@@ -19,14 +21,14 @@ After `setData(data, true)` or `mergeProperty` the data equals JSONModel's: same
 
 - `getData()` returns the same object as before the merge.
 - An object you passed to `setData` or `setProperty` earlier is merged into.
-- Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or a frozen object anywhere in the data (found when the merge looks for `undefined`, or when it has to write to it). `getData()` is a new object then, and every binding checks its value, so bindings on objects fire.
-- SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 30 µs otherwise). So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
+- Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or a frozen object. `setData(data, true)` finds a frozen object anywhere in the data when it looks for `undefined`; `mergeProperty` rebuilds only when it has to write to one. `getData()` is a new object then, and every binding checks its value, so bindings on objects fire.
+- SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 30 µs otherwise). `mergeProperty` looks only below its path and cannot clear that state for the whole model, so it passes over the data below its path on each call until a `setData(data, true)` has run. So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
 
-**What to do.** Nothing new. After a direct change to `getData()` you call `refresh()` in JSONModel too, or its bindings stay stale; the same call covers this. Or write through the model (`setProperty`, `mergeProperty`), or use the `observe` option, which makes an assignment to an existing property count as a write.
+**What to do.** Call `refresh()` after a direct change to `getData()` (see [below](#data-changed-without-the-model-needs-refresh)); the same call covers this. Or write through the model (`setProperty`, `mergeProperty`), or use the `observe` option, which makes an assignment to an existing property count as a write.
 
 ```js
 model.getData().draft = undefined; // direct change
-model.refresh(); // needed for the bindings in both models; also lets the next merge drop `draft`
+model.refresh(); // updates the bindings; also lets the next merge drop `draft`
 model.setData({ saved: true }, true);
 ```
 
@@ -80,3 +82,33 @@ JSONModel's event after a merge that changed nothing is a side effect of rebuild
 model.setData(partial, true);
 list.getBinding("items").refresh(true); // fires a change event also when no row changed
 ```
+
+## Data changed without the model needs `refresh()`
+
+JSONModel checks every binding of the model on every write. A change made directly to `getData()` is therefore picked up by the next `setProperty` or `setData` anywhere in the model, without a `refresh()`. SignalModel tells only the bindings of the written path, the paths above it and the paths below it; that is where its speed comes from. A direct change stays unseen until `refresh()`, or until a write that covers its path.
+
+```js
+model.getData().items.push(newItem); // direct change
+model.setProperty("/busy", false);
+// JSONModel: the list shows the new item. SignalModel: it does not.
+```
+
+The same holds for a binding's own `refresh()`: it updates that binding, not the model's view of the data, so a later write of the old value to that path is no change for the model.
+
+**What to do.** Write through the model (`setProperty("/items", [...items, newItem])`), or call `model.refresh()` after the direct change. With the `observe` option an assignment to an existing property counts as a write; a `push` or a new key does not, as in JSONModel.
+
+```js
+model.getData().items.push(newItem);
+model.refresh(); // both models: every binding checks
+```
+
+## `loadData` uses `fetch`
+
+JSONModel loads with `jQuery.ajax`, SignalModel with `fetch` (a synchronous `loadData(url, params, false)` uses `XMLHttpRequest` in both). The parameters, events, error objects and log entries are the same. What differs is what can intercept the request:
+
+- `sap.ui.core.util.MockServer` and sinon's fake `XMLHttpRequest` do not see it.
+- `jQuery.ajaxSetup`, prefilters and global ajax events do not apply.
+- The `X-Requested-With: XMLHttpRequest` header is not sent, and `Accept` is `application/json` unless you pass your own.
+- A `304 Not Modified` that reaches the page (a request with your own `If-None-Match`) is an error; `jQuery.ajax` treats it as a success without data.
+
+**What to do.** In tests, stub `window.fetch` or serve the file. For a mocked OData-like backend, mock at the network level (a service worker or the dev server) or load the data yourself and pass it to `setData`. Send headers you need with the `headers` parameter of `loadData`.

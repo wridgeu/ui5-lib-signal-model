@@ -226,7 +226,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (asInternal(this).bDestroyed) {
       return isAsync ? Promise.resolve() : undefined;
     }
-    const method = type || "GET";
+    // Upper case, as jQuery.ajax does
+    const method = (type || "GET").toUpperCase();
     let fullURL = url;
     // Fall back to model-level cache setting (set via forceNoCache), matching JSONModel.
     const effectiveCache = cache === undefined ? asInternal(this).bCache : cache;
@@ -240,7 +241,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       fullURL += (url.includes("?") ? "&" : "?") + paramString;
     }
 
-    if (effectiveCache === false) {
+    // Only where a browser would cache, as jQuery.ajax
+    if (effectiveCache === false && (method === "GET" || method === "HEAD")) {
       fullURL += (fullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
     }
 
@@ -382,17 +384,23 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         throw noResponse(error.name === "AbortError" ? "abort" : "error");
       });
 
+    // It may fail while an earlier request is still loading: handled below, once the chain
+    // gets here
+    importPromise.catch(() => {});
+
+    // After destroy() the promise stays pending, as JSONModel's
+    const never = new Promise<undefined>(() => {});
     // Chain sequentially: wait for previous imports, then process this one.
     // Matches JSONModel's pSequentialImportCompleted pattern.
     const returnPromise = this._importChain.then(() =>
       importPromise.then(
         (data) => {
-          if (!asInternal(this).bDestroyed) succeed(data);
+          if (asInternal(this).bDestroyed) return never;
+          succeed(data);
+          return undefined;
         },
         (errorInfo: LoadFailure) => {
-          if (asInternal(this).bDestroyed) {
-            return;
-          }
+          if (asInternal(this).bDestroyed) return never;
           fail(errorInfo);
           return Promise.reject(errorInfo);
         },
@@ -474,6 +482,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   setData(data: Partial<T>, merge: true): void;
   setData(data: T | Partial<T>, merge?: boolean): void {
+    this._syncPending();
     if (merge) {
       // Nothing to merge in, but JSONModel still rebuilds its data: see _dropUndefined().
       // Of a string, the characters are merged in, as there.
@@ -585,6 +594,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const objectPath = resolvedPath.substring(0, lastSlash || 1);
     const propertyName = resolvedPath.substring(lastSlash + 1);
 
+    if (!asyncUpdate) this._syncPending();
     let parent = this._getObject(objectPath) as Record<string, unknown> | undefined;
 
     if (
@@ -655,37 +665,47 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this._bulkSyncTimer === null) {
       this._bulkSyncTimer = setTimeout(() => {
         this._bulkSyncTimer = null;
-        if (asInternal(this).bDestroyed || this._pendingAsyncPaths.size === 0) {
+        if (asInternal(this).bDestroyed) {
           this._pendingAsyncPaths.clear();
           return;
         }
-        const dirty = this._pendingAsyncPaths;
-        this._pendingAsyncPaths = new Set();
-        const invalidatedParents = new Set<string>();
-
-        for (const path of dirty) {
-          this.registry.refresh(path, this._readPath);
-          this.registry.invalidateChildren(path, this._readPath);
-          if (this.registry.minDepth >= depthOf(path)) {
-            continue; // no signal above this path
-          }
-          // Deduplicated ancestor invalidation
-          let idx = path.lastIndexOf("/");
-          while (idx > 0) {
-            const parentPath = path.substring(0, idx);
-            if (invalidatedParents.has(parentPath)) {
-              break;
-            }
-            invalidatedParents.add(parentPath);
-            this.registry.refresh(parentPath, this._readPath);
-            idx = path.lastIndexOf("/", idx - 1);
-          }
-          if (!invalidatedParents.has("/")) {
-            invalidatedParents.add("/");
-            this.registry.refresh("/", this._readPath);
-          }
-        }
+        this._syncPending();
       }, 0);
+    }
+  }
+
+  /**
+   * Brings the signals in line with the asynchronous writes so far. Also before a
+   * synchronous write: it compares with the signals, and a signal that lags behind would
+   * hide a write back to the value from before the asynchronous one.
+   */
+  private _syncPending(): void {
+    if (this._pendingAsyncPaths.size === 0) return;
+    const dirty = this._pendingAsyncPaths;
+    this._pendingAsyncPaths = new Set();
+    const invalidatedParents = new Set<string>();
+
+    for (const path of dirty) {
+      this.registry.refresh(path, this._readPath);
+      this.registry.invalidateChildren(path, this._readPath);
+      if (this.registry.minDepth >= depthOf(path)) {
+        continue; // no signal above this path
+      }
+      // Deduplicated ancestor invalidation
+      let idx = path.lastIndexOf("/");
+      while (idx > 0) {
+        const parentPath = path.substring(0, idx);
+        if (invalidatedParents.has(parentPath)) {
+          break;
+        }
+        invalidatedParents.add(parentPath);
+        this.registry.refresh(parentPath, this._readPath);
+        idx = path.lastIndexOf("/", idx - 1);
+      }
+      if (!invalidatedParents.has("/")) {
+        invalidatedParents.add("/");
+        this.registry.refresh("/", this._readPath);
+      }
     }
   }
 
@@ -721,6 +741,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       return false;
     }
 
+    this._syncPending();
     const existing = this._getObject(resolvedPath);
     // Like a merge with setData: only two arrays or two plain objects are merged
     if (
@@ -747,17 +768,23 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         this._writing = false;
       }
       // Data that cannot be written to, like a frozen object: rebuild all data, as a merge
-      // with setData does, and merge into that
+      // with setData does, and put a merged copy at the path. A copy, since the rebuild
+      // keeps a class instance above the path as it is, with what is frozen inside.
       if (frozen) {
         this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData) as T;
-        this._mergeInPlace(
-          this._getObject(resolvedPath) as Record<string, unknown>,
-          value as Record<string, unknown>,
-          resolvedPath,
-        );
-        if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
-        for (const binding of this._listBindings) binding._onMerge("/");
-        this._observeData();
+        const lastSlash = resolvedPath.lastIndexOf("/");
+        const parent = this._getObject(resolvedPath.substring(0, lastSlash || 1));
+        try {
+          (parent as Record<string, unknown>)[resolvedPath.substring(lastSlash + 1)] = deepExtend(
+            Array.isArray(existing) ? [] : {},
+            this._getObject(resolvedPath) as object,
+            value as object,
+          );
+        } finally {
+          if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
+          for (const binding of this._listBindings) binding._onMerge("/");
+          this._observeData();
+        }
         return true;
       }
       if (changed && this.registry.size > 0) {
@@ -884,6 +911,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown>;
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown> {
+    return this._getSignal(path, true);
+  }
+
+  /**
+   * The signal a binding on `path` follows. With `pin`, a state signal stays when no binding
+   * is on the path: for a caller that keeps it.
+   *
+   * @internal
+   */
+  _getSignal(path: string, pin = false): Signal.State<unknown> | Signal.Computed<unknown> {
     // If a parent path is a computed signal, subscribe to it instead, also if the path
     // has a state signal from before that computed was created.
     // Search bottom-up (closest ancestor first) so bindings track the
@@ -900,7 +937,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       }
     }
 
-    return this.registry.get(path) ?? this.registry.getOrCreate(path, this._getObject(path));
+    const computed = this.registry.hasComputeds && this.registry.getComputed(path);
+    return computed || this.registry.getOrCreate(path, this._getObject(path), pin);
   }
 
   /** @since 0.1.0 */
@@ -913,8 +951,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Skip deps that already exist -- they may be computed signals from
     // a chained computed, and getOrCreate would shadow them with orphaned state signals.
     for (const dep of deps) {
-      if (!this.registry.has(dep)) {
-        this.registry.getOrCreate(dep, this._getObject(dep));
+      if (!this.registry.isComputed(dep)) {
+        this.registry.getOrCreate(dep, this._getObject(dep), true);
       }
     }
     const result = this.registry.addComputed(path, deps, fn, this._readPath);
@@ -929,8 +967,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    */
   removeComputed(path: string): void {
     if (!this.registry.removeComputed(path, this._readPath)) return;
-    // Computeds that depend on this path and bindings at it or below it follow the data again
-    this.registry.getOrCreate(path, this._getObject(path));
+    // Bindings at the path or below it follow the data again
     this._firePathResubscribe(path);
   }
 
@@ -1216,7 +1253,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     let changed = false;
     const hasSignals = this.registry.size > 0;
 
-    for (const key of Object.keys(source)) {
+    // for...in, as JSONModel's merge: inherited keys of the payload are merged too
+    for (const key in source) {
       // Like JSONModel's merge
       if (key === "__proto__") {
         continue;
@@ -1310,7 +1348,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     for (const [subscribedPath, binding] of bindings) {
       binding.subscribe();
       // The other signal may hold another value
-      scheduleFlush(binding, this.getSignal(subscribedPath));
+      scheduleFlush(binding, this._getSignal(subscribedPath));
     }
   }
 

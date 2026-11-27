@@ -1,3 +1,4 @@
+import JSONModel from "sap/ui/model/json/JSONModel";
 import SignalModel from "ui5/model/signal/SignalModel";
 import Log from "sap/base/Log";
 import { Signal } from "signal-polyfill";
@@ -146,5 +147,33 @@ QUnit.module("mergeProperty", () => {
     model.setData("ab" as never, true);
     assert.deepEqual(model.getData(), { 0: "a", 1: "b", name: "Alice" }, "a string");
     model.destroy();
+  });
+
+  QUnit.test("a frozen object inside a class instance is replaced by the merged copy", (assert) => {
+    class Holder {
+      cfg: object = Object.freeze({ a: 1, b: 1 });
+    }
+    const model = new SignalModel<Record<string, unknown>>({ holder: new Holder() });
+    const binding = model.bindProperty("/holder/cfg/a");
+    binding.attachChange(() => {});
+    assert.ok(model.mergeProperty("/holder/cfg", { a: 2 }));
+    assert.deepEqual(model.getProperty("/holder/cfg"), { a: 2, b: 1 });
+    assert.ok(model.getProperty("/holder") instanceof Holder, "the instance stays");
+    return Promise.resolve().then(() => {
+      assert.strictEqual(binding.getValue(), 2);
+      model.destroy();
+    });
+  });
+
+  QUnit.test("inherited keys of a payload are merged, as in JSONModel", (assert) => {
+    const results = [JSONModel, SignalModel].map((Model) => {
+      const model = new Model({ z: 0 });
+      model.setData(Object.assign(Object.create({ a: 1 }), { b: 2 }), true);
+      const data = JSON.stringify(model.getData());
+      model.destroy();
+      return data;
+    });
+    assert.strictEqual(results[1], '{"z":0,"b":2,"a":1}');
+    assert.strictEqual(results[1], results[0], "same data as JSONModel");
   });
 });
