@@ -893,19 +893,24 @@ QUnit.module("SignalPropertyBinding", () => {
   });
 
   QUnit.test("a binding hears once of an asynchronous write of an object", async (assert) => {
-    // refresh() of the binding before the timer of the write
-    await inBoth(assert, "1,1", async (Model) => {
+    // refresh() of the binding before the timer of the write; the second binding hears
+    // once as well
+    await inBoth(assert, "1,1,1", async (Model) => {
       const data: Data = { o: { x: 0 } };
       const model = new Model(data);
       const binding = model.bindProperty("/o");
+      const sibling = model.bindProperty("/o");
       binding.initialize();
+      sibling.initialize();
       let events = 0;
+      let siblingEvents = 0;
       binding.attachChange(() => events++);
+      sibling.attachChange(() => siblingEvents++);
       model.setProperty("/o", { x: 1 }, undefined, true);
       binding.refresh();
       const shown = [events];
       await later(20);
-      shown.push(events);
+      shown.push(events, siblingEvents);
       model.destroy();
       return shown;
     });
@@ -1009,6 +1014,16 @@ QUnit.module("SignalPropertyBinding", () => {
     created.setProperty("/point/y", 2);
     const y = Object.getOwnPropertyDescriptor(created.getProperty("/point"), "y");
     assert.strictEqual(y?.value, 2, "a class instance keeps plain properties");
+    created.setProperty("/frozen", Object.freeze({ x: 1 }));
+    assert.strictEqual(created.getProperty("/frozen/x"), 1, "a frozen object is left alone");
+    (created.getData() as { n: unknown }).n = 7;
+    (created.getData() as { n: unknown }).n = 8;
+    await later(20);
+    assert.strictEqual(created.getProperty("/n"), 8, "primitives assigned one after another");
+    (created.getData() as { n: unknown }).n = { a: 3 };
+    (created.getData().n as { a: number }).a = 4;
+    await later(20);
+    assert.strictEqual(binding.getValue(), 4, "an object assigned after a primitive is observed");
     created.setProperty("/list", [1]);
     created.setProperty("/list/length", 3);
     assert.strictEqual(created.getProperty("/list/length"), 3, "the length of an array stays");
@@ -1102,5 +1117,86 @@ QUnit.module("SignalPropertyBinding", () => {
       model.destroy();
       return shown;
     });
+  });
+
+  QUnit.test("refresh() of the model in a change handler: the others hear once", async (assert) => {
+    await inBoth(assert, "1,1", async (Model) => {
+      const data: Data = { p: { x: 0 }, q: { x: 0 } };
+      const model = new Model(data);
+      const first = model.bindProperty("/p");
+      const second = model.bindProperty("/q");
+      first.initialize();
+      second.initialize();
+      let firstEvents = 0;
+      let secondEvents = 0;
+      first.attachChange(() => {
+        if (firstEvents++ === 0) model.refresh();
+      });
+      second.attachChange(() => secondEvents++);
+      // In this order: the second binding is still queued when the handler of the first runs
+      model.setProperty("/p", { x: 1 });
+      model.setProperty("/q", { x: 1 });
+      await later(20);
+      const shown = [firstEvents, secondEvents];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test(
+    "setValue: an asynchronous write by a propertyChange handler is told once",
+    async (assert) => {
+      await inBoth(assert, "1", async (Model) => {
+        const old = { a: 1 };
+        const data: Data = { o: old };
+        const model = new Model(data);
+        const binding = model.bindProperty("/o");
+        binding.initialize();
+        let events = 0;
+        binding.attachChange(() => events++);
+        let wrote = false;
+        model.attachPropertyChange(() => {
+          if (wrote) return;
+          wrote = true;
+          model.setProperty("/o", old, undefined, true);
+        });
+        binding.setValue({ a: 2 });
+        await later(20);
+        const shown = [events];
+        model.destroy();
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test("a merge whose payload throws leaves the lists in order", (assert) => {
+    const merges: [
+      string,
+      (model: SignalModel<Record<string, unknown>>, payload: object) => void,
+    ][] = [
+      ["setData", (model, payload) => model.setData({ box: payload }, true)],
+      ["mergeProperty", (model, payload) => model.mergeProperty("/box", payload)],
+    ];
+    for (const [name, merge] of merges) {
+      const model = new SignalModel<Record<string, unknown>>({
+        box: { rows: [{ v: 1 }, { v: 2 }] },
+      });
+      const list = model.bindList("/box/rows");
+      list.initialize();
+      list.attachChange(() => {});
+      list.getContexts(0, 10);
+      list.suspend();
+      const payload = {
+        rows: [{ v: 9 }],
+        get boom(): unknown {
+          throw new Error("boom");
+        },
+      };
+      assert.throws(() => merge(model, payload), /boom/, name);
+      // oxlint-disable-next-line typescript/no-explicit-any -- private state of the binding
+      assert.strictEqual((list as any)._sharedRows, undefined, "no rows of before are kept");
+      assert.strictEqual(model.getProperty("/box/rows/0/v"), 9, "what was merged stays");
+      model.destroy();
+    }
   });
 });

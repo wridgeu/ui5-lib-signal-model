@@ -125,7 +125,8 @@ export default class SignalRegistry {
     }
     // The last binding has left a path whose computed was removed: a path like any other
     if (!this.replaced.has(path)) this.released.delete(path);
-    this.dropped.add(path);
+    // Only a path below another one is in the index
+    if (depth > 1) this.dropped.add(path);
     // Amortised: a sweep visits every index entry, so only once half of them are stale
     if (this.dropped.size <= this.signals.size + 64) return;
     for (const [ancestor, below] of this.descendants) {

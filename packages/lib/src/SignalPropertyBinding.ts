@@ -40,7 +40,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   private _subscribedPath: string | null = null;
   private _previousResolvedPath: string | undefined = undefined;
   private _isDirectSignal = false;
-  /** An object this binding shows already, while the model still has to tell of its write */
+  /** The object written by setValue, while the model still has to tell of that write */
   private _shown: unknown = undefined;
 
   /**
@@ -140,6 +140,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
           // the check, whose change handlers may write again.
           cancelFlush(this);
           this.checkUpdate();
+          // What it shows now is what the model will tell of
+          this._shown = self.oValue;
         }
       }
     }
@@ -162,10 +164,6 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       this.watcher?.watch();
     }
     super.refresh(forceUpdate);
-    // An asynchronous write tells of itself later: this binding has shown it now
-    if (this._subscribedPath && this.oModel._isWritePending(this._subscribedPath)) {
-      this._shown = asInternal(this).oValue;
-    }
   }
 
   /** @since 0.1.0 */

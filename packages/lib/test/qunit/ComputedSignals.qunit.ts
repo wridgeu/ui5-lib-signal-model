@@ -1468,4 +1468,49 @@ QUnit.module("ComputedSignals", () => {
     assert.strictEqual(model.getProperty("/c"), 1, "the path is still free for a computed");
     model.destroy();
   });
+
+  QUnit.test("a read below two computeds reads only the closest one", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ x: 1 });
+    let outer = 0;
+    model.createComputed("/a", ["/x"], () => {
+      outer++;
+      return { b: { c: "outer" } };
+    });
+    model.createComputed("/a/b", ["/x"], (x) => ({ c: x }));
+    assert.strictEqual(outer, 1, "created");
+    assert.strictEqual(model.getProperty("/a/b/c"), 1);
+    model.setProperty("/x", 2);
+    assert.strictEqual(model.getProperty("/a/b/c"), 2);
+    assert.strictEqual(outer, 1, "the computed above was not read");
+    assert.deepEqual(model.getProperty("/a"), { b: { c: "outer" } });
+    model.destroy();
+  });
+
+  QUnit.test("createComputed: a path no read would find is refused", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    assert.throws(() => model.createComputed("c", ["/a"], (a) => a), /not an absolute path/);
+    assert.throws(() => model.createComputed("/c/", ["/a"], (a) => a), /not an absolute path/);
+    model.destroy();
+  });
+
+  QUnit.test("a failing createComputed leaves nothing for the paths it read", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    model.createComputed("/u", ["/a"], (a) => a);
+    const binding = model.bindProperty("/u");
+    binding.initialize();
+    binding.attachChange(() => {});
+    // The binding stays, so the registry remembers that /u was a computed
+    model.removeComputed("/u");
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    const replaced = (model as any).registry.replaced as Map<string, unknown>;
+    assert.throws(
+      () =>
+        model.createComputed("/bad", ["/u"], () => {
+          throw new Error("first run");
+        }),
+      /first run/,
+    );
+    assert.notOk(replaced.has("/u"));
+    model.destroy();
+  });
 });

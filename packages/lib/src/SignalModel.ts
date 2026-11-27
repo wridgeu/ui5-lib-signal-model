@@ -152,13 +152,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           for (const name in value) observe(value[name], value, name);
         }
       }
-      if (!parent) return;
+      // Nothing to observe on an object that takes no change, like a frozen one
+      if (!parent || Object.isSealed(parent)) return;
       Object.defineProperty(
         parent,
         key,
         // A function stays a plain value, as in JSONModel
         typeof value === "function"
-          ? { value, writable: true }
+          ? { value, writable: true, configurable: true, enumerable: true }
           : {
               // An array hole becomes a property here: a merge has to be able to cut it
               configurable: true,
@@ -166,7 +167,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
               enumerable: true,
               get: () => value,
               set: (next: unknown) => {
-                this._observeData(next, parent, key);
+                if (next !== null && (typeof next === "object" || typeof next === "function")) {
+                  this._observeData(next, parent, key);
+                } else {
+                  // Nothing below it to observe: the property stays as it is
+                  value = next;
+                }
                 this.checkUpdate();
               },
             },
@@ -546,8 +552,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
       } finally {
         this._writing = false;
+        // Also after an error of the payload: the rows it changed until then are changed
+        for (const binding of this._listBindings) binding._onMerge("/");
       }
-      for (const binding of this._listBindings) binding._onMerge("/");
       this._observeData();
     } else {
       this.oData = data as T;
@@ -818,7 +825,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             resolvedPath,
           ) || dropped;
       } catch (error) {
-        if (!(error instanceof NotWritable)) throw error;
+        if (!(error instanceof NotWritable)) {
+          // An error of the payload: the rows it changed until then are changed
+          for (const binding of this._listBindings) binding._onMerge(resolvedPath);
+          throw error;
+        }
         frozen = true;
       } finally {
         this._writing = false;
@@ -952,14 +963,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         clearTimeout(this._bulkSyncTimer);
         this._bulkSyncTimer = null;
       }
-      if (this.registry.hasComputeds) {
-        // A computed notifies its watchers itself, also here: drop those updates
-        for (const binding of asInternal(this).getBindings()) {
-          if (binding.watcher) {
-            cancelFlush(binding);
-            binding.watcher.watch();
-          }
-        }
+      // Every binding checks below, so what is queued for one is dropped: the update of a
+      // computed, which notifies its watchers itself, and those of a flush that is running
+      // when a change handler has called this
+      for (const binding of asInternal(this).getBindings()) {
+        cancelFlush(binding);
+        binding.watcher?.watch();
       }
     }
     try {
@@ -1034,6 +1043,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // Reads and bindings below the root would not follow it
       throw new TypeError('Cannot create computed signal at "/": the root holds the data');
     }
+    if (!path.startsWith("/") || path.endsWith("/")) {
+      // No read would find it: reads resolve their path
+      throw new TypeError(
+        `Cannot create computed signal at "${path}": not an absolute path without trailing slash`,
+      );
+    }
     if (deps.some((dep) => dep === path || dep.startsWith(`${path}/`))) {
       throw new TypeError(`Cannot create computed signal at "${path}": it depends on itself`);
     }
@@ -1045,8 +1060,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     try {
       result = this.registry.addComputed(path, deps, fn, this._readPath);
     } catch (error) {
-      // Nothing has changed: the signals created for its dependencies go again
+      // Nothing has changed: the signals created for its dependencies go again, and what
+      // its first run made the registry keep
       for (const dep of pinned) this.registry.unpin(dep);
+      this._forgetUnread(deps);
       throw error;
     }
     // The state signal of the path is gone, and with it the pins the readers of a computed
@@ -1078,11 +1095,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     for (const dep of own?.pinned ?? []) this.registry.unpin(dep);
     // What the registry keeps for the readers of a path goes with the last of them: here
     // for the path itself, and for the paths this computed read
-    for (const start of [path, ...(own?.all ?? [])]) {
-      for (let at = start; at.length > 1; at = at.substring(0, at.lastIndexOf("/"))) {
-        if (this.registry.remembers(at) && !this._isRead(at)) this.registry.forget(at);
-      }
-    }
+    this._forgetUnread([path, ...(own?.all ?? [])]);
     // Bindings at the path or below it follow the data again
     this._firePathResubscribe(path);
   }
@@ -1095,16 +1108,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    */
   _syncSignals(path: string): void {
     this._mayHoldUndefined = true;
+    // As a synchronous write: the asynchronous ones so far are told now. Told again by
+    // their timer, a binding on an object would fire twice.
+    this._syncPending();
     this.registry.sync(path, this._readPath);
   }
 
-  /**
-   * Whether an asynchronous write at `path` still waits to be told to the bindings.
-   *
-   * @internal
-   */
-  _isWritePending(path: string): boolean {
-    return this._pendingAsyncPaths.has(path);
+  /** Lets the registry forget `paths` and the paths above them, where no computed reads them. */
+  private _forgetUnread(paths: string[]): void {
+    for (const start of paths) {
+      for (let at = start; at.length > 1; at = at.substring(0, at.lastIndexOf("/"))) {
+        if (this.registry.remembers(at) && !this._isRead(at)) this.registry.forget(at);
+      }
+    }
   }
 
   /** Whether a computed reads `path` or a path below it. */
@@ -1182,42 +1198,33 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       return this.oData;
     }
 
+    let start = 1;
     if (this.registry.hasComputeds) {
-      let currentPath = "";
-      let start = 1;
-      while (start < resolvedPath.length) {
-        const end = resolvedPath.indexOf("/", start);
-        const part =
-          end === -1 ? resolvedPath.substring(start) : resolvedPath.substring(start, end);
-        if (!part) break;
-        currentPath += "/" + part;
-
-        const above = this.registry.getComputed(currentPath);
+      // The closest computed above the path. One above that one is not read: it would
+      // become a dependency of the reader, and its error the reader's.
+      for (
+        let idx = resolvedPath.lastIndexOf("/");
+        idx > 0;
+        idx = resolvedPath.lastIndexOf("/", idx - 1)
+      ) {
+        const above = this.registry.getComputed(resolvedPath.substring(0, idx));
         if (above) {
           node = above.get();
-        } else {
-          if (!node) {
-            return node;
-          }
-          node = (node as Record<string, unknown>)[part];
+          start = idx + 1;
+          break;
         }
-        if (end === -1) break;
-        start = end + 1;
       }
-    } else {
-      let start = 1;
-      while (start < resolvedPath.length) {
-        const end = resolvedPath.indexOf("/", start);
-        const part =
-          end === -1 ? resolvedPath.substring(start) : resolvedPath.substring(start, end);
-        if (!part) break;
-        if (!node) {
-          return node;
-        }
-        node = (node as Record<string, unknown>)[part];
-        if (end === -1) break;
-        start = end + 1;
+    }
+    while (start < resolvedPath.length) {
+      const end = resolvedPath.indexOf("/", start);
+      const part = end === -1 ? resolvedPath.substring(start) : resolvedPath.substring(start, end);
+      if (!part) break;
+      if (!node) {
+        return node;
       }
+      node = (node as Record<string, unknown>)[part];
+      if (end === -1) break;
+      start = end + 1;
     }
     return node;
   }
@@ -1273,7 +1280,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    */
   private _createPath(path: string): Record<string, unknown> | undefined {
     const isContainer = (value: unknown): boolean =>
-      typeof value === "object" || typeof value === "function";
+      value !== null && (typeof value === "object" || typeof value === "function");
     let createdAt = "";
     if (this.oData == null) {
       this.oData = {} as T;
