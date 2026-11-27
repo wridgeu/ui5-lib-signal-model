@@ -180,7 +180,7 @@ model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => 
 
 ### Computed Signal Immutability
 
-Computed signals are **define-once**: calling `createComputed` on a path that already holds a computed or a state signal (i.e., a path already accessed through a binding or `getSignal`) throws a `TypeError`. To redefine an existing computed, call `removeComputed` first.
+Computed signals are **define-once**: `createComputed` throws a `TypeError` on a path that already holds a computed, and on a path that was already read as plain data through a binding or `getSignal` on exactly that path. A binding on a path below it (`/user/name` before `createComputed("/user", …)`) is fine and follows the computed. To redefine a computed, call `removeComputed` first; a path that had a computed can get a new one at any time, also while bindings are on it.
 
 ```typescript
 model.createComputed("/total", ["/price", "/tax"], (p, t) => p * (1 + t));
@@ -195,7 +195,7 @@ model.createComputed("/total", ["/price"], (p) => p);
 
 > **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters, the closest existing equivalent, are also fixed in code and never replaced at runtime.
 >
-> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative -- bindings are declared in XML and the developer never touches them directly. SignalModel's automatic resubscription mechanism (described below) ensures that `removeComputed` + `createComputed` works seamlessly regardless of how bindings were created.
+> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative -- bindings are declared in XML and the developer never touches them directly. Bindings therefore move to a redefined computed by themselves (see [below](#creating-removing-and-redefining-while-bound)), regardless of how they were created.
 
 ### Computed Signals That Throw
 
@@ -205,35 +205,49 @@ An error thrown by a computed's function is not turned into a value:
 - A binding that already shows a value keeps it. The error is logged, and other bindings update as usual.
 - `createComputed` runs the function once. If that first run throws, `createComputed` throws and no computed is registered, so the function must handle the data the model holds at that moment (for example before `loadData` has finished).
 
-### Automatic Resubscription
+### Creating, Removing and Redefining While Bound
 
-When a `Signal.Computed` is created, its derivation function is fixed. To change what a computed derives, you must replace it with `removeComputed` + `createComputed`. But the bindings watching that path still hold a watcher on the **old** signal object -- they would never see updates from the new one.
+A `Signal.Computed` has a fixed function, so changing what a path derives means another signal object at that path. Whatever used the old one has to move to the new one. The model does that whenever `createComputed` or `removeComputed` is called:
 
-SignalModel solves this with **automatic resubscription**. When `createComputed` is called, the model notifies every existing binding to that path (and to any sub-path below it). Each notified binding tears down its watcher on the old signal and subscribes to the new one -- transparently, in a single synchronous step.
+| What exists                                             | After `createComputed(path)`                             | After `removeComputed(path)`        |
+| ------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------- |
+| Bindings on the path or below it (property, list, tree) | follow the computed, also if they were created before it | follow the model's data at the path |
+| Computeds that depend on the path or on a path below it | run again with the computed's value                      | run again with the model's data     |
+
+The bindings re-subscribe at once and check their value in the next microtask, so a control shows the new value without a write to one of the inputs.
 
 ```mermaid
 flowchart LR
   S1["State: /users"] --> C1["Computed: /currentUser"]
   S2["State: /selectedId"] --> C1
   C1 -->|"watched by"| B1["Binding: {/currentUser/name}"]
-  C1 -->|"watched by"| B2["Binding: {/currentUser/email}"]
-  Redef["removeComputed + createComputed('/currentUser')"] -.->|"_firePathResubscribe<br/>rewires watchers"| B1
-  Redef -.->|"_firePathResubscribe<br/>rewires watchers"| B2
+  C1 -->|"read by"| D1["Computed: /greeting"]
+  Redef["removeComputed / createComputed('/currentUser')"] -.->|"re-subscribes, then checks"| B1
+  Redef -.->|"runs again"| D1
 ```
-
-This means you can redefine a computed at any time and all bindings will see the new derivation, even if it has entirely different dependencies:
 
 ```typescript
 // XML view has: <Text text="{/total}" />
 
 model.removeComputed("/total");
 model.createComputed("/total", ["/newPrice", "/newTax"], (p, t) => p * (1 + t));
-// All bindings to /total now track the new formula. No binding manipulation needed.
+// The text shows the new formula's value and follows /newPrice and /newTax.
+
+model.removeComputed("/total");
+// The text shows the model's data at /total (undefined if there is none) and follows writes to it.
 ```
 
-**Sub-path resubscription.** When a computed returns an object and bindings target sub-paths (e.g., `{/currentUser/name}`), those sub-path bindings also resubscribe automatically when the parent computed is redefined. The model scans for all bindings whose path starts with the computed's path and triggers resubscription for each one.
+A dependency can be the path of plain data, of a computed, or a path inside a computed's value:
 
-**Cost.** One `Map` lookup per `createComputed` call plus one `startsWith` scan of registered binding paths. When no bindings exist at the path (or its sub-paths), the cost is effectively zero.
+```typescript
+model.createComputed("/currentUser", ["/users", "/selectedId"], (users, id) => users[id]);
+model.createComputed("/greeting", ["/currentUser/name"], (name) => `Hello ${name}`);
+// /greeting follows /currentUser, also after /currentUser is redefined or removed.
+```
+
+One limit: **a binding on exactly the path before the first `createComputed`** makes that call throw (define-once, see above). Create the computed before the view binds to it, for example in `onInit` or in the component.
+
+**Cost.** Per `createComputed` or `removeComputed`, one pass over the paths that have bindings and over the state signals below the path. A computed that no other computed depends on costs nothing extra; one that others depend on (itself or a path inside it) gets one small signal that tells them when it was replaced.
 
 ### Computed Sub-Path Traversal
 
@@ -383,7 +397,7 @@ model.removeComputed("/fullName");
 // Direct signal access
 const signal = model.getSignal("/path");
 signal.get(); // read current value
-signal.set(1); // on a state signal: the same as model.setProperty("/path", 1)
+signal.set(1); // on a state signal: the same as model.setProperty("/path", 1); a refused write is logged
 
 // Lifecycle
 model.destroy(); // aborts in-flight requests, clears all subscriptions

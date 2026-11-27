@@ -39,6 +39,9 @@ class PathState extends Signal.State<unknown> {
   }
 }
 
+/** See SignalRegistry.signalReplaced() */
+const REPLACED = {};
+
 /**
  * Manages signal state and computed signals for path-based subscriptions.
  *
@@ -47,6 +50,14 @@ class PathState extends Signal.State<unknown> {
 export default class SignalRegistry {
   private readonly signals = new Map<string, PathState>();
   private readonly computeds = new Map<string, Signal.Computed<unknown>>();
+  /** Paths whose computed was removed: a new computed may take the place of their state signal. */
+  private readonly released = new Set<string>();
+  /**
+   * For a path that holds or held a computed, and only once another computed depends on it
+   * or on a path below it: a signal that is set when a computed is created or removed
+   * there. Those computeds read it, so they run again and find the other signal.
+   */
+  private readonly replaced = new Map<string, Signal.State<number>>();
   /**
    * Paths of the state signals below each path, filled as signals are created. Lets a
    * write reach its child signals directly instead of scanning the whole registry.
@@ -208,12 +219,22 @@ export default class SignalRegistry {
     path: string,
     deps: string[],
     fn: (...args: unknown[]) => unknown,
+    read?: ValueResolver,
   ): Signal.Computed<unknown> {
     if (this.signals.has(path)) {
-      throw new TypeError(
-        `Cannot create computed signal at "${path}": path already holds raw data`,
-      );
+      if (!this.released.has(path)) {
+        throw new TypeError(
+          `Cannot create computed signal at "${path}": path already holds raw data`,
+        );
+      }
+      // The state signal the bindings went to when the computed was removed
+      this.signals.delete(path);
+      for (let idx = path.lastIndexOf("/"); idx > 0; idx = path.lastIndexOf("/", idx - 1)) {
+        const below = this.descendants.get(path.substring(0, idx));
+        below?.splice(below.indexOf(path), 1);
+      }
     }
+    this.released.delete(path);
 
     if (this.computeds.has(path)) {
       throw new TypeError(
@@ -222,13 +243,7 @@ export default class SignalRegistry {
     }
 
     const computed = new Signal.Computed(
-      () => {
-        const values = deps.map((dep) => {
-          const s = this.get(dep);
-          return s ? s.get() : undefined;
-        });
-        return fn(...values);
-      },
+      () => fn(...deps.map((dep) => this.readDependency(dep, read))),
       { equals: signalEquals },
     );
 
@@ -239,6 +254,7 @@ export default class SignalRegistry {
     computed.get();
 
     this.computeds.set(path, computed);
+    this.signalReplaced(path, read);
     return computed;
   }
 
@@ -246,8 +262,48 @@ export default class SignalRegistry {
    * @param path - Property path of the computed signal to remove.
    * @since 0.1.0
    */
-  removeComputed(path: string): void {
-    this.computeds.delete(path);
+  removeComputed(path: string, read?: ValueResolver): boolean {
+    if (!this.computeds.delete(path)) return false;
+    this.released.add(path);
+    this.signalReplaced(path, read);
+    return true;
+  }
+
+  /**
+   * The value of a dependency of a computed: of the closest computed at or above the path
+   * (with `read` for a path inside its value), otherwise of the path's state signal.
+   */
+  private readDependency(dep: string, read: ValueResolver | undefined): unknown {
+    for (let at = dep; ;) {
+      const computed = this.computeds.get(at);
+      if (computed || this.released.has(at)) {
+        let replaced = this.replaced.get(at);
+        if (!replaced) this.replaced.set(at, (replaced = new Signal.State(0)));
+        replaced.get();
+        if (computed && at === dep) return computed.get();
+        // read() goes through the computed, which makes it a dependency
+        if (computed && read) return read(dep);
+      }
+      const idx = at.lastIndexOf("/");
+      if (idx <= 0) break;
+      at = at.substring(0, idx);
+    }
+    return this.signals.get(dep)?.get();
+  }
+
+  /** Makes the computeds run again that read `path` or a path below it. */
+  private signalReplaced(path: string, read: ValueResolver | undefined): void {
+    const replaced = this.replaced.get(path);
+    replaced?.set(replaced.get() + 1);
+    // A computed may have read a state signal below the path. Set even to an equal value,
+    // such a signal would not tell it: hence the object in between.
+    for (const below of this.descendants.get(path) ?? []) {
+      const signal = this.signals.get(below);
+      if (!signal) continue;
+      const value = read ? read(below) : signal.get();
+      signal.apply(REPLACED);
+      signal.apply(value);
+    }
   }
 
   /**
@@ -279,6 +335,8 @@ export default class SignalRegistry {
   destroy(): void {
     this.signals.clear();
     this.computeds.clear();
+    this.released.clear();
+    this.replaced.clear();
     this.descendants.clear();
     this.subscribers.clear();
     this.minDepth = Infinity;

@@ -917,7 +917,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         this.registry.getOrCreate(dep, this._getObject(dep));
       }
     }
-    const result = this.registry.addComputed(path, deps, fn);
+    const result = this.registry.addComputed(path, deps, fn, this._readPath);
     // Bindings at this path or below it have to follow the new computed
     this._firePathResubscribe(path);
     return result;
@@ -928,7 +928,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @since 0.1.0
    */
   removeComputed(path: string): void {
-    this.registry.removeComputed(path);
+    if (!this.registry.removeComputed(path, this._readPath)) return;
+    // Computeds that depend on this path and bindings at it or below it follow the data again
+    this.registry.getOrCreate(path, this._getObject(path));
+    this._firePathResubscribe(path);
   }
 
   /** Used by binding classes to check whether a signal is registered directly at `path`. @internal */

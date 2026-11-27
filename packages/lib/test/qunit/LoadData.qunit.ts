@@ -683,14 +683,18 @@ QUnit.module("loadData", () => {
     const model = new SignalModel<Record<string, unknown>>({});
     const seen: unknown[] = [];
     model.attachRequestFailed((event) => seen.push(event.getParameter("statusText")));
-    window.fetch = () => Promise.resolve(new Response("x", { status: 500, statusText: "" }));
-    await model.loadData(SAMPLE_URL).catch(() => {});
-    window.fetch = () => Promise.resolve(new Response("{", { status: 200, statusText: "" }));
-    await model.loadData(SAMPLE_URL).catch(() => {});
-    window.fetch = () =>
-      Promise.resolve(new Response("x", { status: 404, statusText: "Not Found" }));
-    await model.loadData(SAMPLE_URL).catch(() => {});
-    window.fetch = originalFetch;
+    try {
+      for (const [body, status, statusText] of [
+        ["x", 500, ""],
+        ["{", 200, ""],
+        ["x", 404, "Not Found"],
+      ] as const) {
+        window.fetch = () => Promise.resolve(new Response(body, { status, statusText }));
+        await model.loadData(SAMPLE_URL).catch(() => {});
+      }
+    } finally {
+      window.fetch = originalFetch;
+    }
     assert.deepEqual(seen, ["error", "parsererror", "Not Found"]);
     model.destroy();
   });

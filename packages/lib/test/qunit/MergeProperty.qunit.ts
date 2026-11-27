@@ -125,9 +125,12 @@ QUnit.module("mergeProperty", () => {
     const warnings: string[] = [];
     const original = Log.warning;
     Log.warning = (message: string) => void warnings.push(message);
-    (model.getSignal("/missing/x") as Signal.State<unknown>).set(1);
-    (model.getSignal("/a") as Signal.State<unknown>).set(2);
-    Log.warning = original;
+    try {
+      (model.getSignal("/missing/x") as Signal.State<unknown>).set(1);
+      (model.getSignal("/a") as Signal.State<unknown>).set(2);
+    } finally {
+      Log.warning = original;
+    }
     assert.strictEqual(warnings.length, 1, "one warning, for the refused write");
     assert.ok(warnings[0].includes("/missing/x"), "it names the path");
     assert.strictEqual(model.getProperty("/a"), 2, "the other write went through");
