@@ -1443,8 +1443,30 @@ QUnit.module(
         assert.strictEqual(plain.mergeProperty("/__proto__", { polluted: 1 }), false);
         assert.strictEqual(plain.mergeProperty("/constructor/prototype", { polluted: 1 }), false);
         assert.strictEqual((polluted() as { polluted?: number }).polluted, undefined);
+
+        // Through a primitive, which has a prototype too
+        const primitives = new SignalModel<Record<string, unknown>>({ n: 1, s: "hi", f: () => 1 });
+        assert.strictEqual(primitives.setProperty("/n/constructor/prototype/polluted", 1), false);
+        assert.strictEqual(primitives.setProperty("/f/constructor/prototype/polluted", 1), false);
+        assert.strictEqual((Function.prototype as { polluted?: number }).polluted, undefined);
+        assert.strictEqual(
+          primitives.mergeProperty("/s/constructor/prototype", { polluted: 1 }),
+          false,
+        );
+        assert.strictEqual((1 as unknown as { polluted?: number }).polluted, undefined);
+        assert.strictEqual(("hi" as unknown as { polluted?: number }).polluted, undefined);
+        primitives.destroy();
+
+        // Behind objects that autoCreatePaths would create first
+        const creating = new SignalModel<Record<string, unknown>>({}, { autoCreatePaths: true });
+        assert.strictEqual(creating.setProperty("/a/b/__proto__", { polluted: 1 }), false);
+        assert.strictEqual(creating.setProperty("/a/b/__proto__/polluted", 1), false);
+        assert.deepEqual(creating.getData(), {}, "nothing was created");
+        creating.destroy();
       } finally {
         delete (Object.prototype as { polluted?: number }).polluted;
+        delete (Number.prototype as { polluted?: number }).polluted;
+        delete (String.prototype as { polluted?: number }).polluted;
       }
       // A key of the data with that name is data
       assert.strictEqual(model.setProperty("/constructor/own", 2), true);

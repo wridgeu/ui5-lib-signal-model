@@ -350,7 +350,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // fetch cannot block, so this is the request JSONModel makes. The response is
       // taken from the load event, as jQuery.ajax does: it fires during send().
       const request = new XMLHttpRequest();
+      let loaded = false;
       request.addEventListener("load", () => {
+        loaded = true;
         let data: T | undefined;
         try {
           data = parse(request.status, request.statusText, request.responseText);
@@ -367,8 +369,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
         request.send(body);
       } catch {
-        // No response: a blocking request throws instead of firing an error event
-        fail(noResponse("error"));
+        // No response: a blocking request throws instead of firing an error event. After
+        // the response it is an error of a handler, which jQuery.ajax drops as well.
+        if (!loaded) fail(noResponse("error"));
       }
       return undefined;
     }
@@ -527,6 +530,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         // merged again.
         if (!(error instanceof NotWritable)) throw error;
         this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData, data) as T;
+        this._mayHoldUndefined = false;
         if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
       } finally {
         this._writing = false;
@@ -921,8 +925,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // the signals in line, then let every binding check, as JSONModel does.
     if (!asyncMode && this.registry.size > 0) {
       flushNow();
-      // Without notifying: every binding checks below
+      // Without notifying: every binding checks below. That covers the asynchronous
+      // writes so far, as JSONModel's check cancels its timer.
       this.registry.invalidateAll(this._readPath, false);
+      this._pendingAsyncPaths.clear();
       if (this.registry.hasComputeds) {
         // A computed notifies its watchers itself, also here: drop those updates
         for (const binding of asInternal(this).getBindings()) {
@@ -1007,6 +1013,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (path === "/") {
       // Reads and bindings below the root would not follow it
       throw new TypeError('Cannot create computed signal at "/": the root holds the data');
+    }
+    if (deps.some((dep) => dep === path || dep.startsWith(`${path}/`))) {
+      throw new TypeError(`Cannot create computed signal at "${path}": it depends on itself`);
     }
     // A copy: the caller's array may change, the dependencies of the computed do not
     deps = [...deps];
@@ -1217,18 +1226,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Runs on every write, and nearly every path ends here
     if (!path.includes("__proto__") && !path.includes("constructor")) return false;
     const parts = path.substring(1).split("/");
+    // Wherever it is: autoCreatePaths may create the objects before it
+    if (parts.includes("__proto__")) return true;
     let node: unknown = this.oData;
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i] === "__proto__") return true;
-      if ((typeof node !== "object" || node === null) && typeof node !== "function") return false;
-      // As the last segment it becomes a property of the data
-      if (
-        parts[i] === "constructor" &&
-        i < parts.length - 1 &&
-        !Object.hasOwn(node, "constructor")
-      ) {
-        return true;
-      }
+    // Walked as _getObject does, so also through a truthy primitive: it has a prototype too.
+    // Not the last segment: there, "constructor" becomes a property of the data.
+    for (let i = 0; i < parts.length - 1 && node; i++) {
+      if (parts[i] === "constructor" && !Object.hasOwn(node, "constructor")) return true;
       node = (node as Record<string, unknown>)[parts[i]];
     }
     return false;

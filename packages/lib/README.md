@@ -247,7 +247,7 @@ model.createComputed("/greeting", ["/currentUser/name"], (name) => `Hello ${name
 
 One limit: **a binding on exactly the path, or a computed that depends on it, before the first `createComputed`** makes that call throw (define-once, see above). Create the computed before the view binds to it and before the computeds that depend on it, for example in `onInit` or in the component. After `removeComputed`, a computed can be created at the path again as long as a binding stays on it; once the path has lost its bindings, it is a path like any other. A computed at the root path `/` is refused.
 
-**Cost.** Per `createComputed` or `removeComputed`, one pass over the paths that have bindings and over the state signals below the path; `removeComputed` also passes over the other computeds once. A computed that no other computed depends on costs nothing extra, and nothing but its path is kept after `removeComputed`; one that others depend on (itself or a path inside it) gets one small signal that tells them when it was replaced.
+**Cost.** Per `createComputed` or `removeComputed`, one pass over the paths that have bindings and over the state signals below the path; `removeComputed` also passes over the other computeds once. A computed that no other computed depends on costs nothing extra, and nothing is kept after `removeComputed` once the path has no binding; one that others depend on (itself or a path inside it) gets one small signal that tells them when it was replaced.
 
 ### Computed Sub-Path Traversal
 
@@ -372,7 +372,8 @@ model.bindTree("/path", context, filters, { arrayNames: ["children"] }, sorters)
 
 // Load JSON from a URL (fires requestSent/requestCompleted/requestFailed events).
 // Like JSONModel, the returned promise rejects with { message, statusCode, statusText,
-// responseText } when the request fails.
+// responseText } when the request fails. params go into the URL for GET and HEAD and into
+// the body otherwise. abortSignal is an extension: an abort fails with the message "abort".
 model.loadData(url, params?, async?, method?, merge?, cache?, headers?, abortSignal?);
 
 // Promise that resolves when all pending loadData calls complete
@@ -406,10 +407,11 @@ signal.set(1); // on a state signal: the same as model.setProperty("/path", 1); 
 model.destroy(); // aborts in-flight requests, clears all subscriptions
 ```
 
-Two things to know about a signal you keep:
+Three things to know about a signal you keep:
 
 - Below a computed, `getSignal` returns that computed: `getSignal("/user/name")` with a computed at `/user` is the signal of the whole `/user` value.
 - A state signal is the signal of plain data. If a computed is created at its path or above it later, the signal no longer follows; call `getSignal` again.
+- The model keeps a state signal that `getSignal` handed out until `destroy()`. Signals it creates for bindings and for the dependencies of computeds go when the last of those is gone.
 
 ### Binding Classes
 

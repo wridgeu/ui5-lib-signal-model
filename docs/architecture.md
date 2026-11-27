@@ -25,7 +25,7 @@ Each binding type (property, list, tree) subscribes to its path in the registry.
 
 For the same reason `set()` on a state signal from `getSignal()` does not set the signal directly: it calls `setProperty` for the signal's path, so the data, the bindings and the computeds stay in line; `set()` returns nothing, so a write the model refuses is logged as a warning.
 
-Data changed without the model is picked up at `refresh()`, not at the next write as in JSONModel (see [the differences](jsonmodel-differences.md#data-changed-without-the-model-needs-refresh)). At a `refresh()` the model first delivers the updates still queued, then reads every signal's value again without notifying and lets all bindings check; such a check compares the values as JSONModel does. A binding's own `refresh()` reads only the signals at its path and below, and notifies the bindings of those whose value differs. The `observe` option (JSONModel's `bObserve`) uses the model's path: the setters put on the data (as JSONModel's `observeData` does) call it.
+Data changed without the model is picked up at `refresh()`, not at the next write as in JSONModel (see [the differences](jsonmodel-differences.md#data-changed-without-the-model-needs-refresh)). At a `refresh()` the model first delivers the updates still queued, then reads every signal's value again without notifying and lets all bindings check; such a check compares the values as JSONModel does. A binding's own `refresh()` reads only the signals at its path and below, and notifies the other bindings of those whose value differs; a suspended binding does nothing, as in JSONModel. The `observe` option (JSONModel's `bObserve`) uses the model's path: the setters put on the data (as JSONModel's `observeData` does) call it.
 
 All bindings share a single flush queue (`FlushQueue.ts`) that batches updates into one `queueMicrotask`:
 
@@ -163,7 +163,7 @@ SignalModel supports this flag with targeted dirty-path tracking: when `bAsyncUp
 SignalModel has two scheduling paths depending on how `setProperty` is called:
 
 - **Default (no `bAsyncUpdate`):** signal changes fire synchronously, and the FlushQueue batches binding updates via `queueMicrotask`. Microtasks run before the browser paints, so the first frame always shows correct data.
-- **`bAsyncUpdate=true`:** signal notifications are skipped entirely during the `setProperty` loop. A single `setTimeout` syncs the signals of the written paths afterward (see above). This uses the same macrotask scheduling as JSONModel's `bAsyncUpdate` -- the browser may render one stale frame before bindings update.
+- **`bAsyncUpdate=true`:** signal notifications are skipped entirely during the `setProperty` loop. A single `setTimeout` syncs the signals of the written paths afterward (see above). The bindings on a written path are told also when its signal already holds the value: a binding that wrote the path itself (two-way) may show another one, and compares for itself. This uses the same macrotask scheduling as JSONModel's `bAsyncUpdate` -- the browser may render one stale frame before bindings update.
 
 The browser event loop processes work in this order:
 

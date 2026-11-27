@@ -987,4 +987,39 @@ QUnit.module("loadData", () => {
     assert.deepEqual(model.getData(), { old: true }, "the data stays");
     model.destroy();
   });
+
+  QUnit.test("a synchronous load: an error of a handler is not a failed request", (assert) => {
+    // A request that passes the errors of its listeners on, as a fake XMLHttpRequest can
+    class PassingOn {
+      status = 200;
+      statusText = "OK";
+      responseText = '{"a":1}';
+      private listener?: () => void;
+      addEventListener(_type: string, listener: () => void): void {
+        this.listener = listener;
+      }
+      open(): void {}
+      setRequestHeader(): void {}
+      send(): void {
+        this.listener?.();
+      }
+    }
+    const original = window.XMLHttpRequest;
+    window.XMLHttpRequest = PassingOn as unknown as typeof XMLHttpRequest;
+    const model = new SignalModel();
+    const events: string[] = [];
+    model.attachRequestCompleted((event) => {
+      events.push(`completed ${event.getParameter("success")}`);
+      throw new Error("handler");
+    });
+    model.attachRequestFailed(() => events.push("failed"));
+    try {
+      model.loadData(SAMPLE_URL, undefined, false);
+    } finally {
+      window.XMLHttpRequest = original;
+    }
+    assert.deepEqual(events, ["completed true"], "no second requestCompleted, no requestFailed");
+    assert.deepEqual(model.getData(), { a: 1 });
+    model.destroy();
+  });
 });

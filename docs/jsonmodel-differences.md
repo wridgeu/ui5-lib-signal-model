@@ -94,7 +94,7 @@ model.setProperty("/busy", false);
 // JSONModel: the list shows the new item. SignalModel: it does not.
 ```
 
-A binding's own `refresh()` does the same for its path and the paths below it. That binding checks its value at once, as in JSONModel. Other bindings on those paths update in the next microtask; in JSONModel they wait for the next write. A computed whose dependencies were changed directly needs `model.refresh()`.
+A binding's own `refresh()` does the same for its path and the paths below it. That binding checks its value at once, as in JSONModel, and does nothing while it is suspended. Other bindings on those paths update in the next microtask; in JSONModel they wait for the next write. A computed whose dependencies were changed directly needs `model.refresh()`.
 
 **What to do.** Write through the model (`setProperty("/items", [...items, newItem])`), or call `model.refresh()` after the direct change. With the `observe` option an assignment to an existing property counts as a write; a `push` or a new key does not, as in JSONModel.
 

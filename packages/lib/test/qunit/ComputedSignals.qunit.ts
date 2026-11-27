@@ -1454,4 +1454,18 @@ QUnit.module("ComputedSignals", () => {
       model.destroy();
     },
   );
+
+  QUnit.test("a computed that depends on itself is refused", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    assert.throws(() => model.createComputed("/c", ["/c"], (c) => c), /depends on itself/);
+    assert.throws(() => model.createComputed("/c", ["/c/x"], (x) => x), /depends on itself/);
+    model.createComputed("/k", ["/kk"], (kk) => kk);
+    assert.strictEqual(model.getProperty("/k"), undefined, "a path that only starts alike is fine");
+    model.createComputed("/c", ["/a"], (a) => a);
+    model.removeComputed("/c");
+    assert.throws(() => model.createComputed("/c", ["/a", "/c"], (a) => a), /depends on itself/);
+    model.createComputed("/c", ["/a"], (a) => a);
+    assert.strictEqual(model.getProperty("/c"), 1, "the path is still free for a computed");
+    model.destroy();
+  });
 });

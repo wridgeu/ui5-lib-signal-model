@@ -852,4 +852,22 @@ QUnit.module("SignalPropertyBinding", () => {
       });
     },
   );
+
+  QUnit.test("refresh() of the model covers the asynchronous writes before it", async (assert) => {
+    await inBoth(assert, "1,1", async (Model) => {
+      const data: Data = { o: { x: 0 } };
+      const model = new Model(data);
+      const binding = model.bindProperty("/o");
+      binding.initialize();
+      let events = 0;
+      binding.attachChange(() => events++);
+      model.setProperty("/o", { x: 1 }, undefined, true);
+      model.refresh();
+      const shown = [events];
+      await later(20);
+      shown.push(events);
+      model.destroy();
+      return shown;
+    });
+  });
 });
