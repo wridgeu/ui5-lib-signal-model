@@ -1396,6 +1396,27 @@ QUnit.module("ComputedSignals", () => {
     }
     assert.deepEqual(kept(), [0, 0, 0], "computeds and their readers created and removed");
 
+    // Read only below its path: no state signal is needed at the path itself
+    model.createComputed("/c", ["/a"], () => ({ x: 1 }));
+    model.createComputed("/inner", ["/c/x"], (x) => x);
+    model.removeComputed("/c");
+    assert.deepEqual([...registry.signals.keys()], ["/c/x"]);
+    model.removeComputed("/inner");
+
+    // A reader that stays is still told when the path gets a computed again
+    model.createComputed("/c", ["/a"], (a) => a);
+    model.createComputed("/stays", ["/c"], (c) => c);
+    model.createComputed("/goes", ["/c"], (c) => c);
+    model.removeComputed("/c");
+    // Read now, so that it depends on what the registry keeps for the readers of /c
+    assert.strictEqual(model.getProperty("/stays"), undefined, "no data at /c");
+    model.removeComputed("/goes");
+    model.createComputed("/c", ["/a"], (a) => (a as number) * 10);
+    assert.strictEqual(model.getProperty("/stays"), 10);
+    model.removeComputed("/stays");
+    model.removeComputed("/c");
+    assert.deepEqual(kept(), [0, 0, 0]);
+
     model.createComputed("/c", ["/a"], (a) => a);
     const binding = model.bindProperty("/c");
     binding.initialize();
@@ -1407,4 +1428,30 @@ QUnit.module("ComputedSignals", () => {
     assert.deepEqual(kept(), [0, 0, 0], "and forgotten with the last binding");
     model.destroy();
   });
+
+  QUnit.test(
+    "a computed removed, created again and removed keeps one pin per reader",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+      const deps = ["/c"];
+      model.createComputed("/c", ["/a"], (a) => a);
+      model.createComputed("/d", deps, (c) => c);
+      // The caller's array is not the model's
+      deps.length = 0;
+      model.removeComputed("/c");
+      model.setProperty("/c", 3);
+      assert.strictEqual(model.getProperty("/d"), 3, "/d follows the data at /c");
+      model.createComputed("/c", ["/a"], (a) => a);
+      model.removeComputed("/c");
+      model.createComputed("/e", ["/c"], (c) => c);
+      model.removeComputed("/d");
+      const binding = model.bindProperty("/e");
+      binding.initialize();
+      binding.attachChange(() => {});
+      model.setProperty("/c", 7);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(binding.getValue(), 7, "/e still follows /c after /d is gone");
+      model.destroy();
+    },
+  );
 });

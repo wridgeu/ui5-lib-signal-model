@@ -42,8 +42,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     : ui5IsPlainObject(value);
 }
 
-/** Number of segments in an absolute path below the root: "/a" is 1, "/a/b" is 2. */
+/** Number of segments in an absolute path: "/" is 0, "/a" is 1, "/a/b" is 2. */
 function depthOf(path: string): number {
+  if (path === "/") return 0;
   let depth = 1;
   for (let idx = path.indexOf("/", 1); idx !== -1; idx = path.indexOf("/", idx + 1)) depth++;
   return depth;
@@ -992,7 +993,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   /** Per computed: its dependencies, and the state signals among them that it keeps alive */
-  private readonly _deps = new Map<string, { all: string[]; pinned: string[] }>();
+  private readonly _deps = new Map<string, { all: string[]; pinned: Set<string> }>();
 
   /** @since 0.1.0 */
   createComputed(
@@ -1007,7 +1008,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // Reads and bindings below the root would not follow it
       throw new TypeError('Cannot create computed signal at "/": the root holds the data');
     }
-    const pinned = deps.filter((dep) => !this.registry.isComputed(dep));
+    // A copy: the caller's array may change, the dependencies of the computed do not
+    deps = [...deps];
+    const pinned = new Set(deps.filter((dep) => !this.registry.isComputed(dep)));
     for (const dep of pinned) this.registry.getOrCreate(dep, this._getObject(dep), true);
     let result: Signal.Computed<unknown>;
     try {
@@ -1017,6 +1020,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       for (const dep of pinned) this.registry.unpin(dep);
       throw error;
     }
+    // The state signal of the path is gone, and with it the pins the readers of a computed
+    // removed here before had on it
+    for (const other of this._deps.values()) other.pinned.delete(path);
     this._deps.set(path, { all: deps, pinned });
     // Bindings at this path or below it have to follow the new computed
     this._firePathResubscribe(path);
@@ -1034,9 +1040,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // The computeds that read exactly this path follow its state signal from now on, and
     // keep it alive as they do with their other dependencies
     for (const other of this._deps.values()) {
-      if (other.all.includes(path)) {
+      if (other.all.includes(path) && !other.pinned.has(path)) {
         this.registry.getOrCreate(path, this._getObject(path), true);
-        other.pinned.push(path);
+        other.pinned.add(path);
       }
     }
     this.registry.release(path);
@@ -1497,6 +1503,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // No change event after destroy()
     for (const binding of asInternal(this).getBindings()) cancelFlush(binding);
     this._listBindings.clear();
+    this._deps.clear();
     this.registry.destroy();
     super.destroy();
   }
