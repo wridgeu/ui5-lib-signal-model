@@ -248,7 +248,7 @@ npm run bench:render                                                   # regener
 
 ### Observations
 
-These notes interpret the generated results above (10 runs, 2,000 bindings). Ratios are quoted with their 95% confidence interval. Absolute times depend on machine state: a measurement taken while another program's test run loaded the machine was up to 35% slower for both models, with compatible ratios. Nothing else was running during this one. It was measured before the last fixes of version 0.2.0 (computeds, state signals released with their bindings); two runs on the final code had another program's tests on the machine and gave the same ratios within their noise. Read the ratios, not the milliseconds.
+These notes interpret the generated results above (10 runs, 2,000 bindings). Ratios are quoted with their 95% confidence interval. Absolute times depend on machine state: a measurement taken while another program's test run loaded the machine was up to 35% slower for both models, with compatible ratios. Nothing else was running during this one. It was measured before the last fixes of version 0.2.0 (computeds, state signals released with their bindings); three runs on later code, the last on the final one, had another program's tests on the machine and gave the same ratios within their noise. Read the ratios, not the milliseconds.
 
 **The pattern: O(bindings) vs O(changed paths).**
 
