@@ -24,6 +24,7 @@ export default class Comparison extends BaseController {
     json: { events: 0, real: 0, keys: "", listEvents: 0 },
   });
   private city = 0;
+  private note = 0;
   private lists: ListBinding[] = [];
   private bindings: Binding[] = [];
 
@@ -34,6 +35,8 @@ export default class Comparison extends BaseController {
     const data = (): Record<string, unknown> => ({
       address: { street: "Main St 1", city: CITIES[0] },
       price: 9.99,
+      note: "change 0",
+      busy: false,
       rows: [{ n: 1 }, { n: 2 }],
     });
     this.models = { signal: new SignalModel(data()), json: new JSONModel(data()) };
@@ -113,6 +116,27 @@ export default class Comparison extends BaseController {
   /** The recipe from docs/jsonmodel-differences.md: force the change event */
   onRefreshLists(): void {
     for (const list of this.lists) list.refresh(true);
+  }
+
+  onDirectChangeThenWrite(): void {
+    this.directChange(false);
+  }
+
+  onDirectChangeThenRefresh(): void {
+    this.directChange(true);
+  }
+
+  /** A change to the data without the model, then a write elsewhere or the recipe: refresh() */
+  private directChange(refresh: boolean): void {
+    this.note++;
+    for (const model of Object.values(this.models)) {
+      (model.getData() as Record<string, unknown>).note = `change ${this.note}`;
+      if (refresh) {
+        model.refresh();
+      } else {
+        model.setProperty("/busy", !model.getProperty("/busy"));
+      }
+    }
   }
 
   onMergeWithoutRefresh(): void {

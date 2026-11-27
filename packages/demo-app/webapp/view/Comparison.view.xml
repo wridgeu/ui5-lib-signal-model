@@ -65,7 +65,7 @@
 			type="Success"
 			class="sapUiSmallMarginBottom" />
 		<MessageStrip
-			text="A key that holds undefined, assigned to getData() directly, and then a merge: JSONModel's merge drops the key. SignalModel looks for such keys only after an object or undefined was written through the model, or after a refresh(), which the bindings need in both models anyway."
+			text="A key that holds undefined, assigned to getData() directly, and then a merge: JSONModel's merge drops the key. SignalModel looks for such keys only after an object or undefined was written through the model, or after a refresh()."
 			type="Information"
 			class="sapUiSmallMarginBottom" />
 		<HBox class="sapUiSmallMarginBottom">
@@ -100,6 +100,28 @@
 				<Text id="jsonListEvents" text="{diff>/json/listEvents}" />
 			</f:SimpleForm>
 		</l:Grid>
+		<MessageStrip
+			text="Data changed directly in getData(): JSONModel checks every binding on every write, so the next write anywhere shows the change. SignalModel tells only the bindings of the written path. The recipe works the same in both: refresh() after a direct change, or write through the model."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="directThenWrite" text="Change /note in getData(), then write /busy" press=".onDirectChangeThenWrite" class="sapUiSmallMarginEnd" />
+			<Button id="directThenRefresh" text="Change /note in getData(), then refresh()" press=".onDirectChangeThenRefresh" type="Emphasized" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Text bound to /note" />
+				<Text id="signalNote" text="{signalDiff>/note}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Text bound to /note" />
+				<Text id="jsonNote" text="{jsonDiff>/note}" />
+			</f:SimpleForm>
+		</l:Grid>
+		<MessageStrip
+			text="Not shown live: an asynchronous loadData uses fetch, so MockServer and a fake XMLHttpRequest do not see the request. They do see a synchronous load."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
 		<MessageStrip
 			text="A formatter that throws: JSONModel throws the error out of setProperty, SignalModel logs it. The recipe works the same in both: catch in the formatter and return a fallback."
 			type="Information"

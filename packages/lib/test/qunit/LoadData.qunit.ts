@@ -1,5 +1,6 @@
 import SignalModel from "ui5/model/signal/SignalModel";
 import JSONModel from "sap/ui/model/json/JSONModel";
+import MockServer from "sap/ui/core/util/MockServer";
 
 const BASE = "/test-resources/ui5/model/signal/qunit/testdata";
 const SAMPLE_URL = `${BASE}/sample.json`;
@@ -703,19 +704,53 @@ QUnit.module("loadData", () => {
 
   QUnit.test("a response without content is a success without data", async (assert) => {
     const originalFetch = window.fetch;
-    window.fetch = () => Promise.resolve(new Response(null, { status: 204 }));
-    const model = new SignalModel<Record<string, unknown>>({ name: "old" });
-    let completed: unknown;
-    model.attachRequestCompleted((event) => (completed = event.getParameter("success")));
-    await model.loadData(SAMPLE_URL);
-    window.fetch = originalFetch;
-    assert.strictEqual(completed, true, "requestCompleted reports success");
-    assert.strictEqual(
-      model.getData(),
-      undefined,
-      "the data is replaced by nothing, as in JSONModel",
-    );
-    model.destroy();
+    // 304: only seen by a request that sends its own If-None-Match
+    for (const status of [204, 304]) {
+      window.fetch = () => Promise.resolve(new Response(null, { status }));
+      const model = new SignalModel<Record<string, unknown>>({ name: "old" });
+      let completed: unknown;
+      model.attachRequestCompleted((event) => (completed = event.getParameter("success")));
+      try {
+        await model.loadData(SAMPLE_URL);
+      } finally {
+        window.fetch = originalFetch;
+      }
+      assert.strictEqual(completed, true, `${status}: requestCompleted reports success`);
+      assert.strictEqual(
+        model.getData(),
+        undefined,
+        `${status}: the data is replaced by nothing, as in JSONModel`,
+      );
+      model.destroy();
+    }
+  });
+
+  QUnit.test("JSONModel takes 204 and 304 as a success without data", (assert) => {
+    const server = new MockServer({
+      rootUri: "/mocked/",
+      requests: [204, 304].map((status) => ({
+        method: "GET",
+        path: new RegExp(`status${status}`),
+        response: (xhr: { respond(status: number, headers: object, body: string): void }) =>
+          xhr.respond(status, {}, ""),
+      })),
+    });
+    server.start();
+    const results: string[] = [];
+    try {
+      for (const status of [204, 304]) {
+        const model = new JSONModel({ name: "old" });
+        model.attachRequestCompleted((event) =>
+          results.push(`${status} success=${event.getParameter("success")}`),
+        );
+        model.loadData(`/mocked/status${status}`, undefined, false);
+        results.push(String(model.getData()));
+        model.destroy();
+      }
+    } finally {
+      server.destroy();
+    }
+    assert.deepEqual(results, ["204 success=true", "undefined", "304 success=true", "undefined"]);
   });
 
   QUnit.test("an abort while the body is read is reported as abort", async (assert) => {
@@ -832,6 +867,42 @@ QUnit.module("loadData", () => {
         results.push(settled);
       }
       assert.deepEqual(results, ["pending", "pending"]);
+    },
+  );
+
+  QUnit.test(
+    "MockServer sees a synchronous load, and an asynchronous one only of JSONModel",
+    async (assert) => {
+      const server = new MockServer({
+        rootUri: "/mocked/",
+        requests: [
+          {
+            method: "GET",
+            path: /data\.json/,
+            response: (xhr: { respondJSON(status: number, headers: object, body: object): void }) =>
+              xhr.respondJSON(200, {}, { name: "mocked" }),
+          },
+        ],
+      });
+      server.start();
+      const results: string[] = [];
+      try {
+        for (const model of [new JSONModel(), new SignalModel<Record<string, unknown>>()]) {
+          model.loadData("/mocked/data.json", undefined, false);
+          results.push(`sync ${String(model.getProperty("/name"))}`);
+          model.setData({});
+          await (model.loadData("/mocked/data.json") as Promise<unknown>).catch(() => {});
+          results.push(`async ${String(model.getProperty("/name"))}`);
+          model.destroy();
+        }
+      } finally {
+        server.destroy();
+      }
+      assert.deepEqual(
+        results,
+        ["sync mocked", "async mocked", "sync mocked", "async undefined"],
+        "SignalModel loads asynchronously with fetch: docs/jsonmodel-differences.md",
+      );
     },
   );
 });

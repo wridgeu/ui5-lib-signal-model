@@ -1,15 +1,15 @@
 # Differences from JSONModel
 
-SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Six differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first four live, next to a JSONModel.
+SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Six differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first five live, next to a JSONModel.
 
-| Difference                                                                                        | Who notices                                                                                                      |
-| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [A merge works on the data in place](#a-merge-works-on-the-data-in-place)                         | Code that keeps a reference to `getData()` or to an object it passed in, or changes data directly before a merge |
-| [Bindings update in a microtask](#bindings-update-in-a-microtask)                                 | Code that reads a control right after a write, or catches a formatter's error around `setProperty`               |
-| [Change events for objects](#change-events-for-objects)                                           | Change handlers and formatters on a binding to an object or array                                                |
-| [Change events of list bindings around a merge](#change-events-of-list-bindings-around-a-merge)   | List bindings that use the row object itself as change detection key                                             |
-| [Data changed without the model needs `refresh()`](#data-changed-without-the-model-needs-refresh) | Code that changes `getData()` directly and relies on a later write to update the bindings                        |
-| [`loadData` uses `fetch`](#loaddata-uses-fetch)                                                   | Tests and apps that intercept `XMLHttpRequest` or configure `jQuery.ajax`                                        |
+| Difference                                                                                        | Who notices                                                                                                                 |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [A merge works on the data in place](#a-merge-works-on-the-data-in-place)                         | Code that keeps a reference to `getData()` or to an object it passed in, or changes data directly before a merge            |
+| [Bindings update in a microtask](#bindings-update-in-a-microtask)                                 | Code that reads a control right after a write, or catches a formatter's error around `setProperty`                          |
+| [Change events for objects](#change-events-for-objects)                                           | Change handlers and formatters on a binding to an object or array                                                           |
+| [Change events of list bindings around a merge](#change-events-of-list-bindings-around-a-merge)   | List bindings that use the row object itself as change detection key                                                        |
+| [Data changed without the model needs `refresh()`](#data-changed-without-the-model-needs-refresh) | Code that changes `getData()` directly and relies on a later write to update the bindings                                   |
+| [`loadData` uses `fetch`](#loaddata-uses-fetch)                                                   | Tests and apps that intercept an asynchronous load with `MockServer` or a fake `XMLHttpRequest`, or configure `jQuery.ajax` |
 
 ## How parity is tested
 
@@ -104,11 +104,11 @@ model.refresh(); // both models: every binding checks
 
 ## `loadData` uses `fetch`
 
-JSONModel loads with `jQuery.ajax`, SignalModel with `fetch` (a synchronous `loadData(url, params, false)` uses `XMLHttpRequest` in both). The parameters, events, error objects and log entries are the same. What differs is what can intercept the request:
+JSONModel loads with `jQuery.ajax`. SignalModel loads asynchronously with `fetch` and synchronously (`loadData(url, params, false)`) with `XMLHttpRequest`. The parameters, events, error objects and log entries are the same. What differs is what can intercept an asynchronous request:
 
-- `sap.ui.core.util.MockServer` and sinon's fake `XMLHttpRequest` do not see it.
-- `jQuery.ajaxSetup`, prefilters and global ajax events do not apply.
+- `sap.ui.core.util.MockServer` and sinon's fake `XMLHttpRequest` do not see it. They do see a synchronous load.
 - The `X-Requested-With: XMLHttpRequest` header is not sent, and `Accept` is `application/json` unless you pass your own.
-- A `304 Not Modified` that reaches the page (a request with your own `If-None-Match`) is an error; `jQuery.ajax` treats it as a success without data.
 
-**What to do.** In tests, stub `window.fetch` or serve the file. For a mocked OData-like backend, mock at the network level (a service worker or the dev server) or load the data yourself and pass it to `setData`. Send headers you need with the `headers` parameter of `loadData`.
+For both kinds of load, `jQuery.ajaxSetup`, prefilters and global ajax events do not apply.
+
+**What to do.** In a test with `MockServer` or a fake `XMLHttpRequest`, load synchronously, or stub `window.fetch`, or serve the file. In an app, mock at the network level (a service worker or the dev server), or load the data yourself and pass it to `setData`. Send headers you need with the `headers` parameter of `loadData`.

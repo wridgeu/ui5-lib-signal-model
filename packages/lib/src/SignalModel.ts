@@ -283,9 +283,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         statusText: statusText || "error",
         responseText,
       };
+      // Not modified and no content are a success without data, as with jQuery.ajax
+      if (statusCode === 204 || statusCode === 304) return undefined;
       if (statusCode < 200 || statusCode >= 300) throw failure;
-      // No content is a success without data, as with jQuery.ajax
-      if (statusCode === 204) return undefined;
       try {
         return JSON.parse(responseText) as T;
       } catch {
