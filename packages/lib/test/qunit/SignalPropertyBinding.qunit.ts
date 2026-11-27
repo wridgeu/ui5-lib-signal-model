@@ -870,4 +870,237 @@ QUnit.module("SignalPropertyBinding", () => {
       return shown;
     });
   });
+
+  QUnit.test("setContext: a change handler that writes to the new path is seen", async (assert) => {
+    await inBoth(assert, "B,Bob,Bob", async (Model) => {
+      const data: Data = { items: [{ name: "A" }, { name: "B" }] };
+      const model = new Model(data);
+      const binding = model.bindProperty("name", model.createBindingContext("/items/0"));
+      binding.initialize();
+      const events: unknown[] = [];
+      binding.attachChange(() => {
+        events.push(binding.getValue());
+        if (events.length === 1) model.setProperty("/items/1/name", "Bob");
+      });
+      (binding as unknown as { setContext(context: unknown): void }).setContext(
+        model.createBindingContext("/items/1"),
+      );
+      await later(20);
+      const shown = [...events, binding.getValue()];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test("a binding hears once of an asynchronous write of an object", async (assert) => {
+    // refresh() of the binding before the timer of the write
+    await inBoth(assert, "1,1", async (Model) => {
+      const data: Data = { o: { x: 0 } };
+      const model = new Model(data);
+      const binding = model.bindProperty("/o");
+      binding.initialize();
+      let events = 0;
+      binding.attachChange(() => events++);
+      model.setProperty("/o", { x: 1 }, undefined, true);
+      binding.refresh();
+      const shown = [events];
+      await later(20);
+      shown.push(events);
+      model.destroy();
+      return shown;
+    });
+    // setValue: no event for the binding that wrote, one for the other; a later write
+    // below the object is told to both
+    await inBoth(assert, "0,1,3", async (Model) => {
+      const data: Data = { o: { x: 0 } };
+      const model = new Model(data);
+      const binding = model.bindProperty("/o");
+      const other = model.bindProperty("/o");
+      binding.initialize();
+      other.initialize();
+      let events = 0;
+      let otherEvents = 0;
+      binding.attachChange(() => events++);
+      other.attachChange(() => otherEvents++);
+      binding.setValue({ x: 2 });
+      await later(20);
+      const shown = [events, otherEvents];
+      model.setProperty("/o", { x: 3 });
+      await later(20);
+      shown.push(events + otherEvents);
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test(
+    "a list keyed by its row objects: merges around a suspend and a microtask",
+    async (assert) => {
+      type Detecting = { enableExtendedChangeDetection(detect: boolean, key: string): void };
+      const rows = (Model: AnyModel) => {
+        const data: Data = { rows: [{ v: 1 }, { v: 2 }] };
+        const model = new Model(data);
+        const list = model.bindList("/rows") as ReturnType<SignalModel["bindList"]>;
+        (list as unknown as Detecting).enableExtendedChangeDetection(false, "");
+        list.initialize();
+        list.getContexts(0, 10);
+        let events = 0;
+        list.attachChange(() => {
+          events++;
+          list.getContexts(0, 10);
+        });
+        return [model, list, () => events] as const;
+      };
+      // Suspended in the task of the merge: the change is not lost
+      await inBoth(assert, "1", async (Model) => {
+        const [model, list, events] = rows(Model);
+        model.setData({ rows: [{ v: 9 }] }, true);
+        list.suspend();
+        await later(20);
+        list.resume();
+        await later(20);
+        const shown = [events()];
+        model.destroy();
+        return shown;
+      });
+      // The end of the first merge does not take the mark of the second
+      await inBoth(assert, "2", async (Model) => {
+        const [model, , events] = rows(Model);
+        model.setData({ rows: [{ v: 9 }] }, true);
+        await Promise.resolve();
+        model.setData({ rows: [{ v: 10 }] }, true);
+        await later(20);
+        const shown = [events()];
+        model.destroy();
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test("writes skip the walk upwards again once the last signal is gone", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    const binding = model.bindProperty("/a");
+    binding.initialize();
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    const registry = (model as any).registry as { minDepth: number };
+    assert.strictEqual(registry.minDepth, 1);
+    const deep = model.bindProperty("/a/b/c");
+    deep.initialize();
+    binding.destroy();
+    assert.strictEqual(registry.minDepth, 3, "the shallowest signal left");
+    deep.destroy();
+    assert.strictEqual(registry.minDepth, Infinity);
+    model.destroy();
+  });
+
+  QUnit.test("observe: what JSONModel leaves unobserved or cannot take", async (assert) => {
+    const created = new SignalModel<Record<string, unknown>>({}, { observe: true });
+    created.setProperty("/n", { a: 1 });
+    const binding = created.bindProperty("/n/a");
+    binding.initialize();
+    binding.attachChange(() => {});
+    (created.getData().n as { a: number }).a = 2;
+    await later(20);
+    assert.strictEqual(binding.getValue(), 2, "a key created by setProperty is observed");
+    class Point {
+      x = 1;
+    }
+    created.setProperty("/point", new Point());
+    created.setProperty("/point/y", 2);
+    const y = Object.getOwnPropertyDescriptor(created.getProperty("/point"), "y");
+    assert.strictEqual(y?.value, 2, "a class instance keeps plain properties");
+    created.setProperty("/list", [1]);
+    created.setProperty("/list/length", 3);
+    assert.strictEqual(created.getProperty("/list/length"), 3, "the length of an array stays");
+    created.destroy();
+
+    // oxlint-disable-next-line no-sparse-arrays -- the hole is the point
+    const holes = new SignalModel<Record<string, unknown>>({ a: [1, , 3] }, { observe: true });
+    (holes.getData().a as unknown[])[1] = "x";
+    assert.deepEqual(Object.keys(holes.getData().a as unknown[]), ["0", "1", "2"]);
+    holes.setData({ a: ["m"] }, true);
+    assert.deepEqual(holes.getData().a, ["m", "x", 3], "a merge sees the filled hole");
+    holes.destroy();
+
+    const cyclic: Record<string, unknown> = { x: 1 };
+    cyclic.self = cyclic;
+    const model = new SignalModel(cyclic, { observe: true });
+    const x = model.bindProperty("/x");
+    x.initialize();
+    x.attachChange(() => {});
+    cyclic.x = 2;
+    await later(20);
+    assert.strictEqual(x.getValue(), 2, "data that refers to itself is observed");
+    model.destroy();
+  });
+
+  QUnit.test("a write below an object right after setValue is told", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ o: { x: 0 } });
+    const binding = model.bindProperty("/o");
+    binding.initialize();
+    const seen: unknown[] = [];
+    binding.attachChange(() => seen.push((binding.getValue() as { x: number }).x));
+    binding.setValue({ x: 1 });
+    model.setProperty("/o/x", 99);
+    await later(20);
+    assert.deepEqual(seen, [99], "the write of the binding itself is not, the one below is");
+    model.setProperty("/o", model.getProperty("/o"), undefined, true);
+    await later(20);
+    assert.deepEqual(seen, [99, 99], "nothing is kept: a later asynchronous write is told");
+    model.destroy();
+  });
+
+  QUnit.test("setValue: a change handler that writes again is not dropped", async (assert) => {
+    await inBoth(assert, "C", async (Model) => {
+      const data: Data = { v: "" };
+      const model = new Model(data);
+      const binding = model.bindProperty("/v");
+      binding.initialize();
+      let wrote = false;
+      model.attachPropertyChange(() => model.setProperty("/v", "B"));
+      binding.attachChange(() => {
+        if (wrote) return;
+        wrote = true;
+        model.setProperty("/v", "C");
+      });
+      binding.setValue("A");
+      await later(20);
+      const shown = [binding.getValue()];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test("a merge into data that refers to itself", (assert) => {
+    const data: Record<string, unknown> = { x: 1, gone: undefined };
+    data.self = data;
+    const model = new SignalModel(data);
+    model.setData({ x: 2 }, true);
+    assert.strictEqual(model.getProperty("/x"), 2);
+    model.setData(model.getData(), true);
+    assert.strictEqual(model.getProperty("/self/self/x"), 2, "merged with itself");
+    model.destroy();
+  });
+
+  QUnit.test("setContext while suspended, to a path with the same value", async (assert) => {
+    // One event, from resume(), which forces its check
+    await inBoth(assert, "0,1", async (Model) => {
+      const data: Data = { items: [{ name: "A" }, { name: "A" }] };
+      const model = new Model(data);
+      const binding = model.bindProperty("name", model.createBindingContext("/items/0"));
+      binding.initialize();
+      let events = 0;
+      binding.attachChange(() => events++);
+      binding.suspend();
+      (binding as unknown as { setContext(context: unknown): void }).setContext(
+        model.createBindingContext("/items/1"),
+      );
+      const shown = [events];
+      binding.resume();
+      await later(20);
+      shown.push(events);
+      model.destroy();
+      return shown;
+    });
+  });
 });

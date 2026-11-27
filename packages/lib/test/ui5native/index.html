@@ -42,10 +42,13 @@
                 }
                 request.onload = () =>
                   resolve(
-                    new Response(request.status === 204 ? null : request.responseText, {
-                      status: request.status || 200,
-                      statusText: request.statusText,
-                    }),
+                    new Response(
+                      [204, 304].includes(request.status) ? null : request.responseText,
+                      {
+                        status: request.status || 200,
+                        statusText: request.statusText,
+                      },
+                    ),
                   );
                 request.onerror = () => reject(new TypeError("Failed to fetch"));
                 options.signal?.addEventListener("abort", () => {

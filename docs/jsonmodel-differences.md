@@ -1,6 +1,6 @@
 # Differences from JSONModel
 
-SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Seven differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first five live, next to a JSONModel.
+SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Eight differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first five live, next to a JSONModel.
 
 | Difference                                                                                        | Who notices                                                                                                                 |
 | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -11,6 +11,7 @@ SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`.
 | [Data changed without the model needs `refresh()`](#data-changed-without-the-model-needs-refresh) | Code that changes `getData()` directly and relies on a later write to update the bindings                                   |
 | [`loadData` uses `fetch`](#loaddata-uses-fetch)                                                   | Tests and apps that intercept an asynchronous load with `MockServer` or a fake `XMLHttpRequest`, or configure `jQuery.ajax` |
 | [A write into a prototype is refused](#a-write-into-a-prototype-is-refused)                       | Nobody on purpose: JSONModel changes `Object.prototype` there                                                               |
+| [`observe` covers more](#observe-covers-more)                                                     | Nobody on purpose: JSONModel loses updates or throws there                                                                  |
 
 ## How parity is tested
 
@@ -121,3 +122,13 @@ JSONModel follows a path wherever it leads. `setProperty("/__proto__/isAdmin", t
 SignalModel refuses such a write: `setProperty` and `mergeProperty` return `false` and log a warning when the path has a `__proto__` segment, or goes on through a `constructor` that the data only inherits. A key named `constructor` that the data holds itself is data and stays writable. Reading is unchanged.
 
 **What to do.** Nothing, unless code relied on reaching a prototype through the model; change the prototype directly then.
+
+## `observe` covers more
+
+With the `observe` option (JSONModel's `bObserve`) both models put getters and setters on the data. JSONModel has three gaps there that SignalModel does not copy:
+
+- A key created by `setProperty` is observed, and so is everything below it. JSONModel observes only what `setData` saw, so a later assignment to such a property updates nothing.
+- A hole in an array stays visible after it was filled. In JSONModel the index is hidden from `Object.keys` from then on, and a merge into that array throws.
+- Data that refers to itself is observed. JSONModel ends in a stack overflow.
+
+A key added by a direct assignment and a `push` are not observed in either model; call `refresh()` after those.

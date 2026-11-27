@@ -52,7 +52,7 @@ const model = new SignalModel({ customer: { name: "Alice", age: 28 }, orders: []
 // Works with standard XML view bindings: {/customer/name}, {/orders}, etc.
 ```
 
-For the full API reference, usage examples, computed signals, and configuration options, see the **[library documentation](packages/lib/README.md)**. The seven places where it differs from JSONModel on purpose, each with what to do about it, are in [Differences from JSONModel](docs/jsonmodel-differences.md); the internals are in the [architecture notes](docs/architecture.md).
+For the full API reference, usage examples, computed signals, and configuration options, see the **[library documentation](packages/lib/README.md)**. The eight places where it differs from JSONModel on purpose, each with what to do about it, are in [Differences from JSONModel](docs/jsonmodel-differences.md); the internals are in the [architecture notes](docs/architecture.md).
 
 ## Demo
 

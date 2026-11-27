@@ -67,6 +67,8 @@ export default class SignalListBinding extends ClientListBinding {
   _rowChanged = false;
   /** Like _merged, but only until the bindings were updated after the merge */
   private _mergedNow = false;
+  /** Counts the merges, so that the end of one does not take the mark of a later one */
+  private _merges = 0;
   /** The rows are a copy of the model's (see _copyRows), taken since the last update() */
   private _ownRows = false;
   /** The rows as they were before _onRowChange() copied them in the merge that is running */
@@ -107,15 +109,14 @@ export default class SignalListBinding extends ClientListBinding {
     }
     this._merged = true;
     this._mergedNow = true;
+    const merge = ++this._merges;
     // Until the bindings were updated after the merge. Two hops, so that an update queued
-    // later in this task still runs first. A suspended list is checked at resume().
-    if (!internal.bSuspended) {
-      queueMicrotask(() =>
-        queueMicrotask(() => {
-          this._mergedNow = false;
-        }),
-      );
-    }
+    // later in this task still runs first. A list suspended by then is checked at resume().
+    queueMicrotask(() =>
+      queueMicrotask(() => {
+        if (merge === this._merges && !internal.bSuspended) this._mergedNow = false;
+      }),
+    );
   }
 
   /**

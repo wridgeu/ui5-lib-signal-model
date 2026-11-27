@@ -139,13 +139,18 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * as JSONModel's observeData() does. A setter observes the new value and calls
    * checkUpdate().
    */
-  private _observeData(root: unknown = this.oData): void {
+  private _observeData(root: unknown = this.oData, at?: object, atKey?: string | number): void {
     if (!this.observe) return;
+    // Each object once: data may refer to itself
+    const seen = new WeakSet<object>();
     const observe = (value: unknown, parent?: object, key: string | number = ""): void => {
-      if (Array.isArray(value)) {
-        for (let i = 0; i < value.length; i++) observe(value[i], value, i);
-      } else if (isPlainObject(value)) {
-        for (const name in value) observe(value[name], value, name);
+      if (typeof value === "object" && value !== null && !seen.has(value)) {
+        seen.add(value);
+        if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i++) observe(value[i], value, i);
+        } else if (isPlainObject(value)) {
+          for (const name in value) observe(value[name], value, name);
+        }
       }
       if (!parent) return;
       Object.defineProperty(
@@ -157,15 +162,17 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           : {
               // An array hole becomes a property here: a merge has to be able to cut it
               configurable: true,
+              // Stated for such a hole, which would be hidden from a merge otherwise
+              enumerable: true,
               get: () => value,
               set: (next: unknown) => {
-                observe(next, parent, key);
+                this._observeData(next, parent, key);
                 this.checkUpdate();
               },
             },
       );
     };
-    observe(root);
+    observe(root, at, atKey);
   }
 
   /**
@@ -229,7 +236,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
     // Upper case, as jQuery.ajax does
     const method = (type || "GET").toUpperCase();
-    let fullURL = url;
+    // Without the fragment, as jQuery.ajax: parameters behind it would not be sent
+    let fullURL = url.replace(/#.*$/, "");
     // Fall back to model-level cache setting (set via forceNoCache), matching JSONModel.
     const effectiveCache = cache === undefined ? asInternal(this).bCache : cache;
     const info = "cache=" + effectiveCache + ";bMerge=" + merge;
@@ -237,10 +245,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     // Requests without a body carry the parameters in the URL, as jQuery.ajax
     const inUrl = method === "GET" || method === "HEAD";
-    if (parameters && inUrl) {
-      const paramString =
-        typeof parameters === "string" ? parameters : new URLSearchParams(parameters).toString();
-      fullURL += (url.includes("?") ? "&" : "?") + paramString;
+    // Empty for an empty object: no "?" without a query then, and no body
+    const paramString =
+      typeof parameters === "string"
+        ? parameters
+        : parameters
+          ? new URLSearchParams(parameters).toString()
+          : "";
+    if (paramString && inUrl) {
+      fullURL += (fullURL.includes("?") ? "&" : "?") + paramString;
     }
 
     // Only where a browser would cache, as jQuery.ajax
@@ -259,9 +272,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Content-Type: application/x-www-form-urlencoded. String params are sent as-is.
     // Callers wanting JSON POST must stringify manually and set Content-Type via customHeaders.
     let body: string | undefined;
-    if (!inUrl && parameters) {
-      body =
-        typeof parameters === "string" ? parameters : new URLSearchParams(parameters).toString();
+    if (!inUrl && paramString) {
+      body = paramString;
       if (!Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
         headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
       }
@@ -405,18 +417,18 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     importPromise.catch(() => {});
 
     // After destroy() the promise stays pending, as JSONModel's
-    const never = new Promise<undefined>(() => {});
+    const never = (): Promise<undefined> => new Promise(() => {});
     // Chain sequentially: wait for previous imports, then process this one.
     // Matches JSONModel's pSequentialImportCompleted pattern.
     const returnPromise = this._importChain.then(() =>
       importPromise.then(
         (data) => {
-          if (asInternal(this).bDestroyed) return never;
+          if (asInternal(this).bDestroyed) return never();
           succeed(data);
           return undefined;
         },
         (errorInfo: LoadFailure) => {
-          if (asInternal(this).bDestroyed) return never;
+          if (asInternal(this).bDestroyed) return never();
           fail(errorInfo);
           return Promise.reject(errorInfo);
         },
@@ -560,17 +572,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   getProperty(path: string, context?: object): unknown;
   getProperty(path: string, context?: object): unknown {
-    // Only resolve computed check for proper Context objects (not raw data items from FilterProcessor)
-    if (
-      this.registry.hasComputeds &&
-      (!context || typeof (context as Context).getPath === "function")
-    ) {
-      const resolvedPath = this._resolvePath(path, context as Context | undefined);
-      if (resolvedPath && this.registry.isComputed(resolvedPath)) {
-        // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
-        return this.registry.get(resolvedPath)!.get();
-      }
-    }
     return this._getObject(path, context);
   }
 
@@ -643,6 +644,18 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
     // Also to a truthy primitive, as in JSONModel: the assignment throws a TypeError
     this._assign(parent, propertyName, value);
+    if (this.observe) {
+      // A new key has no setter yet. JSONModel leaves it and what is below it unobserved.
+      const written = Object.getOwnPropertyDescriptor(parent, propertyName);
+      // Only on plain data, as everywhere: not on a class instance or a function
+      if (
+        written?.configurable &&
+        !written.get &&
+        (Array.isArray(parent) || isPlainObject(parent))
+      ) {
+        this._observeData(parent[propertyName], parent, propertyName);
+      }
+    }
 
     if (this.registry.size > 0) {
       if (asyncUpdate) {
@@ -710,6 +723,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this._pendingAsyncPaths.size === 0) return;
     const dirty = this._pendingAsyncPaths;
     this._pendingAsyncPaths = new Set();
+    // Called by a synchronous write: the timer has nothing left to do
+    if (this._bulkSyncTimer !== null) {
+      clearTimeout(this._bulkSyncTimer);
+      this._bulkSyncTimer = null;
+    }
     const invalidatedParents = new Set<string>();
 
     for (const path of dirty) {
@@ -743,7 +761,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   mergeProperty(path: string, value: unknown, context?: Context): boolean;
   mergeProperty(path: string, value: unknown, context?: Context): boolean {
-    const resolvedPath = asInternal(this).resolve(path, context);
+    const resolvedPath = this._resolvePath(path, context);
     if (!resolvedPath) {
       return false;
     }
@@ -810,6 +828,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // keeps a class instance above the path as it is, with what is frozen inside.
       if (frozen) {
         this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData) as T;
+        this._mayHoldUndefined = false;
         const lastSlash = resolvedPath.lastIndexOf("/");
         const parent = this._getObject(resolvedPath.substring(0, lastSlash || 1));
         try {
@@ -905,7 +924,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @since 0.1.0
    */
   isList(path: string, context?: Context): boolean {
-    const absolutePath = asInternal(this).resolve(path, context);
+    const absolutePath = this._resolvePath(path, context);
     if (!absolutePath) return false;
     return Array.isArray(this._getObject(absolutePath));
   }
@@ -929,6 +948,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // writes so far, as JSONModel's check cancels its timer.
       this.registry.invalidateAll(this._readPath, false);
       this._pendingAsyncPaths.clear();
+      if (this._bulkSyncTimer !== null) {
+        clearTimeout(this._bulkSyncTimer);
+        this._bulkSyncTimer = null;
+      }
       if (this.registry.hasComputeds) {
         // A computed notifies its watchers itself, also here: drop those updates
         for (const binding of asInternal(this).getBindings()) {
@@ -985,11 +1008,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this.registry.hasComputeds && !this.registry.isComputed(path)) {
       let idx = path.lastIndexOf("/");
       while (idx > 0) {
-        const parentPath = path.substring(0, idx);
-        if (this.registry.isComputed(parentPath)) {
-          // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
-          return this.registry.get(parentPath)!;
-        }
+        const above = this.registry.getComputed(path.substring(0, idx));
+        if (above) return above;
         idx = path.lastIndexOf("/", idx - 1);
       }
     }
@@ -1078,6 +1098,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     this.registry.sync(path, this._readPath);
   }
 
+  /**
+   * Whether an asynchronous write at `path` still waits to be told to the bindings.
+   *
+   * @internal
+   */
+  _isWritePending(path: string): boolean {
+    return this._pendingAsyncPaths.has(path);
+  }
+
   /** Whether a computed reads `path` or a path below it. */
   private _isRead(path: string): boolean {
     const prefix = path + "/";
@@ -1146,10 +1175,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     // Computed signals live in the registry, not in oData.
     // Return the computed value so list/tree bindings can see it.
-    if (this.registry.hasComputeds && this.registry.isComputed(resolvedPath)) {
-      // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
-      return this.registry.get(resolvedPath)!.get();
-    }
+    const computed = this.registry.hasComputeds && this.registry.getComputed(resolvedPath);
+    if (computed) return computed.get();
 
     if (resolvedPath === "/") {
       return this.oData;
@@ -1165,9 +1192,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         if (!part) break;
         currentPath += "/" + part;
 
-        if (this.registry.isComputed(currentPath)) {
-          // oxlint-disable-next-line typescript/no-non-null-assertion -- guarded by isComputed() check
-          node = this.registry.get(currentPath)!.get();
+        const above = this.registry.getComputed(currentPath);
+        if (above) {
+          node = above.get();
         } else {
           if (!node) {
             return node;
@@ -1206,13 +1233,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this.registry.isComputed(resolvedPath)) {
       return resolvedPath;
     }
-    const parts = resolvedPath.substring(1).split("/");
-    let ancestor = "";
-    for (let i = 0; i < parts.length - 1; i++) {
-      ancestor += "/" + parts[i];
-      if (this.registry.isComputed(ancestor)) {
-        return ancestor;
-      }
+    // From the top, without an array of the segments: this runs on every write
+    for (
+      let idx = resolvedPath.indexOf("/", 1);
+      idx !== -1;
+      idx = resolvedPath.indexOf("/", idx + 1)
+    ) {
+      const ancestor = resolvedPath.substring(0, idx);
+      if (this.registry.isComputed(ancestor)) return ancestor;
     }
     return null;
   }
@@ -1331,9 +1359,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       walk(child);
       keys.pop();
     };
+    // Each object once: data may refer to itself
+    const seen = new WeakSet<object>();
     const walk = (node: object): void => {
       const list = Array.isArray(node);
-      if (!list && !isPlainObject(node)) return;
+      if ((!list && !isPlainObject(node)) || seen.has(node)) return;
+      seen.add(node);
       // JSONModel's rebuild leaves nothing frozen behind. Thrown like the write that such
       // an object refuses: the merge then rebuilds the data. Not for mergeProperty, which
       // rebuilds only if its own write fails.
@@ -1400,8 +1431,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // Own properties only: an inherited one ("constructor") is not merged into
       const oldValue = Object.hasOwn(target, key) ? target[key] : undefined;
       const newValue = source[key];
-      // Like JSONModel's deepExtend: an undefined value in the payload changes nothing
-      if (newValue === undefined) {
+      // Like JSONModel's deepExtend: an undefined value in the payload changes nothing.
+      // Nor does the object that is there already; data that refers to itself ends here.
+      if (newValue === undefined || (newValue === oldValue && typeof newValue === "object")) {
         continue;
       }
 

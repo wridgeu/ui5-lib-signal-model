@@ -1022,4 +1022,43 @@ QUnit.module("loadData", () => {
     assert.deepEqual(model.getData(), { a: 1 });
     model.destroy();
   });
+
+  QUnit.test("an empty object as parameters adds nothing to the request", async (assert) => {
+    const originalFetch = window.fetch;
+    const calls: unknown[] = [];
+    window.fetch = (url, init) => {
+      calls.push([url, init?.method, init?.body]);
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    };
+    const model = new SignalModel();
+    try {
+      await model.loadData("/x.json", {});
+      await model.loadData("/x.json", {}, true, "POST");
+    } finally {
+      window.fetch = originalFetch;
+    }
+    assert.deepEqual(calls, [
+      ["/x.json", "GET", undefined],
+      ["/x.json", "POST", undefined],
+    ]);
+    model.destroy();
+  });
+
+  QUnit.test("parameters go before a fragment, which is not sent", async (assert) => {
+    const originalFetch = window.fetch;
+    const urls: unknown[] = [];
+    window.fetch = (url) => {
+      urls.push(url);
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    };
+    const model = new SignalModel();
+    try {
+      await model.loadData("/x.json#part", { a: "1" });
+      await model.loadData("/x.json?b=2#part", { a: "1" });
+    } finally {
+      window.fetch = originalFetch;
+    }
+    assert.deepEqual(urls, ["/x.json?a=1", "/x.json?b=2&a=1"]);
+    model.destroy();
+  });
 });

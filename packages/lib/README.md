@@ -297,7 +297,7 @@ model.setProperty("/a/b/c", value)
 ```
 
 - **`autoCreatePaths: true`**: Auto-creates intermediate objects when setting a deeply nested path. `model.setProperty("/a/b/c", value)` creates `{a: {b: {}}}` if the parent path doesn't exist, instead of returning `false`. Useful for dynamic form models where the schema isn't known upfront. Only missing parents (`undefined` or `null`) are created. An existing value is never replaced: with `name: ""`, `setProperty("/name/first", "x")` still returns `false`, and with `name: "Al"` it throws a `TypeError`, as in JSONModel.
-- **`observe: true`** (or `true` as the second constructor argument, like JSONModel's `bObserve`): an assignment to a property of the data object (`model.getData().name = "x"`) updates the bindings without `refresh()`. As in JSONModel, the properties of the data are replaced by getters and setters and every such assignment checks all bindings, so writes get slower. Off by default.
+- **`observe: true`** (or `true` as the second constructor argument, like JSONModel's `bObserve`): an assignment to a property of the data object (`model.getData().name = "x"`) updates the bindings without `refresh()`. As in JSONModel, the properties of the data are replaced by getters and setters and every such assignment checks all bindings, so writes get slower. Off by default. Three bugs of JSONModel are not copied (see [the differences](../../docs/jsonmodel-differences.md#observe-covers-more)).
 - **`strictLeafCheck: true`**: Rejects `setProperty` writes to leaf properties that don't exist on the parent object (returns `false`). JSONModel allows creating new properties on existing parents; this flag prevents it. Useful for catching typos in property names against a known schema. A key that holds `undefined` is gone after a merge (as in JSONModel), so declare the properties of such a schema with `null`.
 
 | `autoCreatePaths` | `strictLeafCheck` | Missing parent | New leaf on existing parent | Use case                         |
@@ -311,7 +311,7 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Seven differences remain on purpose:
+The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Eight differences remain on purpose:
 
 - **A merge works on the data in place.** The data after `setData(data, true)` or `mergeProperty` equals JSONModel's, but the existing objects are changed instead of rebuilt: `getData()` stays the same object. Data you changed directly needs `refresh()` before a merge drops its `undefined` keys.
 - **Bindings update in a microtask**, not inside `setProperty`. A control shows the new value one microtask later, and an error in a formatter is logged instead of thrown out of `setProperty`.
@@ -320,6 +320,7 @@ The same operations run against both models in a randomized test, and UI5's own 
 - **Data changed directly in `getData()` needs `refresh()`.** JSONModel checks all bindings on every write and so finds such a change with the next write anywhere; SignalModel tells only the bindings at, above and below the written path.
 - **An asynchronous `loadData` uses `fetch`**, not `jQuery.ajax`: `MockServer` and a fake `XMLHttpRequest` do not see the request. They do see a synchronous load (`loadData(url, params, false)`).
 - **A write into a prototype is refused.** `setProperty("/__proto__/x", 1)` returns `false`; JSONModel writes to `Object.prototype`.
+- **The `observe` option covers more.** A key created by `setProperty` is observed, a filled array hole stays visible, and data that refers to itself works. JSONModel loses updates or throws in these cases.
 
 Details, the reason for each and what to do about it: [Differences from JSONModel](https://github.com/wridgeu/ui5-lib-signal-model/blob/main/docs/jsonmodel-differences.md).
 

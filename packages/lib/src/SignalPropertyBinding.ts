@@ -40,6 +40,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   private _subscribedPath: string | null = null;
   private _previousResolvedPath: string | undefined = undefined;
   private _isDirectSignal = false;
+  /** An object this binding shows already, while the model still has to tell of its write */
+  private _shown: unknown = undefined;
 
   /**
    * @param forceUpdate - Whether to force a change event regardless of value comparison.
@@ -51,6 +53,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       return;
     }
 
+    this._shown = undefined;
     const value = self._getValue();
     // No signal has reported a write here, so the values are compared as in JSONModel
     this._applyUpdate(self, value, forceUpdate || !deepEqual(value, self.oValue));
@@ -68,10 +71,25 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       return;
     }
 
+    // Whatever the binding hears, what it showed before is no longer the news
+    this._shown = undefined;
     const value = this._isDirectSignal ? signalValue : self._getValue();
     // An object stays the same object when something below it is written
     const changed = (typeof value === "object" && value !== null) || !Object.is(self.oValue, value);
     this._applyUpdate(self, value, changed);
+  }
+
+  /**
+   * Asked once when the model tells of an asynchronous write: whether this binding shows
+   * that object already. Only that one notification is skipped, a write below the object
+   * is told as ever.
+   *
+   * @internal
+   */
+  _showsAlready(value: unknown): boolean {
+    const shown = this._shown;
+    this._shown = undefined;
+    return typeof value === "object" && value !== null && value === shown;
   }
 
   private _applyUpdate(
@@ -107,6 +125,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     if (!deepEqual(self.oValue, value)) {
       if (this.oModel.setProperty(self.sPath, value, self.oContext, true)) {
         self.oValue = value;
+        // The model tells of this write later: no event for the binding that made it
+        this._shown = value;
         self.getDataState().setValue(self.oValue);
         this.oModel.firePropertyChange({
           reason: ChangeReason.Binding,
@@ -116,9 +136,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
         });
         // The model can hold something else than was written, e.g. the length of an array
         if (!Object.is(self._getValue(), value)) {
-          this.checkUpdate();
-          // A propertyChange handler wrote to the path: the check has covered that write
+          // A propertyChange handler wrote to the path: the check covers that write. Before
+          // the check, whose change handlers may write again.
           cancelFlush(this);
+          this.checkUpdate();
         }
       }
     }
@@ -141,6 +162,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       this.watcher?.watch();
     }
     super.refresh(forceUpdate);
+    // An asynchronous write tells of itself later: this binding has shown it now
+    if (this._subscribedPath && this.oModel._isWritePending(this._subscribedPath)) {
+      this._shown = asInternal(this).oValue;
+    }
   }
 
   /** @since 0.1.0 */
@@ -178,6 +203,7 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       this._subscribedPath = null;
     }
     this._isDirectSignal = false;
+    this._shown = undefined;
     cancelFlush(this);
     this.watcher = teardownWatcher(this.watcher);
   }
@@ -211,12 +237,15 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       }
       const oldResolved = this.getResolvedPath();
       self.oContext = context;
-      if (this.isRelative()) {
-        this.checkUpdate();
-      }
       const newResolved = this.getResolvedPath();
+      // Before the check: a change handler may write to the new path
       if (oldResolved !== newResolved) {
         this.subscribe();
+        // The check still has to see that the path changed
+        this._previousResolvedPath = oldResolved;
+      }
+      if (this.isRelative()) {
+        this.checkUpdate();
       }
     }
   }

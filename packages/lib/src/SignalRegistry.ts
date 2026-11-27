@@ -4,7 +4,10 @@ import { scheduleFlush, type FlushableBinding } from "./FlushQueue";
 type ValueResolver = (path: string) => unknown;
 
 /** A binding subscribed to a path */
-export type Subscriber = FlushableBinding & { subscribe(): void };
+export type Subscriber = FlushableBinding & {
+  subscribe(): void;
+  _showsAlready?(value: unknown): boolean;
+};
 
 /**
  * Custom equality that uses Object.is for primitives but always returns false
@@ -75,6 +78,8 @@ export default class SignalRegistry {
    * this depth or above has no signal among its ancestors, so the ancestor walk is skipped.
    */
   minDepth = Infinity;
+  /** Signals per depth: keeps minDepth exact when the shallowest signal goes */
+  private depths: number[] = [];
 
   /** @param writeThrough - What `set()` on a state signal does: a write through the model. */
   constructor(private readonly writeThrough: (path: string, value: unknown) => void = () => {}) {}
@@ -111,6 +116,13 @@ export default class SignalRegistry {
   /** Removes the state signal of `path`. Its index entries go with a later sweep. */
   private drop(path: string): void {
     if (!this.signals.delete(path)) return;
+    // Otherwise one binding near the root, long gone, costs every write its walk upwards
+    let depth = path === "/" ? 0 : 1;
+    for (let idx = path.indexOf("/", 1); idx !== -1; idx = path.indexOf("/", idx + 1)) depth++;
+    if (--this.depths[depth] === 0 && depth === this.minDepth) {
+      const next = this.depths.findIndex((count) => count > 0);
+      this.minDepth = next === -1 ? Infinity : next;
+    }
     // The last binding has left a path whose computed was removed: a path like any other
     if (!this.replaced.has(path)) this.released.delete(path);
     this.dropped.add(path);
@@ -140,9 +152,12 @@ export default class SignalRegistry {
     if (!changed) return;
     const current = this.subscribers.get(path);
     if (!current) return;
+    // Forced is the asynchronous write: not told to a binding that shows its value already
     if (Array.isArray(current)) {
-      for (const binding of current) scheduleFlush(binding, signal);
-    } else {
+      for (const binding of current) {
+        if (!(force && binding._showsAlready?.(value))) scheduleFlush(binding, signal);
+      }
+    } else if (!(force && current._showsAlready?.(value))) {
       scheduleFlush(current, signal);
     }
   }
@@ -232,6 +247,7 @@ export default class SignalRegistry {
           this.descendants.set(ancestor, [path]);
         }
       }
+      this.depths[depth] = (this.depths[depth] ?? 0) + 1;
       if (depth < this.minDepth) {
         this.minDepth = depth;
       }
@@ -437,5 +453,6 @@ export default class SignalRegistry {
     this.dropped.clear();
     this.subscribers.clear();
     this.minDepth = Infinity;
+    this.depths = [];
   }
 }
