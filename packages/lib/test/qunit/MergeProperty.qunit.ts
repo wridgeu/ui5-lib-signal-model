@@ -1,4 +1,6 @@
 import SignalModel from "ui5/model/signal/SignalModel";
+import Log from "sap/base/Log";
+import { Signal } from "signal-polyfill";
 
 QUnit.module("mergeProperty", () => {
   QUnit.test("merges into existing object, preserving unchanged fields", (assert) => {
@@ -100,6 +102,35 @@ QUnit.module("mergeProperty", () => {
     model.mergeProperty("/o", { a: 2 });
     assert.strictEqual(model.getData(), data, "the data is not rebuilt");
     assert.strictEqual(data.o.a, 2, "merged in place");
+    model.destroy();
+  });
+
+  QUnit.test("a TypeError that is not a refused write comes out of the merge", (assert) => {
+    const data = { a: 1, o: { b: 1 } };
+    const model = new SignalModel(data);
+    // One watcher per signal: a watcher notifies once until it is armed again
+    for (const path of ["/a", "/o/b"]) {
+      new Signal.subtle.Watcher(() => {
+        throw new TypeError("from a watcher");
+      }).watch(model.getSignal(path));
+    }
+    assert.throws(() => model.setData({ a: 2 }, true), /from a watcher/, "setData with merge");
+    assert.throws(() => model.mergeProperty("/o", { b: 2 }), /from a watcher/, "mergeProperty");
+    assert.strictEqual(model.getData(), data, "the data is not rebuilt");
+    model.destroy();
+  });
+
+  QUnit.test("set() on a signal logs a write the model refuses", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    const warnings: string[] = [];
+    const original = Log.warning;
+    Log.warning = (message: string) => void warnings.push(message);
+    (model.getSignal("/missing/x") as Signal.State<unknown>).set(1);
+    (model.getSignal("/a") as Signal.State<unknown>).set(2);
+    Log.warning = original;
+    assert.strictEqual(warnings.length, 1, "one warning, for the refused write");
+    assert.ok(warnings[0].includes("/missing/x"), "it names the path");
+    assert.strictEqual(model.getProperty("/a"), 2, "the other write went through");
     model.destroy();
   });
 

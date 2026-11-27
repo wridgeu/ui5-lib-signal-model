@@ -1,2 +1,6 @@
 # Auto-detect text files and ensure LF line endings everywhere
 * text=auto eol=lf
+
+# Written by npm run bench:render; collapsed in diffs on GitHub
+docs/benchmark-results.json linguist-generated
+docs/benchmark-results.svg linguist-generated

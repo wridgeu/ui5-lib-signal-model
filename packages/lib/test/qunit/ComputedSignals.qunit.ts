@@ -982,4 +982,39 @@ QUnit.module("ComputedSignals", () => {
       done();
     }, 50);
   });
+
+  QUnit.test(
+    "a binding from before a computed above its path follows that computed",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, c: { name: "raw" } });
+      const binding = model.bindProperty("/c/name");
+      let fired = 0;
+      binding.attachChange(() => fired++);
+      model.createComputed("/c", ["/a"], (a) => ({ name: `computed ${String(a)}` }));
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "computed 1", "the computed's value, without a write");
+      assert.strictEqual(fired, 1, "change fired once");
+      model.setProperty("/a", 2);
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "computed 2", "follows the computed's input");
+      model.destroy();
+    },
+  );
+
+  QUnit.test(
+    "a binding shows a redefined computed without a change of its inputs",
+    async (assert) => {
+      const model = new SignalModel({ a: 5 });
+      model.createComputed("/result", ["/a"], (a) => (a as number) + 10);
+      const binding = model.bindProperty("/result");
+      let fired = 0;
+      binding.attachChange(() => fired++);
+      model.removeComputed("/result");
+      model.createComputed("/result", ["/a"], (a) => (a as number) * 2);
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), 10, "the new formula");
+      assert.strictEqual(fired, 1, "change fired once");
+      model.destroy();
+    },
+  );
 });

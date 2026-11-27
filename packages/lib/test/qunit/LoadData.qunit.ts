@@ -677,6 +677,24 @@ QUnit.module("loadData", () => {
     }
   });
 
+  QUnit.test("an empty status text is filled in as jQuery.ajax does", async (assert) => {
+    // HTTP/2 has no status text; JSONModel then reports jQuery's own
+    const originalFetch = window.fetch;
+    const model = new SignalModel<Record<string, unknown>>({});
+    const seen: unknown[] = [];
+    model.attachRequestFailed((event) => seen.push(event.getParameter("statusText")));
+    window.fetch = () => Promise.resolve(new Response("x", { status: 500, statusText: "" }));
+    await model.loadData(SAMPLE_URL).catch(() => {});
+    window.fetch = () => Promise.resolve(new Response("{", { status: 200, statusText: "" }));
+    await model.loadData(SAMPLE_URL).catch(() => {});
+    window.fetch = () =>
+      Promise.resolve(new Response("x", { status: 404, statusText: "Not Found" }));
+    await model.loadData(SAMPLE_URL).catch(() => {});
+    window.fetch = originalFetch;
+    assert.deepEqual(seen, ["error", "parsererror", "Not Found"]);
+    model.destroy();
+  });
+
   QUnit.test("a response without content is a success without data", async (assert) => {
     const originalFetch = window.fetch;
     window.fetch = () => Promise.resolve(new Response(null, { status: 204 }));

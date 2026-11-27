@@ -24,4 +24,9 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run test:qunit
+      # UI5's own test files, downloaded by test:ui5 only if they are missing
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/lib/test/ui5native/upstream
+          key: ui5-tests-${{ hashFiles('packages/lib/ui5.yaml', 'scripts/run-ui5-tests.mjs') }}
       - run: npm run test:ui5

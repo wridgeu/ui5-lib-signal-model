@@ -123,7 +123,7 @@ JSONModel's rebuild also leaves out every key that holds `undefined` and the tra
 
 This reduces `setData(partial, true)` from O(n) to O(k) where k is the payload size, for every merge that can skip that pass.
 
-Data that cannot be changed in place is rebuilt with `deepExtend`, as JSONModel does with all data: a root that is a class instance or no object, and data that holds an object the merge cannot write to (frozen, for example). The pass that drops `undefined` looks for such objects, since JSONModel's rebuild leaves nothing frozen behind; otherwise the write itself fails. Either way the in-place merge throws a `TypeError`, the model rebuilds the data including the payload, and all signals read their value again. The improvement is largest for shallow merges into large datasets, common in form-based Fiori apps that update a few fields at a time.
+Data that cannot be changed in place is rebuilt with `deepExtend`, as JSONModel does with all data: a root that is a class instance or no object, and data that holds an object the merge cannot write to (frozen, for example). The pass that drops `undefined` looks for such objects, since JSONModel's rebuild leaves nothing frozen behind; otherwise the write itself fails. Either way the in-place merge stops (only for a write the data refuses; any other error comes out of the merge as it is), the model rebuilds the data including the payload, and all signals read their value again. The improvement is largest for shallow merges into large datasets, common in form-based Fiori apps that update a few fields at a time.
 
 ## List Copies
 

@@ -5,7 +5,7 @@ import deepExtend from "sap/base/util/deepExtend";
 import ui5IsPlainObject from "sap/base/util/isPlainObject";
 import type Context from "sap/ui/model/Context";
 import SignalRegistry, { type Subscriber } from "./SignalRegistry";
-import { cancelFlush, flushNow, type FlushableBinding } from "./FlushQueue";
+import { cancelFlush, flushNow, scheduleFlush, type FlushableBinding } from "./FlushQueue";
 import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
 import SignalTreeBinding from "./SignalTreeBinding";
@@ -49,6 +49,13 @@ function depthOf(path: string): number {
   return depth;
 }
 
+/** Thrown by a merge for data that refuses a write (frozen, for example): it then rebuilds the data. */
+class NotWritable extends Error {}
+
+/** A TypeError from a write to the data is that write refused; any other error stays what it is. */
+const refused = (error: unknown): unknown =>
+  error instanceof TypeError ? new NotWritable() : error;
+
 /** Path of an array's `length`, for the array at `arrayPath`. */
 function lengthPath(arrayPath: string): string {
   return arrayPath === "/" ? "/length" : `${arrayPath}/length`;
@@ -88,7 +95,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   constructor(dataOrUrl?: T | string, options?: SignalModelOptions | boolean) {
     super();
     this.registry = new SignalRegistry((path, value) => {
-      this.setProperty(path, value);
+      // set() returns nothing, so a refused write is at least logged
+      if (!this.setProperty(path, value)) {
+        Log.warning(
+          `set() on the signal of "${path}" changed nothing: the model refused the write`,
+          undefined,
+          "ui5.model.signal.SignalModel",
+        );
+      }
     });
     // JSONModel's second argument is bObserve
     const settings = typeof options === "boolean" ? { observe: options } : (options ?? {});
@@ -260,14 +274,20 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     // The same error object as JSONModel, which takes the message from jQuery.ajax
     const parse = (statusCode: number, statusText: string, responseText: string): T | undefined => {
-      const failure = { message: "error", statusCode, statusText, responseText };
+      // jQuery.ajax fills in an empty status text (HTTP/2 has none) with the message
+      const failure = {
+        message: "error",
+        statusCode,
+        statusText: statusText || "error",
+        responseText,
+      };
       if (statusCode < 200 || statusCode >= 300) throw failure;
       // No content is a success without data, as with jQuery.ajax
       if (statusCode === 204) return undefined;
       try {
         return JSON.parse(responseText) as T;
       } catch {
-        throw { ...failure, message: "parsererror" };
+        throw { ...failure, message: "parsererror", statusText: statusText || "parsererror" };
       }
     };
     const noResponse = (message: string): LoadFailure => ({
@@ -483,7 +503,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       } catch (error) {
         // Data that cannot be written to, like a frozen object. What was merged so far is
         // merged again.
-        if (!(error instanceof TypeError)) throw error;
+        if (!(error instanceof NotWritable)) throw error;
         this.oData = deepExtend(Array.isArray(this.oData) ? [] : {}, this.oData, data) as T;
         if (this.registry.size > 0) this.registry.invalidateAll(this._readPath);
       } finally {
@@ -721,7 +741,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             resolvedPath,
           ) || dropped;
       } catch (error) {
-        if (!(error instanceof TypeError)) throw error;
+        if (!(error instanceof NotWritable)) throw error;
         frozen = true;
       } finally {
         this._writing = false;
@@ -864,13 +884,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown>;
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown> {
-    const existing = this.registry.get(path);
-    if (existing) return existing;
-
-    // If a parent path is a computed signal, subscribe to it instead.
+    // If a parent path is a computed signal, subscribe to it instead, also if the path
+    // has a state signal from before that computed was created.
     // Search bottom-up (closest ancestor first) so bindings track the
     // most specific computed. Uses lastIndexOf to avoid array allocation.
-    if (this.registry.hasComputeds) {
+    if (this.registry.hasComputeds && !this.registry.isComputed(path)) {
       let idx = path.lastIndexOf("/");
       while (idx > 0) {
         const parentPath = path.substring(0, idx);
@@ -882,7 +900,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       }
     }
 
-    return this.registry.getOrCreate(path, this._getObject(path));
+    return this.registry.get(path) ?? this.registry.getOrCreate(path, this._getObject(path));
   }
 
   /** @since 0.1.0 */
@@ -1142,15 +1160,18 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // JSONModel's rebuild leaves nothing frozen behind. Thrown like the write that such
       // an object refuses: the merge then rebuilds the data. Not for mergeProperty, which
       // rebuilds only if its own write fails.
-      if (path === "/" && !Object.isExtensible(node))
-        throw new TypeError("Data that cannot be written to");
+      if (path === "/" && !Object.isExtensible(node)) throw new NotWritable();
       const entries = node as Record<string, unknown>;
       let dropped = false;
       let used = 0;
       // for...in, as JSONModel's merge: it skips the holes of an array and sees its other keys
       for (const key in entries) {
         if (entries[key] === undefined || key === "__proto__") {
-          delete entries[key];
+          try {
+            delete entries[key];
+          } catch (error) {
+            throw refused(error);
+          }
           dropped = true;
         } else {
           // Only an array index counts for the length, not a key like "1.5"
@@ -1160,7 +1181,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
       }
       const shorter = list && used < node.length;
-      if (shorter) node.length = used;
+      if (shorter) {
+        try {
+          node.length = used;
+        } catch (error) {
+          throw refused(error);
+        }
+      }
       if (dropped || shorter) changed(node, shorter);
     };
     walk(root);
@@ -1226,12 +1253,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         }
         // Clone incoming arrays and plain objects to prevent external mutation, with the
         // function JSONModel's merge uses: class instances inside stay the same instances.
+        let stored = newValue;
         if (Array.isArray(newValue)) {
-          target[key] = deepExtend([], newValue);
+          stored = deepExtend([], newValue);
         } else if (isPlainObject(newValue)) {
-          target[key] = deepExtend({}, newValue);
-        } else {
-          target[key] = newValue;
+          stored = deepExtend({}, newValue);
+        }
+        try {
+          target[key] = stored;
+        } catch (error) {
+          throw refused(error);
         }
         if (hasSignals) {
           this.registry.set(childPath, target[key]);
@@ -1265,13 +1296,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private _firePathResubscribe(path: string): void {
     const prefix = path + "/";
     // Collected first: subscribe() changes the map
-    const bindings: Subscriber[] = [];
+    const bindings: [string, Subscriber][] = [];
     for (const [subscribedPath, subscribed] of this.registry.subscribers) {
       if (subscribedPath === path || subscribedPath.startsWith(prefix)) {
-        bindings.push(...(Array.isArray(subscribed) ? subscribed : [subscribed]));
+        for (const binding of Array.isArray(subscribed) ? subscribed : [subscribed]) {
+          bindings.push([subscribedPath, binding]);
+        }
       }
     }
-    for (const binding of bindings) binding.subscribe();
+    for (const [subscribedPath, binding] of bindings) {
+      binding.subscribe();
+      // The other signal may hold another value
+      scheduleFlush(binding, this.getSignal(subscribedPath));
+    }
   }
 
   /** @since 0.1.0 */
