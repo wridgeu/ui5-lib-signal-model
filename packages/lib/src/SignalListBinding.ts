@@ -259,6 +259,18 @@ export default class SignalListBinding extends ClientListBinding {
     }
   }
 
+  /**
+   * Checks the binding against the data, as in JSONModel. The data may have changed without
+   * the model, so the signals at the binding's path and below it are brought in line first;
+   * otherwise a later write of the value they still hold would be no change.
+   *
+   * @param forceUpdate - Whether to fire a change event regardless of value comparison.
+   */
+  override refresh(forceUpdate?: boolean): void {
+    if (this._subscribedPath) this.oModel._syncSignals(this._subscribedPath);
+    super.refresh(forceUpdate);
+  }
+
   /** @since 0.1.0 */
   subscribe(): void {
     this.unsubscribe();

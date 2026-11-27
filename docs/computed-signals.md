@@ -17,7 +17,7 @@ model.createComputed("/computedRows", ["/sourceRows"], (rows) =>
 // 4. Only cells whose value actually changed trigger a DOM update
 ```
 
-**Rendering is correct** -- unchanged cells do not re-render. But every binding performs the comparison check. For a table with 2000 rendered rows and 3 columns, 6000 bindings are checked even if only 1 value changed. This is the expected behavior, not a limitation.
+**Rendering is correct** -- unchanged cells do not re-render. But every binding performs the comparison check. For a table with 2000 rendered rows and 3 columns, 6000 bindings are checked even if only 1 value changed.
 
 ## Why Computed Signals Are Atomic
 
@@ -25,7 +25,7 @@ The [TC39 Signals proposal](https://github.com/tc39/proposal-signals) explicitly
 
 This is a deliberate design choice shared across the signals ecosystem:
 
-- **SolidJS** separates [`createSignal`](https://docs.solidjs.com/reference/basic-reactivity/create-signal) (atomic, single value) from [`createStore`](https://docs.solidjs.com/concepts/stores) (Proxy-based, fine-grained per-property tracking). These are two distinct primitives -- stores are not "better signals," they are a fundamentally different reactive architecture built on top of `Proxy`.
+- **SolidJS** separates [`createSignal`](https://docs.solidjs.com/reference/basic-reactivity/create-signal) (atomic, single value) from [`createStore`](https://docs.solidjs.com/concepts/stores) (Proxy-based, fine-grained per-property tracking). These are two distinct primitives.
 - **Angular Signals** are fully atomic. There is no built-in store primitive. The recommended approach for reducing notifications is to decompose large objects into smaller, focused signals.
 - **Preact Signals** are atomic. The community-built [`deepsignal`](https://github.com/luisherranz/deepsignal) package adds Proxy-based fine-grained tracking as an opt-in layer on top.
 
@@ -53,7 +53,7 @@ When a computed re-evaluates, the notification cost is O(N) where N is the numbe
 3. Each binding's `checkUpdate` re-reads its value and compares with the previous value
 4. Only bindings whose value actually changed trigger a DOM update (O(k) where k ≤ N)
 
-For primitive leaf values (strings, numbers -- typical for table cells), the comparison is `Object.is`, which is effectively free and handles `NaN` accurately. For direct property bindings, the flush queue passes the already-read signal value directly to the binding, avoiding redundant path traversal.
+For primitive leaf values (strings, numbers -- typical for table cells), the comparison is `Object.is`, which treats `NaN` as equal to itself. For direct property bindings, the flush queue passes the already-read signal value directly to the binding, avoiding redundant path traversal.
 
 ## Dependency Granularity
 

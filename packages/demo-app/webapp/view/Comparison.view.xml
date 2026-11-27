@@ -29,7 +29,7 @@
 			</Panel>
 		</l:Grid>
 		<MessageStrip
-			text="Both models show identical behavior. Edit either side - bindings update the same way. The difference is internal: SignalModel uses push-based signals, JSONModel uses poll-based checkUpdate."
+			text="Edit either side: the bindings update the same way in both models. Inside, SignalModel pushes changes through signals and JSONModel checks every binding."
 			type="Information"
 			class="sapUiSmallMargin" />
 	</Panel>
@@ -65,7 +65,7 @@
 			type="Success"
 			class="sapUiSmallMarginBottom" />
 		<MessageStrip
-			text="A key that holds undefined, assigned to getData() directly, and then a merge: JSONModel's merge drops the key. SignalModel looks for such keys only after an object or undefined was written through the model, or after a refresh()."
+			text="A key that holds undefined, assigned to getData() directly, and then a merge: JSONModel's merge drops the key. SignalModel looks for such keys only after new data, an object, undefined or a length was written through the model, or after a refresh()."
 			type="Information"
 			class="sapUiSmallMarginBottom" />
 		<HBox class="sapUiSmallMarginBottom">
@@ -101,7 +101,7 @@
 			</f:SimpleForm>
 		</l:Grid>
 		<MessageStrip
-			text="Data changed directly in getData(): JSONModel checks every binding on every write, so the next write anywhere shows the change. SignalModel tells only the bindings of the written path. The recipe works the same in both: refresh() after a direct change, or write through the model."
+			text="Data changed directly in getData(): JSONModel checks every binding on every write, so the next write anywhere shows the change. SignalModel tells only the bindings at, above and below the written path. The recipe works the same in both: refresh() after a direct change, or write through the model."
 			type="Information"
 			class="sapUiSmallMarginBottom" />
 		<HBox class="sapUiSmallMarginBottom">

@@ -22,7 +22,7 @@ After `setData(data, true)` or `mergeProperty` the data equals JSONModel's: same
 - `getData()` returns the same object as before the merge.
 - An object you passed to `setData` or `setProperty` earlier is merged into.
 - Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or a frozen object. `setData(data, true)` finds a frozen object anywhere in the data when it looks for `undefined`; `mergeProperty` rebuilds only when it has to write to one. `getData()` is a new object then, and every binding checks its value, so bindings on objects fire.
-- SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 30 µs otherwise). `mergeProperty` looks only below its path and cannot clear that state for the whole model, so it passes over the data below its path on each call until a `setData(data, true)` has run. So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
+- SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`, a `length`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 30 µs otherwise). `mergeProperty` looks only below its path and cannot clear that state for the whole model, so it passes over the data below its path on each call until a `setData(data, true)` has run. So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
 
 **What to do.** Call `refresh()` after a direct change to `getData()` (see [below](#data-changed-without-the-model-needs-refresh)); the same call covers this. Or write through the model (`setProperty`, `mergeProperty`), or use the `observe` option, which makes an assignment to an existing property count as a write.
 
@@ -93,7 +93,7 @@ model.setProperty("/busy", false);
 // JSONModel: the list shows the new item. SignalModel: it does not.
 ```
 
-The same holds for a binding's own `refresh()`: it updates that binding, not the model's view of the data, so a later write of the old value to that path is no change for the model.
+A binding's own `refresh()` does the same for its path and the paths below it. That binding checks its value at once, as in JSONModel. Other bindings on those paths update in the next microtask; in JSONModel they wait for the next write. A computed whose dependencies were changed directly needs `model.refresh()`.
 
 **What to do.** Write through the model (`setProperty("/items", [...items, newItem])`), or call `model.refresh()` after the direct change. With the `observe` option an assignment to an existing property counts as a write; a `push` or a new key does not, as in JSONModel.
 

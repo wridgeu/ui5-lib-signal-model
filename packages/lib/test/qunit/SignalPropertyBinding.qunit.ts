@@ -525,6 +525,52 @@ QUnit.module("SignalPropertyBinding", () => {
     assert.strictEqual(await run(SignalModel), await run(JSONModel), "as JSONModel");
   });
 
+  QUnit.test("a binding refreshed after a change to getData() tells the model", async (assert) => {
+    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+    const run = async (Model: typeof JSONModel | typeof SignalModel): Promise<string> => {
+      const initial: Record<string, unknown> = { x: 1, rows: [{ n: 1 }], o: { a: 1 } };
+      const model = new Model(initial);
+      const binding = model.bindProperty("/x");
+      const other = model.bindProperty("/x");
+      const list = model.bindList("/rows");
+      const cell = model.bindProperty("/rows/0/n");
+      const object = model.bindProperty("/o");
+      let objectEvents = 0;
+      for (const each of [binding, other, list, cell, object]) {
+        each.attachChange(() => {});
+        each.initialize();
+      }
+      // After a merge the data holds no undefined
+      model.setData({ y: 1 }, true);
+      await tick();
+      object.attachChange(() => objectEvents++);
+      const data = model.getData() as Record<string, unknown> & { rows: { n: number }[] };
+      data.x = 2;
+      data.rows[0].n = 2;
+      data.draft = undefined;
+      binding.refresh();
+      list.refresh();
+      object.refresh();
+      await tick();
+      const shown: unknown[] = [binding.getValue(), other.getValue(), objectEvents];
+      object.refresh(true);
+      await tick();
+      shown.push(objectEvents);
+      // For the model these must be changes, although its last writes held 1 too
+      model.setProperty("/x", 1);
+      model.setProperty("/rows/0/n", 1);
+      model.setData({ saved: true }, true);
+      await tick();
+      shown.push(binding.getValue(), other.getValue(), cell.getValue());
+      shown.push("draft" in (model.getData() as object));
+      model.destroy();
+      return shown.join();
+    };
+    // Second value: another binding on the path follows at once, in JSONModel at the next write
+    assert.strictEqual(await run(SignalModel), "2,2,0,1,1,1,1,false");
+    assert.strictEqual(await run(JSONModel), "2,1,0,1,1,1,1,false");
+  });
+
   QUnit.test("a state signal goes with its last binding", async (assert) => {
     const model = new SignalModel({ rows: Array.from({ length: 2000 }, (_, n) => ({ n })) });
     // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry

@@ -287,7 +287,7 @@ Why that is, what it costs and how to split a computed: [Computed Signals: Re-Ev
 
 ## Configuration Modes
 
-SignalModel defaults to **full JSONModel parity**: `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Three options extend this behavior. Two of them control a level of the path each; the third (`observe`) is JSONModel's `bObserve`:
+By default `setProperty` returns `false` for nonexistent parent paths, as in JSONModel. Three options extend this behavior. Two of them control a level of the path each; the third (`observe`) is JSONModel's `bObserve`:
 
 ```
 model.setProperty("/a/b/c", value)
@@ -317,7 +317,7 @@ The same operations run against both models in a randomized test, and UI5's own 
 - **Bindings update in a microtask**, not inside `setProperty`. A control shows the new value one microtask later, and an error in a formatter is logged instead of thrown out of `setProperty`.
 - **A binding on an object or array fires for every write below it.** A formatter that reads from the object always shows current content; JSONModel can keep the old text.
 - **A list binding keyed by the row object** does not fire after a merge that changed nothing. JSONModel's does, because its merge replaces every row object.
-- **Data changed directly in `getData()` needs `refresh()`.** JSONModel checks all bindings on every write and so finds such a change with the next write anywhere; SignalModel only looks at the written path.
+- **Data changed directly in `getData()` needs `refresh()`.** JSONModel checks all bindings on every write and so finds such a change with the next write anywhere; SignalModel tells only the bindings at, above and below the written path.
 - **An asynchronous `loadData` uses `fetch`**, not `jQuery.ajax`: `MockServer` and a fake `XMLHttpRequest` do not see the request. They do see a synchronous load (`loadData(url, params, false)`).
 
 Details, the reason for each and what to do about it: [Differences from JSONModel](https://github.com/wridgeu/ui5-lib-signal-model/blob/main/docs/jsonmodel-differences.md).
@@ -342,7 +342,7 @@ model.mergeProperty("/customer", { age: 30 });
 
 `setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally. Below the root, `mergeProperty` merges only two arrays or two plain objects, like that merge does with the values inside the data. Any other combination (a `Date`, a class instance, an array into an object) replaces the value, as `setProperty` does.
 
-A sorted, filtered or grouped list sorts and filters again after a merge that changed one of its rows, as it does with JSONModel. A plain `setProperty` on a row does not make it sort again, in either model; call `refresh()` on the list binding for that.
+A sorted, filtered or grouped list sorts and filters again after a merge that changed one of its rows, as it does with JSONModel. A plain `setProperty` on a row does not make a list binding without extended change detection sort again, in either model; call `refresh(true)` on the list binding for that.
 
 ## API
 
@@ -428,7 +428,7 @@ Two things to know about a signal you keep:
 | **Property binding**           | `{/path}` in XML views                                            | Identical                                                                                              |
 | **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                                              |
 | **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                                                         |
-| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)                                           |
+| **Expression binding**         | Supported                                                         | Supported                                                                                              |
 | **Two-way binding**            | Supported                                                         | Supported (same behavior)                                                                              |
 | **Declarative XML binding**    | Supported                                                         | Supported (full lifecycle: one-way, two-way, list, tree)                                               |
 | **Named models**               | `{modelName>/path}`                                               | Identical                                                                                              |

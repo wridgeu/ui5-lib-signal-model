@@ -971,6 +971,17 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     this._firePathResubscribe(path);
   }
 
+  /**
+   * Used by a binding's refresh(): the signals at `path` and below it follow the data, and
+   * the bindings of those that changed are told.
+   *
+   * @internal
+   */
+  _syncSignals(path: string): void {
+    this._mayHoldUndefined = true;
+    this.registry.sync(path, this._readPath);
+  }
+
   /** Used by binding classes to check whether a signal is registered directly at `path`. @internal */
   _getExactSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown> | undefined {
     return this.registry.get(path);

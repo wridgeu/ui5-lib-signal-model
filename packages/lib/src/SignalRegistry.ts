@@ -146,6 +146,21 @@ export default class SignalRegistry {
   }
 
   /**
+   * For data changed without the model: sets the state signals at `path` and below it to the
+   * values the resolver returns. An object that is still the same object is no change here.
+   */
+  sync(path: string, resolver: ValueResolver): void {
+    const paths =
+      path === "/" ? this.signals.keys() : [path, ...(this.descendants.get(path) ?? [])];
+    for (const each of paths) {
+      const signal = this.signals.get(each);
+      if (!signal) continue;
+      const value = resolver(each);
+      this.write(each, signal, value, !Object.is(signal.get(), value));
+    }
+  }
+
+  /**
    * @param path - Property path to look up or create.
    * @param initialValue - Value used when creating a new signal.
    * @param pin - Whether the signal stays when no binding is on its path.
