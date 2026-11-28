@@ -1,6 +1,6 @@
 # Differences from JSONModel
 
-SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Eight differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first five live, next to a JSONModel.
+SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`. Nine differences remain on purpose. Each is listed here with what to do about it. The Comparison page of the demo app (`npm start`) shows the first five live, next to a JSONModel.
 
 | Difference                                                                                        | Who notices                                                                                                                 |
 | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -12,6 +12,7 @@ SignalModel is meant as a drop-in replacement for `sap.ui.model.json.JSONModel`.
 | [`loadData` uses `fetch`](#loaddata-uses-fetch)                                                   | Tests and apps that intercept an asynchronous load with `MockServer` or a fake `XMLHttpRequest`, or configure `jQuery.ajax` |
 | [A write into a prototype is refused](#a-write-into-a-prototype-is-refused)                       | Nobody on purpose: JSONModel changes `Object.prototype` there                                                               |
 | [`observe` covers more](#observe-covers-more)                                                     | Nobody on purpose: JSONModel loses updates or throws there                                                                  |
+| [Not an instance of JSONModel](#not-an-instance-of-jsonmodel)                                     | Code that checks `instanceof JSONModel` or `isA("sap.ui.model.json.JSONModel")`                                             |
 
 ## How parity is tested
 
@@ -25,6 +26,11 @@ After `setData(data, true)` or `mergeProperty` the data equals JSONModel's: same
 - An object you passed to `setData` or `setProperty` earlier is merged into.
 - Data that cannot be changed in place is rebuilt, as JSONModel does with all data: a class instance as root, or a frozen object. `setData(data, true)` finds a frozen object anywhere in the data when it looks for `undefined`; `mergeProperty` rebuilds only when it has to write to one. `getData()` is a new object then, and every binding checks its value, so bindings on objects fire.
 - SignalModel looks for `undefined` only when something was written through the model that can hold it (new data, an object, `undefined`, a `length`) or after `refresh()`. JSONModel passes over all data on every merge (about 18 ms for 20,000 rows), SignalModel only when it has to (about 1 ms then, about 30 µs otherwise). `mergeProperty` looks only below its path and cannot clear that state for the whole model, so it passes over the data below its path on each call until a `setData(data, true)` has run. So a key holding `undefined` that you assigned to `getData()` directly survives a merge until `refresh()` is called.
+
+Two more consequences of working in place:
+
+- A merge that fails half way, because a getter of the payload throws or the payload refers to itself, leaves the part that was merged until then. JSONModel builds its copy first and leaves the data untouched.
+- Data that refers to itself can be merged into. JSONModel ends in a stack overflow there.
 
 **What to do.** Call `refresh()` after a direct change to `getData()` (see [below](#data-changed-without-the-model-needs-refresh)); the same call covers this. Or write through the model (`setProperty`, `mergeProperty`), or use the `observe` option, which makes an assignment to an existing property count as a write.
 
@@ -47,6 +53,8 @@ text.getText(); // "Bob"
 ```
 
 The order of the change events of one write differs as well. JSONModel checks its bindings in the order in which they got their first change handler. SignalModel tells the bindings of the written path first, then those of the paths above it, then those below it. Code should not depend on which of two bindings hears first.
+
+A binding that lost its last change handler and gets one again has missed the writes in between. JSONModel's binding notices at the next write anywhere in the model, SignalModel's in the next microtask after the handler is attached.
 
 `loadData` is an exception to the microtask: the bindings are updated before `requestCompleted` fires, as with JSONModel.
 
@@ -99,6 +107,8 @@ model.setProperty("/busy", false);
 // JSONModel: the list shows the new item. SignalModel: it does not.
 ```
 
+A merge covers every path of its payload, also where the payload holds the value or the very object the data holds already: `setData(model.getData(), true)` after direct changes tells of all of them.
+
 The same holds for one object that the data holds at two paths, like a selected row that is also in the list: a write through `/selected/name` tells the bindings of `/selected`, not those of `/items/0/name`. JSONModel updates both.
 
 A binding's own `refresh()` does the same for its path and the paths below it. That binding checks its value at once, as in JSONModel, and does nothing while it is suspended. Other bindings on those paths update in the next microtask; in JSONModel they wait for the next write. A computed whose dependencies were changed directly needs `model.refresh()`.
@@ -127,6 +137,8 @@ JSONModel follows a path wherever it leads. `setProperty("/__proto__/isAdmin", t
 
 SignalModel refuses such a write: `setProperty` and `mergeProperty` return `false` and log a warning when the path has a `__proto__` segment, or goes on through something the data only inherits: a `constructor`, or a method as in `/hasOwnProperty/call`. A key of that name that the data holds itself is data and stays writable. Reading is unchanged.
 
+This covers data made of plain objects and arrays, like parsed JSON. Where the data holds live objects, such as a DOM node, an event or a class instance with getters, a path can lead wherever those objects lead, as in JSONModel.
+
 **What to do.** Nothing, unless code relied on reaching a prototype through the model; change the prototype directly then.
 
 ## `observe` covers more
@@ -139,3 +151,7 @@ With the `observe` option (JSONModel's `bObserve`) both models put getters and s
 - A frozen or sealed object in the data, or a single property that cannot be redefined, is left as it is. JSONModel throws a `TypeError`.
 
 A key added by a direct assignment and a `push` are not observed in either model; call `refresh()` after those.
+
+## Not an instance of JSONModel
+
+SignalModel extends `sap.ui.model.ClientModel`, the base class of JSONModel, and its bindings extend the client bindings. `model instanceof JSONModel` and `model.isA("sap.ui.model.json.JSONModel")` are therefore `false`, and so are the same checks for `JSONListBinding` and the other JSON bindings. Code that asks for the type takes its other branch; in SAPUI5 the SmartField does, to choose its control factory. Ask for `sap.ui.model.ClientModel`, or for the method you need.

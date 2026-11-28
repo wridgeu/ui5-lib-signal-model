@@ -312,7 +312,7 @@ All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`,
 
 ### Known Differences from JSONModel
 
-The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Eight differences remain on purpose:
+The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Nine differences remain on purpose:
 
 - **A merge works on the data in place.** The data after `setData(data, true)` or `mergeProperty` equals JSONModel's, but the existing objects are changed instead of rebuilt: `getData()` stays the same object. Data you changed directly needs `refresh()` before a merge drops its `undefined` keys.
 - **Bindings update in a microtask**, not inside `setProperty`. A control shows the new value one microtask later, and an error in a formatter is logged instead of thrown out of `setProperty`.
@@ -322,6 +322,7 @@ The same operations run against both models in a randomized test, and UI5's own 
 - **An asynchronous `loadData` uses `fetch`**, not `jQuery.ajax`: `MockServer` and a fake `XMLHttpRequest` do not see the request. They do see a synchronous load (`loadData(url, params, false)`).
 - **A write into a prototype is refused.** `setProperty("/__proto__/x", 1)` returns `false`; JSONModel writes to `Object.prototype`.
 - **The `observe` option covers more.** A key created by `setProperty` is observed, a filled array hole stays visible, and data that refers to itself works. JSONModel loses updates or throws in these cases.
+- **It is not an instance of JSONModel.** SignalModel extends `ClientModel`, so `model instanceof JSONModel` and `isA("sap.ui.model.json.JSONModel")` are `false`.
 
 Details, the reason for each and what to do about it: [Differences from JSONModel](https://github.com/wridgeu/ui5-lib-signal-model/blob/main/docs/jsonmodel-differences.md).
 
@@ -415,7 +416,7 @@ Three things to know about a signal you keep:
 
 - Below a computed, `getSignal` returns that computed: `getSignal("/user/name")` with a computed at `/user` is the signal of the whole `/user` value.
 - A state signal is the signal of plain data. If a computed is created at its path or above it later, the signal no longer follows; call `getSignal` again.
-- A write with `bAsyncUpdate` (what a two-way binding does) reaches a state signal you kept when its timer runs. `getSignal`, `getProperty` on a computed and every synchronous write bring the signals in line before that.
+- A write with `bAsyncUpdate` (what a two-way binding does) reaches a signal you kept, state or computed, when its timer runs. `getSignal`, `getProperty` on a computed and every synchronous write bring the signals in line before that.
 - The model keeps a state signal that `getSignal` handed out until `destroy()`. Signals it creates for bindings and for the dependencies of computeds go when the last of those is gone.
 
 ### Binding Classes

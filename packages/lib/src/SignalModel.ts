@@ -11,7 +11,7 @@ import SignalPropertyBinding from "./SignalPropertyBinding";
 import SignalListBinding from "./SignalListBinding";
 import SignalTreeBinding from "./SignalTreeBinding";
 import type { SignalModelOptions, ModelPath, PathValue } from "./types";
-import type { Signal } from "signal-polyfill";
+import { Signal } from "signal-polyfill";
 
 // Runtime properties/methods on ClientModel not exposed by @openui5/types stubs.
 type ClientModelInternal = ClientModel & {
@@ -68,11 +68,19 @@ function asInternal(self: ClientModel): ClientModelInternal {
 }
 
 type BindingKeeper = { addBinding(binding: Binding): void; removeBinding(binding: Binding): void };
-type Held = { _held: boolean; subscribe(): void; unsubscribe(): void };
+type Held = FlushableBinding & {
+  _held: boolean;
+  _seenWrites: number;
+  _subscribedPath: string | null;
+  subscribe(): void;
+  unsubscribe(): void;
+};
 
 /** Parameters as jQuery.param writes them, which is what JSONModel sends. */
-function toQuery(parameters: Record<string, unknown>): string {
+function toQuery(parameters: Record<string, unknown> | unknown[]): string {
   const pairs: string[] = [];
+  // What jQuery's toType() does not call "object"
+  const other = new Set(["Boolean", "Number", "String", "Date", "RegExp", "Error", "Symbol"]);
   const add = (key: string, value: unknown): void => {
     if (Array.isArray(value)) {
       value.forEach((item, i) => {
@@ -80,9 +88,15 @@ function toQuery(parameters: Record<string, unknown>): string {
         if (key.endsWith("[]")) put(key, item);
         else add(`${key}[${indexed ? i : ""}]`, item);
       });
-    } else if (Object.prototype.toString.call(value) === "[object Object]") {
+    } else if (
+      typeof value === "object" &&
+      value !== null &&
+      !other.has(Object.prototype.toString.call(value).slice(8, -1))
+    ) {
       const object = value as Record<string, unknown>;
-      for (const name in object) add(`${key}[${name}]`, object[name]);
+      for (const name in object) {
+        if (object[name] !== undefined) add(`${key}[${name}]`, object[name]);
+      }
     } else {
       put(key, value);
     }
@@ -91,7 +105,16 @@ function toQuery(parameters: Record<string, unknown>): string {
     const text = typeof value === "function" ? value() : value;
     pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(text == null ? "" : text)}`);
   };
-  for (const name in parameters) add(name, parameters[name]);
+  if (Array.isArray(parameters)) {
+    // An array is one of form elements
+    for (const field of parameters as { name: string; value: unknown }[])
+      put(field.name, field.value);
+  } else {
+    // jQuery.ajax leaves out what is undefined, here and in the objects below
+    for (const name in parameters) {
+      if (parameters[name] !== undefined) add(name, parameters[name]);
+    }
+  }
   return pairs.join("&");
 }
 
@@ -295,7 +318,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
 
     // Header names are case-insensitive: a custom "accept" replaces the default
-    const headers: Record<string, string> = { ...customHeaders };
+    const headers: Record<string, string> = {};
+    for (const name in customHeaders) {
+      // As jQuery.ajax: no header for undefined
+      if (customHeaders[name] !== undefined) headers[name] = customHeaders[name];
+    }
     if (!Object.keys(headers).some((name) => name.toLowerCase() === "accept")) {
       headers.Accept = "application/json";
     }
@@ -306,9 +333,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Callers wanting JSON POST must stringify manually and set Content-Type via customHeaders.
     let body: string | undefined;
     if (!inUrl && paramString) {
-      body = paramString;
+      // As jQuery.ajax for a form body
+      body = paramString.replace(/%20/g, "+");
       if (!Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
-        headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
+        headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
       }
     }
 
@@ -404,7 +432,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         loaded = true;
         let data: T | undefined;
         try {
-          data = parse(request.status, request.statusText, request.responseText);
+          // Status 0 is a response without HTTP, as from file://: a success for jQuery.ajax
+          data = parse(request.status || 200, request.statusText, request.responseText);
         } catch (failure) {
           fail(failure as LoadFailure);
           return;
@@ -550,6 +579,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   setData(data: T | Partial<T>, merge?: boolean): void;
   setData(data: T | Partial<T>, merge?: boolean): void {
+    this._writes++;
     this._syncPending();
     if (merge) {
       // Nothing to merge in, but JSONModel still rebuilds its data: see _dropUndefined().
@@ -626,6 +656,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   setProperty(path: string, value: unknown, context?: Context, asyncUpdate?: boolean): boolean;
   setProperty(path: string, value: unknown, context?: Context, asyncUpdate?: boolean): boolean {
+    this._writes++;
     const resolvedPath = this._resolvePath(path, context);
     if (!resolvedPath) {
       return false;
@@ -769,6 +800,13 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * synchronous write: it compares with the signals, and a signal that lags behind would
    * hide a write back to the value from before the asynchronous one.
    */
+  private _syncForRead(): void {
+    // A computed reads signals: an asynchronous write so far has to be in them. Not while
+    // a computed runs: a signal set then, which it has read already, would not make it run
+    // again. The timer of the write does that.
+    if (this._pendingAsyncPaths.size > 0 && !Signal.subtle.currentComputed()) this._syncPending();
+  }
+
   private _syncPending(): void {
     if (this._pendingAsyncPaths.size === 0) return;
     const dirty = this._pendingAsyncPaths;
@@ -811,6 +849,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   mergeProperty(path: string, value: unknown, context?: Context): boolean;
   mergeProperty(path: string, value: unknown, context?: Context): boolean {
+    this._writes++;
     const resolvedPath = this._resolvePath(path, context);
     if (!resolvedPath) {
       return false;
@@ -925,6 +964,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       context?: Context,
       params?: object,
     ) => SignalPropertyBinding)(this, path, context, parameters);
+    binding._seenWrites = this._writes;
     return binding;
   }
 
@@ -938,16 +978,25 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     (ClientModel.prototype as unknown as BindingKeeper).addBinding.call(this, binding);
     // Not a context binding, which follows no path
     if (!("_held" in binding)) return;
-    (binding as unknown as Held)._held = true;
-    (binding as unknown as Held).subscribe();
+    const held = binding as unknown as Held;
+    held._held = true;
+    held.subscribe();
+    // Written since the binding was last held: it has not heard of that. JSONModel's
+    // binding hears at the next write anywhere, this one in the next microtask.
+    if (held._seenWrites !== this._writes && held._subscribedPath) {
+      scheduleFlush(held, this._getSignal(held._subscribedPath));
+    }
   }
 
   /** @internal */
   removeBinding(binding: Binding): void {
     (ClientModel.prototype as unknown as BindingKeeper).removeBinding.call(this, binding);
     if (!("_held" in binding)) return;
-    (binding as unknown as Held)._held = false;
-    (binding as unknown as Held).unsubscribe();
+    const held = binding as unknown as Held;
+    // With an update still queued it has not heard of every write: it catches up when held again
+    held._seenWrites = cancelFlush(held) ? -1 : this._writes;
+    held._held = false;
+    held.unsubscribe();
   }
 
   /** @since 0.1.0 */
@@ -967,6 +1016,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       filters?: object | object[],
       params?: object,
     ) => SignalListBinding)(this, path, context, sorters, filters, parameters);
+    binding._seenWrites = this._writes;
     return binding;
   }
 
@@ -987,6 +1037,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       params?: object,
       sorters?: object | object[],
     ) => SignalTreeBinding)(this, path, context, filters, parameters, sorters);
+    binding._seenWrites = this._writes;
     return binding;
   }
 
@@ -1011,6 +1062,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   checkUpdate(forceUpdate?: boolean, asyncMode?: boolean): number {
     // The setter of observed data, called by a write of the model: the write notifies
     if (this._writing) return 0;
+    this._writes++;
     this._mayHoldUndefined = true;
     // Bindings are told about writes through the model. This is for data changed without
     // it (refresh() after a change to getData(), or an assignment to observed data): bring
@@ -1044,7 +1096,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // Their signals are in line already and would not tell them: they check in the flush.
       for (const [subscribedPath, subscribed] of this.registry.subscribers) {
         const signal = this._getSignal(subscribedPath);
-        for (const binding of Array.isArray(subscribed) ? subscribed : [subscribed]) {
+        for (const binding of subscribed instanceof Set ? subscribed : [subscribed]) {
           scheduleFlush(binding, signal);
         }
       }
@@ -1088,7 +1140,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this.registry.hasComputeds && !this.registry.isComputed(path)) {
       let idx = path.lastIndexOf("/");
       while (idx > 0) {
-        const above = this.registry.getComputed(path.substring(0, idx));
+        const above = this.registry.computedAt(path, idx);
         if (above) return above;
         idx = path.lastIndexOf("/", idx - 1);
       }
@@ -1100,6 +1152,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   /** Per computed: its dependencies, and the state signals among them that it keeps alive */
   private readonly _deps = new Map<string, { all: string[]; pinned: Set<string> }>();
+  /** Counts the writes and checks: a binding that was not held meanwhile has to catch up */
+  private _writes = 0;
   /** Per path: how many dependencies of computeds are there or below it */
   private readonly _readAt = new Map<string, number>();
 
@@ -1146,6 +1200,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
     // A copy: the caller's array may change, the dependencies of the computed do not
     deps = [...deps];
+    // Its first run reads signals: the asynchronous writes so far have to be in them
+    this._syncPending();
+    const nested = this._findComputedAncestor(path) !== null;
     const pinned = new Set(deps.filter((dep) => !this.registry.isComputed(dep)));
     for (const dep of pinned) this.registry.getOrCreate(dep, this._readPath(dep), true);
     let result: Signal.Computed<unknown>;
@@ -1166,8 +1223,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     this._deps.set(path, { all: deps, pinned });
     this._countReads(deps, 1);
     // Bindings at this path or below it have to follow the new computed. They are on state
-    // signals, which the index lists.
-    this._resubscribe([path, ...this.registry.below(path)]);
+    // signals, which the index lists, unless they follow a computed further up.
+    this._resubscribe(nested ? this._subscribedAt(path) : [path, ...this.registry.below(path)]);
     return result;
   }
 
@@ -1195,10 +1252,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     this._forgetUnread([path, ...(own?.all ?? [])]);
     // Bindings at the path or below it follow the data again. Those below had no signal
     // of their own, so no index lists them.
-    const prefix = path + "/";
-    this._resubscribe(
-      [...this.registry.subscribers.keys()].filter((at) => at === path || at.startsWith(prefix)),
-    );
+    this._resubscribe(this._subscribedAt(path));
   }
 
   /**
@@ -1304,7 +1358,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Return the computed value so list/tree bindings can see it.
     const computed = this.registry.hasComputeds && this.registry.getComputed(resolvedPath);
     if (computed) {
-      this._syncPending();
+      this._syncForRead();
       return computed.get();
     }
 
@@ -1321,10 +1375,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         idx > 0;
         idx = resolvedPath.lastIndexOf("/", idx - 1)
       ) {
-        const above = this.registry.getComputed(resolvedPath.substring(0, idx));
+        const above = this.registry.computedAt(resolvedPath, idx);
         if (above) {
-          // It reads signals: an asynchronous write so far has to be in them
-          this._syncPending();
+          this._syncForRead();
           node = above.get();
           start = idx + 1;
           break;
@@ -1362,8 +1415,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       idx !== -1;
       idx = resolvedPath.indexOf("/", idx + 1)
     ) {
-      const ancestor = resolvedPath.substring(0, idx);
-      if (this.registry.isComputed(ancestor)) return ancestor;
+      if (this.registry.computedAt(resolvedPath, idx)) return resolvedPath.substring(0, idx);
     }
     return null;
   }
@@ -1556,8 +1608,19 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       const oldValue = Object.hasOwn(target, key) ? target[key] : undefined;
       const newValue = source[key];
       // Like JSONModel's deepExtend: an undefined value in the payload changes nothing.
-      // Nor does the object that is there already; data that refers to itself ends here.
-      if (newValue === undefined || (newValue === oldValue && typeof newValue === "object")) {
+      if (newValue === undefined) continue;
+      if (newValue === oldValue && typeof newValue === "object" && newValue !== null) {
+        // The object that is there already, like a merge of getData() after a direct
+        // change: what changed in it is unknown, so its signals are brought in line. Data
+        // that refers to itself ends here.
+        if (hasSignals) {
+          changed = true;
+          for (const binding of this._listBindings) {
+            if (binding._isAbove(childPath)) binding._onRowChange();
+          }
+          this.registry.refresh(childPath, this._readPath);
+          this.registry.invalidateChildren(childPath, this._readPath);
+        }
         continue;
       }
 
@@ -1606,6 +1669,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             this.registry.invalidateChildren(basePath || "/", this._readPath);
           }
         }
+      } else if (hasSignals) {
+        // The value the data holds already: its signal may not, after a direct change
+        this.registry.set(childPath, newValue);
       }
     }
     if (changed && hasSignals) {
@@ -1631,13 +1697,21 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   /** Re-subscribes the bindings at `path` and below it: they have to follow another signal. */
+  /** The paths at `path` or below it that have a binding: a scan of all of them. */
+  private _subscribedAt(path: string): string[] {
+    const prefix = path + "/";
+    return [...this.registry.subscribers.keys()].filter(
+      (at) => at === path || at.startsWith(prefix),
+    );
+  }
+
   private _resubscribe(paths: string[]): void {
     // Collected first: subscribe() changes the map
     const bindings: [string, Subscriber][] = [];
     for (const subscribedPath of new Set(paths)) {
       const subscribed = this.registry.subscribers.get(subscribedPath);
       if (!subscribed) continue;
-      for (const binding of Array.isArray(subscribed) ? subscribed : [subscribed]) {
+      for (const binding of subscribed instanceof Set ? subscribed : [subscribed]) {
         bindings.push([subscribedPath, binding]);
       }
     }

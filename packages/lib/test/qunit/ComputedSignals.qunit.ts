@@ -1634,4 +1634,94 @@ QUnit.module("ComputedSignals", () => {
     untyped.destroy();
     typed.destroy();
   });
+
+  QUnit.test(
+    "a computed that runs while an asynchronous write waits is not left stale",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, b: 1, rate: 2 });
+      model.createComputed("/factor", ["/rate"], (rate) => rate);
+      model.createComputed(
+        "/sum",
+        ["/b", "/a"],
+        (b, a) => a + b * (model.getProperty("/factor") as number),
+      );
+      const sum = model.bindProperty("/sum");
+      sum.attachChange(() => {});
+      sum.initialize();
+      const input = model.bindProperty("/b");
+      input.attachChange(() => {});
+      input.initialize();
+      model.setProperty("/a", 2);
+      input.setValue(10);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.strictEqual(sum.getValue(), 22);
+      assert.strictEqual(model.getProperty("/sum"), 22);
+      model.destroy();
+    },
+  );
+
+  QUnit.test("many bindings on one path leave it without a scan per binding", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ busy: false });
+    const handler = (): void => {};
+    const bindings = Array.from({ length: 20000 }, () => model.bindProperty("/busy"));
+    for (const binding of bindings) binding.attachChange(handler);
+    const start = performance.now();
+    for (const binding of bindings) binding.detachChange(handler);
+    const took = performance.now() - start;
+    // About 30 ms; with an array per path it was about 300 ms
+    assert.ok(took < 150, `20,000 bindings left in ${Math.round(took)} ms`);
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    assert.strictEqual((model as any).registry.size, 0);
+    model.destroy();
+  });
+
+  QUnit.test("a computed is found above and below paths of other lengths", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ n: 1, deep: { a: { b: 1 } } });
+    model.createComputed("/xy", ["/n"], (n) => ({ v: n }));
+    model.createComputed("/deep/a/c", ["/n"], (n) => ({ v: n }));
+    assert.strictEqual(model.getProperty("/xy/v"), 1);
+    assert.strictEqual(model.getProperty("/deep/a/c/v"), 1);
+    assert.strictEqual(model.getProperty("/deep/a/b"), 1);
+    assert.notOk(model.setProperty("/deep/a/c/v", 2), "read-only below a computed");
+    assert.ok(model.setProperty("/deep/a/b", 2));
+    model.removeComputed("/xy");
+    assert.strictEqual(model.getProperty("/xy/v"), undefined, "gone with its computed");
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    assert.deepEqual([...(model as any).registry.computedLengths.keys()], ["/deep/a/c".length]);
+    model.destroy();
+  });
+
+  QUnit.test(
+    "a synchronous and then an asynchronous write: a computed over both",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+      model.createComputed("/c1", ["/a"], (a) => ({ v: a + 1 }));
+      model.createComputed("/c2", ["/a", "/c1/v"], (a, v) => a * 1000 + v);
+      const binding = model.bindProperty("/c2");
+      binding.attachChange(() => {});
+      binding.initialize();
+      await Promise.resolve();
+      model.setProperty("/a", 5);
+      model.setProperty("/a", 9, undefined, true);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.strictEqual(binding.getValue(), 9010);
+      model.setProperty("/a", 2, undefined, true);
+      const late = model.createComputed("/late", ["/a"], (a) => a * 2);
+      assert.strictEqual(late.get(), 4, "a computed created after an asynchronous write");
+      model.destroy();
+    },
+  );
+
+  QUnit.test("a computed created below another one takes the bindings below it", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, k: 1 });
+    model.createComputed("/p", ["/a"], (a) => ({ q: { r: a } }));
+    const binding = model.bindProperty("/p/q/r");
+    binding.attachChange(() => {});
+    binding.initialize();
+    model.createComputed("/p/q", ["/k"], (k) => ({ r: "k" + k }));
+    model.setProperty("/k", 2);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.strictEqual(binding.getValue(), "k2");
+    model.destroy();
+  });
 });

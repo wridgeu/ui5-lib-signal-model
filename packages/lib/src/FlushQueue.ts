@@ -112,11 +112,12 @@ export function flushNow(): void {
  * Remove a binding from the pending flush queue.
  *
  * @param binding - The binding to dequeue.
+ * @returns Whether an update was queued for it.
  * @since 0.1.0
  */
-export function cancelFlush(binding: FlushableBinding): void {
-  pendingUpdates.delete(binding);
-  flushing?.delete(binding);
+export function cancelFlush(binding: FlushableBinding): boolean {
+  const queued = pendingUpdates.delete(binding);
+  return (flushing?.delete(binding) ?? false) || queued;
 }
 
 /**

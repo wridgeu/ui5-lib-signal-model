@@ -168,6 +168,8 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
 
   /** Whether the model holds the binding: it has a change handler. @internal */
   _held = false;
+  /** The model's count of writes when the binding last heard of them. @internal */
+  _seenWrites = 0;
 
   /** @since 0.1.0 */
   subscribe(): void {

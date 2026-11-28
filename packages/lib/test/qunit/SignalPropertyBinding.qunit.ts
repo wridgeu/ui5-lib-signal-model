@@ -1289,4 +1289,76 @@ QUnit.module("SignalPropertyBinding", () => {
     assert.strictEqual(other.getValue(), 2, "the binding after it is told");
     model.destroy();
   });
+
+  QUnit.test("a merge of what the data holds tells of a direct change", async (assert) => {
+    await inBoth(assert, "1,2,A,2,1", async (Model) => {
+      const data: Data = { cnt: 0, items: [{ n: "a" }], o: { x: 1 } };
+      const model = new Model(data);
+      const paths = ["/cnt", "/items/length", "/items/0/n", "/o/x"];
+      const bindings = paths.map((path) => model.bindProperty(path));
+      for (const binding of bindings) {
+        binding.attachChange(() => {});
+        binding.initialize();
+      }
+      const list = model.bindList("/items");
+      let listEvents = 0;
+      list.attachChange(() => listEvents++);
+      list.initialize();
+      list.getContexts(0, 10);
+      listEvents = 0;
+      const own = model.getData() as { cnt: number; items: { n: string }[]; o: { x: number } };
+      own.cnt = 1;
+      own.items.push({ n: "b" });
+      own.items[0].n = "A";
+      model.setData(own, true);
+      own.o.x = 2;
+      model.setData({ o: { ...own.o } }, true);
+      await later(20);
+      const shown = [...bindings.map((binding) => binding.getValue()), listEvents];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test("a binding that gets its handler back catches up", async (assert) => {
+    // The events: none while detached, one after; JSONModel at the write to /o
+    await inBoth(assert, "2,3,1,1,7", async (Model) => {
+      const data: Data = { a: 1, o: 0, q: 0, rows: [1, 2] };
+      const model = new Model(data);
+      const binding = model.bindProperty("/a");
+      const list = model.bindList("/rows");
+      let events = 0;
+      let listEvents = 0;
+      const handler = (): void => void events++;
+      const listHandler = (): void => void listEvents++;
+      binding.attachChange(handler);
+      binding.initialize();
+      list.attachChange(listHandler);
+      list.initialize();
+      listEvents = 0;
+      // The write is still queued when the handler goes
+      model.setProperty("/a", 5);
+      binding.detachChange(handler);
+      list.detachChange(listHandler);
+      // JSONModel has told of the 5 already, SignalModel tells nobody
+      events = 0;
+      model.setProperty("/a", 2);
+      model.setProperty("/rows", [1, 2, 3]);
+      binding.attachChange(handler);
+      list.attachChange(listHandler);
+      model.setProperty("/o", 5);
+      // A write, and the handler off and on again before its update is delivered
+      const queued = model.bindProperty("/q");
+      const first = (): void => {};
+      queued.attachChange(first);
+      queued.initialize();
+      model.setProperty("/q", 7);
+      queued.detachChange(first);
+      queued.attachChange(() => {});
+      await later(20);
+      const shown = [binding.getValue(), list.getLength(), events, listEvents, queued.getValue()];
+      model.destroy();
+      return shown;
+    });
+  });
 });

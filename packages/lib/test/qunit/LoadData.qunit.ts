@@ -1062,32 +1062,51 @@ QUnit.module("loadData", () => {
     model.destroy();
   });
 
-  QUnit.test("object parameters are written as jQuery.param does", async (assert) => {
+  QUnit.test("object parameters are written as jQuery.ajax sends them", async (assert) => {
     const parameters = {
       q: "a b",
       ids: [1, 2],
       rows: [{ k: 1 }, [2]],
+      map: new Map([[1, 2]]),
+      when: new Date(0),
       opt: undefined,
       none: null,
-      f: { k: { deep: "ä&=" } },
+      f: { k: { deep: "ä&=", no: undefined } },
       fn: () => "called",
       "x[]": [3],
     };
     const originalFetch = window.fetch;
-    const urls: unknown[] = [];
-    window.fetch = (url) => {
-      urls.push(url);
+    const sent: unknown[] = [];
+    window.fetch = (url, init) => {
+      sent.push(init?.body ?? url);
+      if (url === "/h.json") sent.push(Object.keys(init?.headers ?? {}).join());
+      if (url === "/z.json")
+        sent.push((init?.headers as Record<string, string> | undefined)?.["Content-Type"]);
       return Promise.resolve(new Response("{}", { status: 200 }));
     };
     const model = new SignalModel();
     try {
       await model.loadData("/x.json", parameters);
+      // oxlint-disable-next-line typescript/no-explicit-any -- what jQuery.param takes too
+      await model.loadData("/y.json", [{ name: "a b", value: 1 }] as any);
+      await model.loadData("/z.json", { q: "a b" }, true, "POST");
+      await model.loadData("/h.json", undefined, true, "GET", false, true, {
+        A: "1",
+        // oxlint-disable-next-line typescript/no-explicit-any -- what JavaScript callers pass
+        B: undefined as any,
+      });
     } finally {
       window.fetch = originalFetch;
     }
-    assert.deepEqual(urls, [
-      "/x.json?" +
-        (window as unknown as { jQuery: { param(o: object): string } }).jQuery.param(parameters),
+    const param = (window as unknown as { jQuery: { param(o: object): string } }).jQuery.param;
+    assert.deepEqual(sent, [
+      // jQuery.ajax leaves out what is undefined before jQuery.param sees it
+      "/x.json?" + param(parameters).replace("opt=&", "").replace("&f%5Bk%5D%5Bno%5D=", ""),
+      "/y.json?a%20b=1",
+      "q=a+b",
+      "application/x-www-form-urlencoded; charset=UTF-8",
+      "/h.json",
+      "A,Accept",
     ]);
     model.destroy();
   });
@@ -1150,6 +1169,39 @@ QUnit.module("loadData", () => {
       const odd = new SignalModel(42 as any);
       assert.deepEqual(odd.getData(), new JSONModel(42 as never).getData());
       odd.destroy();
+    },
+  );
+
+  QUnit.test(
+    "a synchronous response without HTTP status is a success, as for jQuery.ajax",
+    (assert) => {
+      // What file:// gives: status 0 and the content
+      class FileRequest {
+        status = 0;
+        statusText = "";
+        responseText = '{"a":1}';
+        private onLoad: () => void = () => {};
+        open(): void {}
+        setRequestHeader(): void {}
+        addEventListener(type: string, listener: () => void): void {
+          if (type === "load") this.onLoad = listener;
+        }
+        send(): void {
+          this.onLoad();
+        }
+      }
+      const original = window.XMLHttpRequest;
+      window.XMLHttpRequest = FileRequest as unknown as typeof XMLHttpRequest;
+      const model = new SignalModel<Record<string, unknown>>();
+      let failed = 0;
+      model.attachRequestFailed(() => failed++);
+      try {
+        model.loadData("/x.json", undefined, false);
+      } finally {
+        window.XMLHttpRequest = original;
+      }
+      assert.deepEqual([model.getProperty("/a"), failed], [1, 0]);
+      model.destroy();
     },
   );
 });

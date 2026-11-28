@@ -53,6 +53,8 @@ const REPLACED = {};
 export default class SignalRegistry {
   private readonly signals = new Map<string, PathState>();
   private readonly computeds = new Map<string, Signal.Computed<unknown>>();
+  /** How many computeds have a path of each length */
+  private readonly computedLengths = new Map<number, number>();
   /** Paths whose computed was removed: a new computed may take the place of their state signal. */
   private readonly released = new Set<string>();
   /**
@@ -88,16 +90,17 @@ export default class SignalRegistry {
    * The bindings subscribed to each path. A binding on a state signal has no watcher of its
    * own: the registry writes every state signal, so it tells the bindings itself.
    */
-  readonly subscribers = new Map<string, Subscriber | Subscriber[]>();
+  readonly subscribers = new Map<string, Subscriber | Set<Subscriber>>();
 
   subscribe(path: string, binding: Subscriber): void {
     const current = this.subscribers.get(path);
     if (!current) {
       this.subscribers.set(path, binding);
-    } else if (Array.isArray(current)) {
-      current.push(binding);
+    } else if (current instanceof Set) {
+      current.add(binding);
     } else {
-      this.subscribers.set(path, [current, binding]);
+      // A set: thousands of bindings on one path leave it one by one
+      this.subscribers.set(path, new Set([current, binding]));
     }
   }
 
@@ -105,10 +108,9 @@ export default class SignalRegistry {
     const current = this.subscribers.get(path);
     if (current === binding) {
       this.subscribers.delete(path);
-    } else if (Array.isArray(current)) {
-      const index = current.indexOf(binding);
-      if (index !== -1) current.splice(index, 1);
-      if (current.length === 0) this.subscribers.delete(path);
+    } else if (current instanceof Set) {
+      current.delete(binding);
+      if (current.size === 0) this.subscribers.delete(path);
     }
     if (!this.subscribers.has(path) && !this.pinned.has(path)) this.drop(path);
   }
@@ -154,7 +156,7 @@ export default class SignalRegistry {
     const current = this.subscribers.get(path);
     if (!current) return;
     // Forced is the asynchronous write: not told to a binding that shows its value already
-    if (Array.isArray(current)) {
+    if (current instanceof Set) {
       for (const binding of current) {
         if (!(force && binding._showsAlready?.(value))) scheduleFlush(binding, signal);
       }
@@ -280,6 +282,22 @@ export default class SignalRegistry {
     return this.descendants.get(path) ?? [];
   }
 
+  /**
+   * The computed at the first `length` characters of `path`, if there is one. No string is
+   * cut for a length that no computed has, which is nearly every step of a walk upwards.
+   */
+  computedAt(path: string, length: number): Signal.Computed<unknown> | undefined {
+    return this.computedLengths.has(length)
+      ? this.computeds.get(path.substring(0, length))
+      : undefined;
+  }
+
+  private countLength(path: string, by: 1 | -1): void {
+    const count = (this.computedLengths.get(path.length) ?? 0) + by;
+    if (count) this.computedLengths.set(path.length, count);
+    else this.computedLengths.delete(path.length);
+  }
+
   /** @returns The computed at exactly `path`, if there is one. */
   getComputed(path: string): Signal.Computed<unknown> | undefined {
     return this.computeds.get(path);
@@ -377,6 +395,7 @@ export default class SignalRegistry {
     this.drop(path);
     this.released.delete(path);
     this.computeds.set(path, computed);
+    this.countLength(path, 1);
     this.signalReplaced(path, read);
     return computed;
   }
@@ -387,6 +406,7 @@ export default class SignalRegistry {
    */
   removeComputed(path: string, read?: ValueResolver): boolean {
     if (!this.computeds.delete(path)) return false;
+    this.countLength(path, -1);
     this.released.add(path);
     // What a computed that depends on the path follows from now on. Created first: such a
     // computed may run again while the signals below are set.
@@ -467,6 +487,7 @@ export default class SignalRegistry {
   destroy(): void {
     this.signals.clear();
     this.computeds.clear();
+    this.computedLengths.clear();
     this.released.clear();
     this.replaced.clear();
     this.descendants.clear();
