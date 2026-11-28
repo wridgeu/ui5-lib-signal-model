@@ -50,58 +50,58 @@
   <g transform="translate(32, 84)">
     <text class="label" x="0" y="12">#4 Update all 2000 bindings (sync)</text>
     <rect class="badge-bg" x="548" y="0" width="148" height="17" rx="4" />
-    <text class="badge-txt" x="622" y="12" text-anchor="middle">59x faster (57x-60x)</text>
+    <text class="badge-txt" x="622" y="12" text-anchor="middle">59x faster (59x-60x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">1025 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">1027 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="10" height="10" rx="4" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">17.34 ms</text>
+    <text class="val-sig" x="696" y="44" text-anchor="end">17.20 ms</text>
   </g>
 
   <g transform="translate(32, 144)">
     <text class="label" x="0" y="12">#21 Warning threshold: 29 sync calls, 3449 bindings</text>
     <rect class="badge-bg" x="541" y="0" width="155" height="17" rx="4" />
-    <text class="badge-txt" x="618.5" y="12" text-anchor="middle">98x faster (95x-100x)</text>
+    <text class="badge-txt" x="618.5" y="12" text-anchor="middle">96x faster (92x-100x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">26.50 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">26.78 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="6" height="10" rx="1.5" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">0.269 ms</text>
+    <text class="val-sig" x="696" y="44" text-anchor="end">0.272 ms</text>
   </g>
 
   <g transform="translate(32, 204)">
     <text class="label" x="0" y="12">#3 Single-path update, 2000 bindings</text>
     <rect class="badge-bg" x="548" y="0" width="148" height="17" rx="4" />
-    <text class="badge-txt" x="622" y="12" text-anchor="middle">55x faster (54x-56x)</text>
+    <text class="badge-txt" x="622" y="12" text-anchor="middle">56x faster (54x-57x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">0.537 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">0.543 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="11" height="10" rx="4" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">9.9 µs</text>
+    <text class="val-sig" x="696" y="44" text-anchor="end">9.7 µs</text>
   </g>
 
   <g transform="translate(32, 264)">
     <text class="label" x="0" y="12">#20 setData merge (large, pinpoint), 20000 items</text>
     <rect class="badge-bg" x="528" y="0" width="168" height="17" rx="4" />
-    <text class="badge-txt" x="612" y="12" text-anchor="middle">560x faster (550x-570x)</text>
+    <text class="badge-txt" x="612" y="12" text-anchor="middle">550x faster (540x-560x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
     <text class="val" x="696" y="30" text-anchor="end">17.90 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="3" height="10" rx="1.5" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">31.9 µs</text>
+    <text class="val-sig" x="696" y="44" text-anchor="end">33.0 µs</text>
   </g>
 
   <g transform="translate(32, 324)">
     <text class="label" x="0" y="12">#6 Sparse update, 1 of 2000 (bAsyncUpdate)</text>
     <rect class="badge-bg" x="548" y="0" width="148" height="17" rx="4" />
-    <text class="badge-txt" x="622" y="12" text-anchor="middle">32x faster (31x-32x)</text>
+    <text class="badge-txt" x="622" y="12" text-anchor="middle">31x faster (30x-32x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">0.541 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">0.534 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
     <rect class="bar-sig" x="0" y="35" width="19" height="10" rx="4" />
     <text class="val-sig" x="696" y="44" text-anchor="end">17.2 µs</text>
@@ -113,14 +113,14 @@
     <text class="badge-eq-txt" x="565" y="12" text-anchor="middle">marginally faster 1.01x (1.00x-1.02x)</text>
     <rect class="track" x="0" y="21" width="600" height="10" rx="4" />
     <rect class="bar-json" x="0" y="21" width="590" height="10" rx="4" />
-    <text class="val" x="696" y="30" text-anchor="end">17.08 ms</text>
+    <text class="val" x="696" y="30" text-anchor="end">17.07 ms</text>
     <rect class="track" x="0" y="35" width="600" height="10" rx="4" />
-    <rect class="bar-sig" x="0" y="35" width="584" height="10" rx="4" />
-    <text class="val-sig" x="696" y="44" text-anchor="end">16.91 ms</text>
+    <rect class="bar-sig" x="0" y="35" width="587" height="10" rx="4" />
+    <text class="val-sig" x="696" y="44" text-anchor="end">17.00 ms</text>
   </g>
 
   <text class="foot" x="32" y="448">Timed: model write → bound control updated → UI5 re-renders the DOM. Bars are scaled per scenario.</text>
   <text class="foot" x="32" y="464">Not timed: browser layout and paint (hidden container), and the setTimeout(0) UI5 waits before rendering.</text>
   <text class="foot" x="32" y="480">Ranges: 95% confidence interval of JSONModel time / SignalModel time over 10 runs; below 1x means SignalModel is slower.</text>
-  <text class="foot" x="32" y="496">All 24 scenarios: 20 faster, 1 slower, 3 no clear difference. Measured on one machine.</text>
+  <text class="foot" x="32" y="496">All 24 scenarios: 19 faster, 0 slower, 5 no clear difference. Measured on one machine.</text>
 </svg>
