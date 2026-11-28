@@ -36,7 +36,6 @@ function asInternal(self: SignalTreeBinding): TreeBindingInternal {
 export default class SignalTreeBinding extends ClientTreeBinding {
   declare oModel: SignalModel;
   watcher: Signal.subtle.Watcher | null = null;
-  private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
 
   /**
@@ -60,30 +59,56 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     }
   }
 
+  /**
+   * Checks the binding against the data, as in JSONModel. The data may have changed without
+   * the model, so the signals at the binding's path and below it are brought in line first;
+   * otherwise a later write of the value they still hold would be no change.
+   *
+   * @param forceUpdate - Whether to fire a change event regardless of value comparison.
+   */
+  override refresh(forceUpdate?: boolean): void {
+    // As JSONModel: a suspended binding does nothing unless forced
+    if (this.isSuspended() && !forceUpdate) return;
+    if (this._subscribedPath) {
+      this.oModel._syncSignals(this._subscribedPath);
+      // The check below covers this binding: a queued update would be a second event
+      cancelFlush(this);
+      this.watcher?.watch();
+    }
+    super.refresh(forceUpdate);
+  }
+
+  /** Whether the model holds the binding: it has a change handler. @internal */
+  _held = false;
+  /** The model's count of writes when the binding last heard of them. @internal */
+  _seenWrites = 0;
+
   /** @since 0.1.0 */
   subscribe(): void {
     this.unsubscribe();
+    if (!this._held) return;
 
     const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;
 
-    const signal = this.oModel.getSignal(resolvedPath);
+    const signal = this.oModel._getSignal(resolvedPath);
 
-    this.watcher = new Signal.subtle.Watcher(() => {
-      scheduleFlush(this, signal);
-    });
-    this.watcher.watch(signal);
+    // The model tells the bindings on a state signal itself; only a computed needs a watcher
+    if (!(signal instanceof Signal.State)) {
+      this.watcher = new Signal.subtle.Watcher(() => {
+        scheduleFlush(this, signal);
+      });
+      this.watcher.watch(signal);
+    }
 
     this._subscribedPath = resolvedPath;
-    this._resubscribeCb = () => this.subscribe();
-    this.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
+    this.oModel._subscribe(resolvedPath, this);
   }
 
   /** @since 0.1.0 */
   unsubscribe(): void {
-    if (this._resubscribeCb && this._subscribedPath) {
-      this.oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
-      this._resubscribeCb = null;
+    if (this._subscribedPath) {
+      this.oModel._unsubscribe(this._subscribedPath, this);
       this._subscribedPath = null;
     }
     cancelFlush(this);
@@ -95,11 +120,16 @@ export default class SignalTreeBinding extends ClientTreeBinding {
    * @since 0.1.0
    */
   override initialize(): this {
-    if (!this.watcher) {
+    if (!this._subscribedPath) {
       this.subscribe();
     }
-    // Fire initial change so controls (e.g. sap.m.Tree) populate their aggregation
-    asInternal(this)._fireChange({ reason: ChangeReason.Change });
+    // The forced check of Binding.initialize, which fires the initial change so controls
+    // (e.g. sap.m.Tree) populate their aggregation; not while suspended. An update queued
+    // for the binding would be a second event.
+    if (!this.isSuspended()) {
+      cancelFlush(this);
+      this.checkUpdate(true);
+    }
     return this;
   }
 
@@ -116,6 +146,10 @@ export default class SignalTreeBinding extends ClientTreeBinding {
         const treeData = this.oModel._getObject(internal.sPath, internal.oContext);
         internal.oTreeData = internal.cloneData(treeData);
         this.subscribe();
+        // The filters hold for the data of the new context. JSONModel's tree applies them
+        // only at the next write and shows nothing until then.
+        internal.applyFilter();
+        internal._mLengthsCache = {};
         internal._fireChange({ reason: ChangeReason.Context });
       }
     }

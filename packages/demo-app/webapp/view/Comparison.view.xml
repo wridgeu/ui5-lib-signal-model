@@ -4,6 +4,7 @@
 	xmlns="sap.m"
 	xmlns:f="sap.ui.layout.form"
 	xmlns:l="sap.ui.layout">
+	<VBox>
 	<Panel headerText="JSONModel vs SignalModel Comparison" class="sapUiContentPadding">
 		<l:Grid defaultSpan="L6 M6 S12">
 			<Panel headerText="SignalModel (default model)">
@@ -28,8 +29,116 @@
 			</Panel>
 		</l:Grid>
 		<MessageStrip
-			text="Both models show identical behavior. Edit either side - bindings update the same way. The difference is internal: SignalModel uses push-based signals, JSONModel uses poll-based checkUpdate."
+			text="Edit either side: the bindings update the same way in both models. Inside, SignalModel pushes changes through signals and JSONModel checks every binding."
 			type="Information"
 			class="sapUiSmallMargin" />
 	</Panel>
+	<Panel headerText="Where the two differ on purpose" class="sapUiContentPadding">
+		<MessageStrip
+			text="A binding on an object: SignalModel fires a change event for every write below the object, so a formatter that reads from it shows the new content. JSONModel compares the object with itself, finds no difference and can keep the old text."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="writeCity" text="Write another city below /address" press=".onWriteCity" type="Emphasized" class="sapUiSmallMarginEnd" />
+			<Button id="writeEqual" text="Write an equal /address object" press=".onWriteEqualAddress" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Text bound to /address" />
+				<Text id="signalAddress" text="{path: 'signalDiff>/address', formatter: '.formatAddress'}" />
+				<Label text="Change events" />
+				<Text id="signalEvents" text="{diff>/signal/events}" />
+				<Label text="With new content (recipe)" />
+				<Text id="signalReal" text="{diff>/signal/real}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Text bound to /address" />
+				<Text id="jsonAddress" text="{path: 'jsonDiff>/address', formatter: '.formatAddress'}" />
+				<Label text="Change events" />
+				<Text id="jsonEvents" text="{diff>/json/events}" />
+				<Label text="With new content (recipe)" />
+				<Text id="jsonReal" text="{diff>/json/real}" />
+			</f:SimpleForm>
+		</l:Grid>
+		<MessageStrip
+			text="The recipe: a change handler that compares the content with its own copy runs its work only for new content. An equal object counts as an event, not as new content."
+			type="Success"
+			class="sapUiSmallMarginBottom" />
+		<MessageStrip
+			text="A key that holds undefined, assigned to getData() directly, and then a merge: JSONModel's merge drops the key. SignalModel looks for such keys only after new data, an object, undefined or a length was written through the model, or after a refresh()."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="mergeNoRefresh" text="draft = undefined, then merge" press=".onMergeWithoutRefresh" class="sapUiSmallMarginEnd" />
+			<Button id="mergeRefresh" text="draft = undefined, refresh(), then merge" press=".onMergeWithRefresh" type="Emphasized" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Keys after the merge" />
+				<Text id="signalKeys" text="{diff>/signal/keys}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Keys after the merge" />
+				<Text id="jsonKeys" text="{diff>/json/keys}" />
+			</f:SimpleForm>
+		</l:Grid>
+		<MessageStrip
+			text="A list binding that uses the row object itself as change detection key: JSONModel's merge replaces every row object, so the binding fires after a merge that changed nothing. SignalModel keeps the rows and stays quiet. The recipe: refresh(true) fires the event in both."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="mergeSameRows" text="Merge the same rows" press=".onMergeSameRows" class="sapUiSmallMarginEnd" />
+			<Button id="refreshLists" text="refresh(true)" press=".onRefreshLists" type="Emphasized" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Change events of the list" />
+				<Text id="signalListEvents" text="{diff>/signal/listEvents}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Change events of the list" />
+				<Text id="jsonListEvents" text="{diff>/json/listEvents}" />
+			</f:SimpleForm>
+		</l:Grid>
+		<MessageStrip
+			text="Data changed directly in getData(): JSONModel checks every binding on every write, so the next write anywhere shows the change. SignalModel tells only the bindings at, above and below the written path. The recipe works the same in both: refresh() after a direct change, or write through the model."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="directThenWrite" text="Change /note in getData(), then write /busy" press=".onDirectChangeThenWrite" class="sapUiSmallMarginEnd" />
+			<Button id="directThenRefresh" text="Change /note in getData(), then refresh()" press=".onDirectChangeThenRefresh" type="Emphasized" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Text bound to /note" />
+				<Text id="signalNote" text="{signalDiff>/note}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Text bound to /note" />
+				<Text id="jsonNote" text="{jsonDiff>/note}" />
+			</f:SimpleForm>
+		</l:Grid>
+		<MessageStrip
+			text="Not shown live: an asynchronous loadData uses fetch, so MockServer and a fake XMLHttpRequest do not see the request. They do see a synchronous load."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<MessageStrip
+			text="A formatter that throws: JSONModel throws the error out of setProperty, SignalModel logs it. The recipe works the same in both: catch in the formatter and return a fallback."
+			type="Information"
+			class="sapUiSmallMarginBottom" />
+		<HBox class="sapUiSmallMarginBottom">
+			<Button id="writePrice" text="Toggle /price between 9.99 and 'abc'" press=".onWritePrice" />
+		</HBox>
+		<l:Grid defaultSpan="L6 M6 S12">
+			<f:SimpleForm title="SignalModel" layout="ResponsiveGridLayout">
+				<Label text="Formatted price" />
+				<Text id="signalPrice" text="{path: 'signalDiff>/price', formatter: '.formatPrice'}" />
+			</f:SimpleForm>
+			<f:SimpleForm title="JSONModel" layout="ResponsiveGridLayout">
+				<Label text="Formatted price" />
+				<Text id="jsonPrice" text="{path: 'jsonDiff>/price', formatter: '.formatPrice'}" />
+			</f:SimpleForm>
+		</l:Grid>
+	</Panel>
+	</VBox>
 </mvc:View>

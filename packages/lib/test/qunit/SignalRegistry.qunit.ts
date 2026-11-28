@@ -130,6 +130,17 @@ QUnit.module("SignalRegistry", () => {
     registry.destroy();
   });
 
+  QUnit.test("a computed reads a computed it depends on", (assert) => {
+    const registry = new SignalRegistry();
+    registry.getOrCreate("/a", 1);
+    registry.addComputed("/double", ["/a"], (a) => (a as number) * 2);
+    const quad = registry.addComputed("/quad", ["/double"], (d) => (d as number) * 2);
+    assert.strictEqual(quad.get(), 4);
+    registry.set("/a", 2);
+    assert.strictEqual(quad.get(), 8, "after a change of the input");
+    registry.destroy();
+  });
+
   QUnit.test("removeComputed removes a computed signal", (assert) => {
     const registry = new SignalRegistry();
     registry.getOrCreate("/a", 1);

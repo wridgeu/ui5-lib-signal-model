@@ -37,10 +37,11 @@ function asInternal(self: SignalPropertyBinding): ClientPropertyBindingInternal 
 export default class SignalPropertyBinding extends ClientPropertyBinding {
   declare oModel: SignalModel;
   watcher: Signal.subtle.Watcher | null = null;
-  private _resubscribeCb: (() => void) | null = null;
   private _subscribedPath: string | null = null;
   private _previousResolvedPath: string | undefined = undefined;
   private _isDirectSignal = false;
+  /** The object written by setValue, while the model still has to tell of that write */
+  private _shown: unknown = undefined;
 
   /**
    * @param forceUpdate - Whether to force a change event regardless of value comparison.
@@ -52,8 +53,10 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       return;
     }
 
+    this._shown = undefined;
     const value = self._getValue();
-    this._applyUpdate(self, value, forceUpdate);
+    // No signal has reported a write here, so the values are compared as in JSONModel
+    this._applyUpdate(self, value, forceUpdate || !deepEqual(value, self.oValue));
   }
 
   /**
@@ -68,22 +71,37 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       return;
     }
 
+    // Whatever the binding hears, what it showed before is no longer the news
+    this._shown = undefined;
     const value = this._isDirectSignal ? signalValue : self._getValue();
-    this._applyUpdate(self, value, false);
+    // An object stays the same object when something below it is written
+    const changed = (typeof value === "object" && value !== null) || !Object.is(self.oValue, value);
+    this._applyUpdate(self, value, changed);
+  }
+
+  /**
+   * Asked once when the model tells of an asynchronous write: whether this binding shows
+   * that object already. Only that one notification is skipped, a write below the object
+   * is told as ever.
+   *
+   * @internal
+   */
+  _showsAlready(value: unknown): boolean {
+    const shown = this._shown;
+    this._shown = undefined;
+    return typeof value === "object" && value !== null && value === shown;
   }
 
   private _applyUpdate(
     self: ClientPropertyBindingInternal,
     value: unknown,
-    forceUpdate?: boolean,
+    hasChanged: boolean,
   ): void {
-    const hasChanged =
-      typeof value === "object" && value !== null ? true : !Object.is(self.oValue, value);
     const isRelative = this.isRelative();
     const currentResolvedPath = isRelative ? this.getResolvedPath() : undefined;
     const pathChanged = isRelative && this._previousResolvedPath !== currentResolvedPath;
 
-    if (hasChanged || pathChanged || forceUpdate) {
+    if (hasChanged || pathChanged) {
       self.oValue = value;
       self.getDataState().setValue(self.oValue);
       self.checkDataState();
@@ -95,6 +113,31 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   }
 
   /**
+   * Takes the update that was queued for the binding. The value is that of the signal: an
+   * asynchronous write the model has not told of yet is not in it, as in JSONModel.
+   */
+  private _hear(): void {
+    if (this._isDirectSignal && this._subscribedPath) {
+      let value: unknown;
+      try {
+        value = this.oModel._getSignal(this._subscribedPath).get();
+      } catch {
+        // A computed that fails
+        return;
+      }
+      this._checkUpdateFromSignal(value);
+    } else {
+      this.checkUpdate();
+    }
+  }
+
+  /** As in JSONModel, a write from before is told before the binding is suspended. */
+  override suspend(): void {
+    if (cancelFlush(this)) this._hear();
+    super.suspend();
+  }
+
+  /**
    * @param value - The new value to set on the bound property.
    * @since 0.1.0
    */
@@ -103,10 +146,18 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     if (self.bSuspended) {
       return;
     }
+    // A write the binding has not heard of yet is told first, as JSONModel has done by
+    // now: the value is compared with what the binding shows
+    if (cancelFlush(this)) this._hear();
 
     if (!deepEqual(self.oValue, value)) {
       if (this.oModel.setProperty(self.sPath, value, self.oContext, true)) {
         self.oValue = value;
+        // An update queued by a change handler of the check above is of a write that this
+        // one replaces
+        cancelFlush(this);
+        // The model tells of this write later: no event for the binding that made it
+        this._shown = value;
         self.getDataState().setValue(self.oValue);
         this.oModel.firePropertyChange({
           reason: ChangeReason.Binding,
@@ -114,13 +165,47 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
           context: self.oContext,
           value,
         });
+        // The model can hold something else than was written, e.g. the length of an array
+        if (!Object.is(self._getValue(), value)) {
+          // A propertyChange handler wrote to the path: the check covers that write. Before
+          // the check, whose change handlers may write again.
+          cancelFlush(this);
+          this.checkUpdate();
+          // What it shows now is what the model will tell of
+          this._shown = self.oValue;
+        }
       }
     }
   }
 
+  /**
+   * Checks the binding against the data, as in JSONModel. The data may have changed without
+   * the model, so the signals at the binding's path and below it are brought in line first;
+   * otherwise a later write of the value they still hold would be no change.
+   *
+   * @param forceUpdate - Whether to fire a change event regardless of value comparison.
+   */
+  override refresh(forceUpdate?: boolean): void {
+    // As JSONModel: a suspended binding does nothing unless forced
+    if (this.isSuspended() && !forceUpdate) return;
+    if (this._subscribedPath) {
+      this.oModel._syncSignals(this._subscribedPath);
+      // The check below covers this binding: a queued update would be a second event
+      cancelFlush(this);
+      this.watcher?.watch();
+    }
+    super.refresh(forceUpdate);
+  }
+
+  /** Whether the model holds the binding: it has a change handler. @internal */
+  _held = false;
+  /** The model's count of writes when the binding last heard of them. @internal */
+  _seenWrites = 0;
+
   /** @since 0.1.0 */
   subscribe(): void {
     this.unsubscribe();
+    if (!this._held) return;
 
     const resolvedPath = this.getResolvedPath();
     if (this.isRelative()) {
@@ -128,30 +213,32 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
     if (!resolvedPath) return;
 
-    const signal = this.oModel.getSignal(resolvedPath);
+    const signal = this.oModel._getSignal(resolvedPath);
     const self = asInternal(this);
     const propName = self.sPath.substring(self.sPath.lastIndexOf("/") + 1);
     this._isDirectSignal =
       propName !== "__name__" && this.oModel._getExactSignal(resolvedPath) === signal;
 
-    this.watcher = new Signal.subtle.Watcher(() => {
-      scheduleFlush(this, signal);
-    });
-    this.watcher.watch(signal);
+    // The model tells the bindings on a state signal itself; only a computed needs a watcher
+    if (!(signal instanceof Signal.State)) {
+      this.watcher = new Signal.subtle.Watcher(() => {
+        scheduleFlush(this, signal);
+      });
+      this.watcher.watch(signal);
+    }
 
     this._subscribedPath = resolvedPath;
-    this._resubscribeCb = () => this.subscribe();
-    this.oModel._onPathResubscribe(resolvedPath, this._resubscribeCb);
+    this.oModel._subscribe(resolvedPath, this);
   }
 
   /** @since 0.1.0 */
   unsubscribe(): void {
-    if (this._resubscribeCb && this._subscribedPath) {
-      this.oModel._offPathResubscribe(this._subscribedPath, this._resubscribeCb);
-      this._resubscribeCb = null;
+    if (this._subscribedPath) {
+      this.oModel._unsubscribe(this._subscribedPath, this);
       this._subscribedPath = null;
     }
     this._isDirectSignal = false;
+    this._shown = undefined;
     cancelFlush(this);
     this.watcher = teardownWatcher(this.watcher);
   }
@@ -161,10 +248,15 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
    * @since 0.1.0
    */
   override initialize(): this {
-    if (!this.watcher) {
+    if (!this._subscribedPath) {
       this.subscribe();
     }
-    this.checkUpdate(true);
+    // Not while suspended, as Binding.initialize. This is the check: an update queued for
+    // the binding would be a second event.
+    if (!asInternal(this).bSuspended) {
+      cancelFlush(this);
+      this.checkUpdate(true);
+    }
     return this;
   }
 
@@ -184,12 +276,15 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
       }
       const oldResolved = this.getResolvedPath();
       self.oContext = context;
-      if (this.isRelative()) {
-        this.checkUpdate();
-      }
       const newResolved = this.getResolvedPath();
+      // Before the check: a change handler may write to the new path
       if (oldResolved !== newResolved) {
         this.subscribe();
+        // The check still has to see that the path changed
+        this._previousResolvedPath = oldResolved;
+      }
+      if (this.isRelative()) {
+        this.checkUpdate();
       }
     }
   }

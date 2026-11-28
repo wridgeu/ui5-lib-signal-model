@@ -135,9 +135,10 @@ const model = new SignalModel<AppData>({
 });
 
 model.getProperty("/customer/name"); // string (typed)
-model.setProperty("/customer/age", 31); // type-checked
-model.setProperty("/customer/age", "x"); // compile error
+model.getSignal("/customer/age"); // Signal<number>
 ```
+
+The types give a known path its value type and completion in the editor. They do not reject anything: a path that is not in the type, or a value of another type, falls back to the untyped signature of JSONModel (`path: string, value: unknown`), because paths are often built at run time.
 
 Path types follow the same conventions as UI5's typed model patterns from `@openui5/types`.
 
@@ -180,7 +181,7 @@ model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => 
 
 ### Computed Signal Immutability
 
-Computed signals are **define-once**: calling `createComputed` on a path that already holds a computed or a state signal (i.e., a path already accessed through a binding or `getSignal`) throws a `TypeError`. To redefine an existing computed, call `removeComputed` first.
+Computed signals are **define-once**: `createComputed` throws a `TypeError` on a path that already holds a computed, on a path or a dependency that is not absolute or ends with a slash, on dependencies that lead back to the path, and on a path that was already read as plain data on exactly that path: through a binding, through `getSignal`, or as a dependency of another computed. So create a computed before the computeds that depend on it. A binding on a path below it (`/user/name` before `createComputed("/user", …)`) is fine and follows the computed. To redefine a computed, call `removeComputed` first; a path that had a computed can get a new one at any time, also while bindings are on it.
 
 ```typescript
 model.createComputed("/total", ["/price", "/tax"], (p, t) => p * (1 + t));
@@ -195,37 +196,59 @@ model.createComputed("/total", ["/price"], (p) => p);
 
 > **Why define-once?** Both the [TC39 Signals proposal](https://github.com/tc39/proposal-signals) and [MobX 6](https://mobx.js.org/computeds.html) treat computed values as immutable. A `Signal.Computed`'s derivation function is fixed at construction. MobX 6 enforces "every field can be annotated only once" and provides no public API to replace a `ComputedValue`'s derivation. UI5 formatters, the closest existing equivalent, are also fixed in code and never replaced at runtime.
 >
-> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative -- bindings are declared in XML and the developer never touches them directly. SignalModel's automatic resubscription mechanism (described below) ensures that `removeComputed` + `createComputed` works seamlessly regardless of how bindings were created.
+> **Declarative binding bridge.** UI5 bindings declared in XML views are managed by the framework. While developers _can_ access bindings programmatically (`getBinding`, `unbindProperty`, etc.), the common pattern in Fiori/UI5 applications is declarative -- bindings are declared in XML and the developer never touches them directly. Bindings therefore move to a redefined computed by themselves (see [below](#creating-removing-and-redefining-while-bound)), regardless of how they were created.
 
-### Automatic Resubscription
+### Computed Signals That Throw
 
-When a `Signal.Computed` is created, its derivation function is fixed. To change what a computed derives, you must replace it with `removeComputed` + `createComputed`. But the bindings watching that path still hold a watcher on the **old** signal object -- they would never see updates from the new one.
+An error thrown by a computed's function is not turned into a value:
 
-SignalModel solves this with **automatic resubscription**. When `createComputed` is called, the model notifies every existing binding to that path (and to any sub-path below it). Each notified binding tears down its watcher on the old signal and subscribes to the new one -- transparently, in a single synchronous step.
+- `getProperty`, `getObject` and a new binding on the path rethrow the error until a dependency changes and the function succeeds again. This is how `Signal.Computed` behaves, and how JSONModel behaves when a formatter throws.
+- A binding that already shows a value keeps it. The error is logged, and other bindings update as usual. `model.refresh()` throws the error, as it throws the error of a change handler; the other bindings still update, in the next microtask.
+- `createComputed` runs the function once. If that first run throws, `createComputed` throws and nothing changes (after a `removeComputed`, the bindings keep following the data), so the function must handle the data the model holds at that moment (for example before `loadData` has finished).
+
+### Creating, Removing and Redefining While Bound
+
+A `Signal.Computed` has a fixed function, so changing what a path derives means another signal object at that path. Whatever used the old one has to move to the new one. The model does that whenever `createComputed` or `removeComputed` is called:
+
+| What exists                                             | After `createComputed(path)`                             | After `removeComputed(path)`        |
+| ------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------- |
+| Bindings on the path or below it (property, list, tree) | follow the computed, also if they were created before it | follow the model's data at the path |
+| Computeds that depend on the path or on a path below it | run again with the computed's value                      | run again with the model's data     |
+
+The bindings re-subscribe at once and check their value in the next microtask, so a control shows the new value without a write to one of the inputs.
 
 ```mermaid
 flowchart LR
   S1["State: /users"] --> C1["Computed: /currentUser"]
   S2["State: /selectedId"] --> C1
   C1 -->|"watched by"| B1["Binding: {/currentUser/name}"]
-  C1 -->|"watched by"| B2["Binding: {/currentUser/email}"]
-  Redef["removeComputed + createComputed('/currentUser')"] -.->|"_firePathResubscribe<br/>rewires watchers"| B1
-  Redef -.->|"_firePathResubscribe<br/>rewires watchers"| B2
+  C1 -->|"read by"| D1["Computed: /greeting"]
+  Redef["removeComputed / createComputed('/currentUser')"] -.->|"re-subscribes, then checks"| B1
+  Redef -.->|"runs again"| D1
 ```
-
-This means you can redefine a computed at any time and all bindings will see the new derivation, even if it has entirely different dependencies:
 
 ```typescript
 // XML view has: <Text text="{/total}" />
 
 model.removeComputed("/total");
 model.createComputed("/total", ["/newPrice", "/newTax"], (p, t) => p * (1 + t));
-// All bindings to /total now track the new formula. No binding manipulation needed.
+// The text shows the new formula's value and follows /newPrice and /newTax.
+
+model.removeComputed("/total");
+// The text shows the model's data at /total (undefined if there is none) and follows writes to it.
 ```
 
-**Sub-path resubscription.** When a computed returns an object and bindings target sub-paths (e.g., `{/currentUser/name}`), those sub-path bindings also resubscribe automatically when the parent computed is redefined. The model scans for all bindings whose path starts with the computed's path and triggers resubscription for each one.
+A dependency can be the path of plain data, of a computed, or a path inside a computed's value:
 
-**Cost.** One `Map` lookup per `createComputed` call plus one `startsWith` scan of registered binding paths. When no bindings exist at the path (or its sub-paths), the cost is effectively zero.
+```typescript
+model.createComputed("/currentUser", ["/users", "/selectedId"], (users, id) => users[id]);
+model.createComputed("/greeting", ["/currentUser/name"], (name) => `Hello ${name}`);
+// /greeting follows /currentUser, also after /currentUser is redefined or removed.
+```
+
+One limit: **a binding on exactly the path, or a computed that depends on it, before the first `createComputed`** makes that call throw (define-once, see above). Create the computed before the view binds to it and before the computeds that depend on it, for example in `onInit` or in the component. After `removeComputed`, a computed can be created at the path again as long as a binding stays on it; once the path has lost its bindings, it is a path like any other. A computed at the root path `/` is refused.
+
+**Cost.** Per `createComputed` or `removeComputed`, one pass over the paths that have bindings and over the state signals below the path; `removeComputed` also passes over the other computeds once. A computed that no other computed depends on costs nothing extra, and nothing is kept after `removeComputed` once the path has no binding; one that others depend on (itself or a path inside it) gets one small signal that tells them when it was replaced.
 
 ### Computed Sub-Path Traversal
 
@@ -247,73 +270,6 @@ In a path like `/currentUser/name`, the model resolves `/currentUser` as a compu
 
 **Computed paths are read-only.** `setProperty`, `mergeProperty`, and two-way bindings on computed paths (or their sub-paths) return `false` and log a warning. This matches the industry consensus: [Vue](https://vuejs.org/guide/essentials/computed.html), [MobX](https://mobx.js.org/computeds.html), [SolidJS](https://docs.solidjs.com/reference/basic-reactivity/create-memo), and [Angular Signals](https://angular.dev/guide/signals) all treat computeds as read-only.
 
-### Computed Re-Evaluation and Sub-Path Notifications
-
-When a computed re-evaluates, **all** bindings that resolve through it are notified, including sub-path bindings. Each notified binding compares its old value to its new value (`checkUpdate`), and only bindings whose value actually changed trigger a DOM update.
-
-```typescript
-model.createComputed("/computedRows", ["/sourceRows"], (rows) =>
-  rows.map((r) => ({ ...r, display: `${r.name} ($${r.price})` })),
-);
-
-// Grid table bound to /computedRows, each cell bound to {name}, {price}, etc.
-// When /sourceRows is replaced (setProperty("/sourceRows", newArray)):
-// 1. The computed re-evaluates → returns a new array
-// 2. ALL cell bindings are notified (they resolve through the computed)
-// 3. Each cell runs checkUpdate -- compares old vs new value
-// 4. Only cells whose value actually changed trigger a DOM update
-```
-
-**Rendering is correct** -- unchanged cells do not re-render. But every binding performs the comparison check. For a grid table with 2000 rows and 3 columns, 6000 bindings are checked even if only 1 value changed. This is the expected behavior, not a limitation.
-
-#### Why Computed Signals Are Atomic
-
-The [TC39 Signals proposal](https://github.com/tc39/proposal-signals) explicitly defines `Signal.Computed` as a single, atomic reactive node. A computed produces one value, compares it as a whole via `Object.is`, and notifies all downstream consumers uniformly. There is no concept of sub-path or partial notification in the specification.
-
-This is a deliberate design choice shared across the signals ecosystem:
-
-- **SolidJS** separates [`createSignal`](https://docs.solidjs.com/reference/basic-reactivity/create-signal) (atomic, single value) from [`createStore`](https://docs.solidjs.com/concepts/stores) (Proxy-based, fine-grained per-property tracking). These are two distinct primitives -- stores are not "better signals," they are a fundamentally different reactive architecture built on top of `Proxy`.
-- **Angular Signals** are fully atomic. There is no built-in store primitive. The recommended approach for reducing notifications is to decompose large objects into smaller, focused signals.
-- **Preact Signals** are atomic. The community-built [`deepsignal`](https://github.com/luisherranz/deepsignal) package adds Proxy-based fine-grained tracking as an opt-in layer on top.
-
-SignalModel follows the TC39 model: a `Signal.Computed` is a single reactive node, and all observers are notified when it changes.
-
-#### Signals vs Proxy-Based Reactivity
-
-MobX and Vue use a fundamentally different architecture. They wrap objects in JavaScript `Proxy` instances that intercept every property `get` and `set`. When a computed getter reads `state.items[3].name`, the Proxy's `get` trap records that specific property access, creating a per-property dependency. When `state.items[3].name` changes, only the computations that read that exact property are notified.
-
-| Aspect                     | TC39 Signals (SignalModel, SolidJS signals, Angular) | Proxy-based (MobX, Vue `reactive()`, SolidJS stores) |
-| -------------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
-| **Unit of tracking**       | The entire signal value                              | Individual properties on an object                   |
-| **Dependency granularity** | "I depend on signal X"                               | "I depend on property `a` of object X"               |
-| **Notification**           | All subscribers of signal X                          | Only subscribers of `X.a`                            |
-| **Mechanism**              | Value comparison via `equals`                        | Proxy `get`/`set` traps                              |
-
-The Proxy-based approach is more fine-grained by default but comes with trade-offs: Proxy objects have identity issues (the proxy is not the original object), they add overhead on every property access, and they cannot be serialized directly. The TC39 proposal intentionally chose the atomic model as the primitive because it is simpler, composable, and avoids forcing Proxy overhead on all signal usage. Fine-grained tracking can always be layered on top, but you cannot remove Proxy overhead from a system that requires it.
-
-#### Notification Cost
-
-When a computed re-evaluates, the notification cost is O(N) where N is the number of bindings that resolve through the computed:
-
-1. Each binding's `Signal.subtle.Watcher` callback fires (TC39 mechanism, cannot be intercepted)
-2. Each binding is scheduled in the shared flush queue
-3. Each binding's `checkUpdate` re-reads its value and compares with the previous value
-4. Only bindings whose value actually changed trigger a DOM update (O(k) where k ≤ N)
-
-For primitive leaf values (strings, numbers -- typical for table cells), the comparison is `Object.is`, which is effectively free and handles `NaN` accurately. For direct property bindings, the flush queue passes the already-read signal value directly to `checkUpdate`, avoiding redundant path traversal.
-
-#### Dependency Granularity
-
-A computed that depends on a parent path (e.g., `/sourceRows`) re-evaluates both when that path is replaced (`setProperty("/sourceRows", newArray)`) **and** when a child path is updated via `setProperty("/sourceRows/3/name", "new")`, because ancestor state signals are invalidated and both state and computed signals use `signalEquals` (which always notifies for non-null objects). If you want narrower invalidation for large arrays, split dependencies onto specific paths or bind directly to leaf paths.
-
-```typescript
-// Re-evaluates when /sourceRows is replaced OR a child path is updated via setProperty:
-model.createComputed("/computed", ["/sourceRows"], (rows) => transform(rows));
-
-model.setProperty("/sourceRows/3/name", "updated"); // invalidates /sourceRows -> computed re-evaluates
-model.setProperty("/sourceRows", [...newArray]); // invalidates /sourceRows -> computed re-evaluates
-```
-
 ```typescript
 model.setProperty("/currentUser/name", "Bob"); // returns false -- computed path is read-only
 ```
@@ -324,9 +280,15 @@ To update the data, write to the **source** path. The computed re-derives automa
 model.setProperty("/users/0/name", "Bob"); // writes to source data -- /currentUser/name updates
 ```
 
+### Computed Re-Evaluation and Sub-Path Notifications
+
+When a computed re-evaluates, all bindings that resolve through it are notified, including bindings on its sub-paths. Each compares its old value to the new one and updates only if it differs. A computed is one unit: it is re-evaluated as a whole when a dependency changes, so keep the dependencies as narrow as the value needs.
+
+Why that is, what it costs and how to split a computed: [Computed Signals: Re-Evaluation and Notifications](https://github.com/wridgeu/ui5-lib-signal-model/blob/main/docs/computed-signals.md).
+
 ## Configuration Modes
 
-SignalModel defaults to **full JSONModel parity**: `setProperty` returns `false` for nonexistent parent paths, exactly like JSONModel. Two opt-in flags independently extend this behavior, each controlling a different level of the path:
+By default `setProperty` returns `false` for nonexistent parent paths, as in JSONModel. Three options extend this behavior. Two of them control a level of the path each; the third (`observe`) is JSONModel's `bObserve`:
 
 ```
 model.setProperty("/a/b/c", value)
@@ -335,8 +297,9 @@ model.setProperty("/a/b/c", value)
                    └────── INTERMEDIATE: {a}, {b}       ← autoCreatePaths controls this
 ```
 
-- **`autoCreatePaths: true`**: Auto-creates intermediate objects when setting a deeply nested path. `model.setProperty("/a/b/c", value)` creates `{a: {b: {}}}` if the parent path doesn't exist, instead of returning `false`. Useful for dynamic form models where the schema isn't known upfront.
-- **`strictLeafCheck: true`**: Rejects `setProperty` writes to leaf properties that don't exist on the parent object (returns `false`). JSONModel allows creating new properties on existing parents; this flag prevents it. Useful for catching typos in property names against a known schema.
+- **`autoCreatePaths: true`**: Auto-creates intermediate objects when setting a deeply nested path. `model.setProperty("/a/b/c", value)` creates `{a: {b: {}}}` if the parent path doesn't exist, instead of returning `false`. Useful for dynamic form models where the schema isn't known upfront. Only missing parents (`undefined` or `null`) are created. An existing value is never replaced: with `name: ""`, `setProperty("/name/first", "x")` still returns `false`, and with `name: "Al"` it throws a `TypeError`, as in JSONModel.
+- **`observe: true`** (or `true` as the second constructor argument, like JSONModel's `bObserve`): an assignment to a property of the data object (`model.getData().name = "x"`) updates the bindings without `refresh()`. As in JSONModel, the properties of the data are replaced by getters and setters and every such assignment checks all bindings, so writes get slower. Off by default. Four bugs of JSONModel are not copied (see [the differences](https://github.com/wridgeu/ui5-lib-signal-model/blob/main/docs/jsonmodel-differences.md#observe-covers-more)).
+- **`strictLeafCheck: true`**: Rejects `setProperty` writes to leaf properties that don't exist on the parent object (returns `false`). JSONModel allows creating new properties on existing parents; this flag prevents it. Useful for catching typos in property names against a known schema. A key that holds `undefined` is gone after a merge (as in JSONModel), so declare the properties of such a schema with `null`.
 
 | `autoCreatePaths` | `strictLeafCheck` | Missing parent | New leaf on existing parent | Use case                         |
 | ----------------- | ----------------- | -------------- | --------------------------- | -------------------------------- |
@@ -346,6 +309,22 @@ model.setProperty("/a/b/c", value)
 | `true`            | `true`            | creates it     | `false`                     | Scaffold structure, guard leaves |
 
 All other APIs (`setData`, `getData`, `getProperty`, `bindProperty`, `bindList`, `bindTree`) behave identically regardless of configuration.
+
+### Known Differences from JSONModel
+
+The same operations run against both models in a randomized test, and UI5's own tests of the JSON model run against SignalModel. Nine differences remain on purpose:
+
+- **A merge works on the data in place.** The data after `setData(data, true)` or `mergeProperty` equals JSONModel's, but the existing objects are changed instead of rebuilt: `getData()` stays the same object. Data you changed directly needs `refresh()` before a merge drops its `undefined` keys.
+- **Bindings update in a microtask**, not inside `setProperty`. A control shows the new value one microtask later, and an error in a formatter is logged instead of thrown out of `setProperty`.
+- **A binding on an object or array fires for every write below it.** A formatter that reads from the object always shows current content; JSONModel can keep the old text.
+- **A list binding keyed by the row object** does not fire after a merge that changed nothing. JSONModel's does, because its merge replaces every row object.
+- **Data changed directly in `getData()` needs `refresh()`.** JSONModel checks all bindings on every write and so finds such a change with the next write anywhere; SignalModel tells only the bindings at, above and below the written path.
+- **An asynchronous `loadData` uses `fetch`**, not `jQuery.ajax`: `MockServer` and a fake `XMLHttpRequest` do not see the request. They do see a synchronous load (`loadData(url, params, false)`).
+- **A write into a prototype is refused.** `setProperty("/__proto__/x", 1)` returns `false`; JSONModel writes to `Object.prototype`.
+- **The `observe` option covers more.** A key created by `setProperty` is observed, a filled array hole stays visible, and data that refers to itself works. JSONModel loses updates or throws in these cases.
+- **It is not an instance of JSONModel.** SignalModel extends `ClientModel`, so `model instanceof JSONModel` and `isA("sap.ui.model.json.JSONModel")` are `false`.
+
+Details, the reason for each and what to do about it: [Differences from JSONModel](https://github.com/wridgeu/ui5-lib-signal-model/blob/main/docs/jsonmodel-differences.md).
 
 ### Merge Writes
 
@@ -363,9 +342,11 @@ model.mergeProperty("/customer", { age: 30 });
 // Result: /customer = { name: "Alice", age: 30, city: "Berlin" }
 ```
 
-`mergeProperty` only fires signals for paths that actually changed (here, only `/customer/age`). Bindings to `/customer/name` and `/customer/city` are not notified.
+`mergeProperty` only fires signals for paths that actually changed (here, only `/customer/age`). Bindings to `/customer/name` and `/customer/city` are not notified. The exception is data that cannot be written to, like a frozen object: the data is then rebuilt and every binding checks.
 
-`setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally.
+`setData(partial, true)` uses the same merge logic starting at the root. `mergeProperty("/", partial)` delegates to `setData(partial, true)` internally. Below the root, `mergeProperty` merges only two arrays or two plain objects, like that merge does with the values inside the data. Any other combination (a `Date`, a class instance, an array into an object) replaces the value, as `setProperty` does.
+
+A sorted, filtered or grouped list sorts and filters again after a merge that changed one of its rows, as it does with JSONModel. A plain `setProperty` on a row does not make a list binding without extended change detection sort again, in either model; call `refresh(true)` on the list binding for that.
 
 ## API
 
@@ -373,10 +354,10 @@ model.mergeProperty("/customer", { age: 30 });
 
 ```typescript
 // Data constructor (most common)
-new SignalModel<T>(data?: T, options?: { autoCreatePaths?: boolean; strictLeafCheck?: boolean })
+new SignalModel<T>(data?: T, options?: { autoCreatePaths?: boolean; strictLeafCheck?: boolean; observe?: boolean } | boolean)
 
 // URL constructor -- loads JSON from a URL (calls loadData internally)
-new SignalModel(url: string, options?: { autoCreatePaths?: boolean; strictLeafCheck?: boolean })
+new SignalModel(url: string, options?: { autoCreatePaths?: boolean; strictLeafCheck?: boolean; observe?: boolean } | boolean)
 ```
 
 ### JSONModel-Compatible Methods
@@ -392,7 +373,10 @@ model.bindProperty("/path");
 model.bindList("/path");
 model.bindTree("/path", context, filters, { arrayNames: ["children"] }, sorters);
 
-// Load JSON from a URL (fires requestSent/requestCompleted/requestFailed events)
+// Load JSON from a URL (fires requestSent/requestCompleted/requestFailed events).
+// Like JSONModel, the returned promise rejects with { message, statusCode, statusText,
+// responseText } when the request fails. params go into the URL for GET and HEAD and into
+// the body otherwise. abortSignal is an extension: an abort fails with the message "abort".
 model.loadData(url, params?, async?, method?, merge?, cache?, headers?, abortSignal?);
 
 // Promise that resolves when all pending loadData calls complete
@@ -417,21 +401,31 @@ model.mergeProperty("/customer", { age: 30 });
 model.createComputed("/fullName", ["/firstName", "/lastName"], (first, last) => `${first} ${last}`);
 model.removeComputed("/fullName");
 
-// Direct signal access (read-only recommended)
+// Direct signal access
 const signal = model.getSignal("/path");
 signal.get(); // read current value
+signal.set(1); // on a state signal: the same as model.setProperty("/path", 1); a refused write is logged
 
 // Lifecycle
 model.destroy(); // aborts in-flight requests, clears all subscriptions
 ```
 
+As in JSONModel, the model holds a binding from its first change handler to its last. A binding that is only read from (`model.bindList("/items", null, sorters, filters).getContexts()`) is not updated and needs no `destroy()`.
+
+Three things to know about a signal you keep:
+
+- Below a computed, `getSignal` returns that computed: `getSignal("/user/name")` with a computed at `/user` is the signal of the whole `/user` value.
+- A state signal is the signal of plain data. If a computed is created at its path or above it later, the signal no longer follows; call `getSignal` again.
+- A write with `bAsyncUpdate` (what a two-way binding does) reaches a signal you kept, state or computed, when its timer runs. `getSignal`, `getProperty` on a computed and every synchronous write bring the signals in line before that.
+- The model keeps a state signal that `getSignal` handed out until `destroy()`. Signals it creates for bindings and for the dependencies of computeds go when the last of those is gone.
+
 ### Binding Classes
 
 | Class                   | Extends                 | Purpose                                              |
 | ----------------------- | ----------------------- | ---------------------------------------------------- |
-| `SignalPropertyBinding` | `ClientPropertyBinding` | Single-value bindings with Watcher push              |
-| `SignalListBinding`     | `ClientListBinding`     | List bindings with filter/sort, Watcher push         |
-| `SignalTreeBinding`     | `ClientTreeBinding`     | Tree bindings with hierarchy traversal, Watcher push |
+| `SignalPropertyBinding` | `ClientPropertyBinding` | Single-value bindings, updated by push               |
+| `SignalListBinding`     | `ClientListBinding`     | List bindings with filter/sort, updated by push      |
+| `SignalTreeBinding`     | `ClientTreeBinding`     | Tree bindings with hierarchy traversal, push updates |
 
 ## Feature Comparison: SignalModel vs JSONModel
 
@@ -443,8 +437,8 @@ model.destroy(); // aborts in-flight requests, clears all subscriptions
 | **Property binding**           | `{/path}` in XML views                                            | Identical                                                                                              |
 | **List binding**               | Filter + Sort via FilterProcessor/SorterProcessor                 | Same (reuses ClientListBinding internals)                                                              |
 | **Tree binding**               | JSONTreeBinding with arrayNames                                   | SignalTreeBinding with same arrayNames support                                                         |
-| **Expression binding**         | Supported                                                         | Supported (benefits from push-based dependency notification)                                           |
-| **Two-way binding**            | Supported                                                         | Supported (identical behavior)                                                                         |
+| **Expression binding**         | Supported                                                         | Supported                                                                                              |
+| **Two-way binding**            | Supported                                                         | Supported (same behavior)                                                                              |
 | **Declarative XML binding**    | Supported                                                         | Supported (full lifecycle: one-way, two-way, list, tree)                                               |
 | **Named models**               | `{modelName>/path}`                                               | Identical                                                                                              |
 | **Binding modes**              | OneWay, TwoWay, OneTime                                           | Same (inherits from ClientModel)                                                                       |

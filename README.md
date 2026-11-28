@@ -52,7 +52,7 @@ const model = new SignalModel({ customer: { name: "Alice", age: 28 }, orders: []
 // Works with standard XML view bindings: {/customer/name}, {/orders}, etc.
 ```
 
-For the full API reference, usage examples, computed signals, and configuration options, see the **[library documentation](packages/lib/README.md)**.
+For the full API reference, usage examples, computed signals, and configuration options, see the **[library documentation](packages/lib/README.md)**. The nine places where it differs from JSONModel on purpose, each with what to do about it, are in [Differences from JSONModel](docs/jsonmodel-differences.md); the internals are in the [architecture notes](docs/architecture.md).
 
 ## Demo
 
@@ -64,7 +64,7 @@ For the full API reference, usage examples, computed signals, and configuration 
 packages/
   lib/          ui5.model.signal library (SignalModel + bindings)
   demo-app/     Demo app with 7 showcase pages
-docs/           Architecture notes, plans, and specs
+docs/           Differences from JSONModel, architecture notes, specs
 scripts/        Benchmark runners and CI helpers
 ```
 
@@ -86,7 +86,9 @@ npm run start:bench # benchmark page
 ### Tests
 
 ```bash
+npm test            # everything below
 npm run test:qunit  # QUnit via WDIO + headless Chrome
+npm run test:ui5    # UI5's own JSONModel tests against SignalModel (downloads them from GitHub)
 ```
 
 ### Quality checks
@@ -109,17 +111,18 @@ npm run clean  # remove dist and .ui5 caches
 
 ### Benchmark
 
-A self-contained benchmark suite compares SignalModel vs JSONModel across 22 scenarios on OpenUI5 1.154.0. Each number is the time from a model write until UI5 has re-rendered the affected controls; browser layout and paint are not included. The largest difference is 2,000 consecutive synchronous `setProperty` calls on a model with 2,000 bindings: ~38 ms instead of ~1.9 s (**52x faster**, 95% CI 47x-58x), because JSONModel checks every binding on every call. With `bAsyncUpdate`, the mitigation UI5 recommends, JSONModel does the same work in ~34 ms and the two models cannot be separated. Across all 22 scenarios, SignalModel is faster in 16, marginally slower in 1 (`setData` replace, 1.05x) and not clearly different in 5 (aggregation replace, full `bAsyncUpdate` batches).
+A self-contained benchmark suite compares SignalModel vs JSONModel across 24 scenarios on OpenUI5 1.154.0. Each number is the time from a model write until UI5 has re-rendered the affected controls; browser layout and paint are not included. The largest difference is 2,000 consecutive synchronous `setProperty` calls on a model with 2,000 bindings: ~17 ms instead of ~1.0 s (**59x faster**, 95% CI 59x-60x), because JSONModel checks every binding on every call. With `bAsyncUpdate`, the mitigation UI5 recommends, JSONModel does the same work in ~17 ms, the same as SignalModel within the measurement. Across all 24 scenarios, SignalModel is faster in 19 (in three of them, `setData` replace, a full deep merge and one of the two full `bAsyncUpdate` batches, by 1-4%) and not clearly different in 5 (replacing a list, table, grid table or tree, where rendering dominates, and the other full `bAsyncUpdate` batch). None is slower.
 
 ![SignalModel vs JSONModel Benchmark](docs/benchmark-results.svg)
 
-See the [benchmark documentation](packages/lib/test/benchmark/README.md) for all 22 scenarios, the methodology, and what is and is not measured. The numbers come from one desktop machine; the raw data is in [docs/benchmark-results.json](docs/benchmark-results.json).
+See the [benchmark documentation](packages/lib/test/benchmark/README.md) for all 24 scenarios, the methodology, and what is and is not measured. The numbers come from one desktop machine; the raw data is in [docs/benchmark-results.json](docs/benchmark-results.json).
 
 ```bash
 npm run bench                                    # CLI -- headless
 npm run bench -- --bindings 1000 --json results.json  # custom config
 npm run bench:stable                              # multi-run stability
 npm run bench:render                              # regenerate chart + table from docs/benchmark-results.json
+npm run bench:memory                              # heap per binding, both models (needs npm run start:lib)
 ```
 
 ### Commits

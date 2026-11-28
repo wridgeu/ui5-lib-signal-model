@@ -1,4 +1,7 @@
+import JSONModel from "sap/ui/model/json/JSONModel";
 import SignalModel from "ui5/model/signal/SignalModel";
+import Log from "sap/base/Log";
+import { Signal } from "signal-polyfill";
 
 QUnit.module("mergeProperty", () => {
   QUnit.test("merges into existing object, preserving unchanged fields", (assert) => {
@@ -94,11 +97,83 @@ QUnit.module("mergeProperty", () => {
     model.destroy();
   });
 
-  QUnit.test("setData with merge ignores non-object payloads", (assert) => {
-    const model = new SignalModel<Record<string, unknown>>({ name: "Alice" });
-    model.setData("abc" as never, true);
-    model.setData(null as never, true);
-    assert.deepEqual(model.getData(), { name: "Alice" }, "data unchanged");
+  QUnit.test("frozen data that the merge does not write to is left alone", (assert) => {
+    const data = { o: { a: 1, f: Object.freeze({ x: 1 }) } };
+    const model = new SignalModel(data);
+    model.mergeProperty("/o", { a: 2 });
+    assert.strictEqual(model.getData(), data, "the data is not rebuilt");
+    assert.strictEqual(data.o.a, 2, "merged in place");
     model.destroy();
+  });
+
+  QUnit.test("a TypeError that is not a refused write comes out of the merge", (assert) => {
+    const data = { a: 1, o: { b: 1 } };
+    const model = new SignalModel(data);
+    // One watcher per signal: a watcher notifies once until it is armed again
+    for (const path of ["/a", "/o/b"]) {
+      new Signal.subtle.Watcher(() => {
+        throw new TypeError("from a watcher");
+      }).watch(model.getSignal(path));
+    }
+    assert.throws(() => model.setData({ a: 2 }, true), /from a watcher/, "setData with merge");
+    assert.throws(() => model.mergeProperty("/o", { b: 2 }), /from a watcher/, "mergeProperty");
+    assert.strictEqual(model.getData(), data, "the data is not rebuilt");
+    model.destroy();
+  });
+
+  QUnit.test("set() on a signal logs a write the model refuses", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    const warnings: string[] = [];
+    const original = Log.warning;
+    Log.warning = (message: string) => void warnings.push(message);
+    try {
+      (model.getSignal("/missing/x") as Signal.State<unknown>).set(1);
+      (model.getSignal("/a") as Signal.State<unknown>).set(2);
+    } finally {
+      Log.warning = original;
+    }
+    assert.strictEqual(warnings.length, 1, "one warning, for the refused write");
+    assert.ok(warnings[0].includes("/missing/x"), "it names the path");
+    assert.strictEqual(model.getProperty("/a"), 2, "the other write went through");
+    model.destroy();
+  });
+
+  QUnit.test("setData with merge and a payload that is no object", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ name: "Alice" });
+    model.setData(null as never, true);
+    model.setData(7 as never, true);
+    assert.deepEqual(model.getData(), { name: "Alice" }, "null and a number merge nothing in");
+    // as JSONModel: its merge takes the characters as keys
+    model.setData("ab" as never, true);
+    assert.deepEqual(model.getData(), { 0: "a", 1: "b", name: "Alice" }, "a string");
+    model.destroy();
+  });
+
+  QUnit.test("a frozen object inside a class instance is replaced by the merged copy", (assert) => {
+    class Holder {
+      cfg: object = Object.freeze({ a: 1, b: 1 });
+    }
+    const model = new SignalModel<Record<string, unknown>>({ holder: new Holder() });
+    const binding = model.bindProperty("/holder/cfg/a");
+    binding.attachChange(() => {});
+    assert.ok(model.mergeProperty("/holder/cfg", { a: 2 }));
+    assert.deepEqual(model.getProperty("/holder/cfg"), { a: 2, b: 1 });
+    assert.ok(model.getProperty("/holder") instanceof Holder, "the instance stays");
+    return Promise.resolve().then(() => {
+      assert.strictEqual(binding.getValue(), 2);
+      model.destroy();
+    });
+  });
+
+  QUnit.test("inherited keys of a payload are merged, as in JSONModel", (assert) => {
+    const results = [JSONModel, SignalModel].map((Model) => {
+      const model = new Model({ z: 0 });
+      model.setData(Object.assign(Object.create({ a: 1 }), { b: 2 }), true);
+      const data = JSON.stringify(model.getData());
+      model.destroy();
+      return data;
+    });
+    assert.strictEqual(results[1], '{"z":0,"b":2,"a":1}');
+    assert.strictEqual(results[1], results[0], "same data as JSONModel");
   });
 });

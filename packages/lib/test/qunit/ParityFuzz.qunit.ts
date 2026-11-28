@@ -1,0 +1,1306 @@
+import isPlainObject from "sap/base/util/isPlainObject";
+import SignalModel from "ui5/model/signal/SignalModel";
+import JSONModel from "sap/ui/model/json/JSONModel";
+import Context from "sap/ui/model/Context";
+import Filter from "sap/ui/model/Filter";
+import FilterOperator from "sap/ui/model/FilterOperator";
+import Sorter from "sap/ui/model/Sorter";
+import Integer from "sap/ui/model/type/Integer";
+import deepEqual from "sap/base/util/deepEqual";
+import deepExtend from "sap/base/util/deepExtend";
+import nextUIUpdate from "sap/ui/test/utils/nextUIUpdate";
+import Input from "sap/m/Input";
+import List from "sap/m/List";
+import StandardListItem from "sap/m/StandardListItem";
+import StandardTreeItem from "sap/m/StandardTreeItem";
+import Text from "sap/m/Text";
+import Tree from "sap/m/Tree";
+import Message from "sap/ui/core/message/Message";
+import XMLView from "sap/ui/core/mvc/XMLView";
+import Column from "sap/ui/table/Column";
+import Table from "sap/ui/table/Table";
+import TreeTable from "sap/ui/table/TreeTable";
+import type DataState from "sap/ui/model/DataState";
+import type ListBinding from "sap/ui/model/ListBinding";
+import type PropertyBinding from "sap/ui/model/PropertyBinding";
+import type TreeBinding from "sap/ui/model/TreeBinding";
+
+/**
+ * Differential test: the same random sequence of operations runs against JSONModel and
+ * SignalModel, and after every step the two must agree. Compared:
+ * - the data, and the result of every write;
+ * - property bindings: absolute, relative, switched to another context, suspended;
+ * - list bindings: plain, sorted, filtered (test function and operators), extended change
+ *   detection, suspended; tree bindings, also with a filter and a sorter;
+ * - rendered controls with expression, composite, element, typed, two-way and aggregation
+ *   bindings: their properties and their DOM. Among them a second and a named model, a
+ *   growing list, a grouped list, a sap.ui.table.Table, a sap.ui.table.TreeTable, a
+ *   sap.m.Tree and two instances of an XML view on the one model;
+ * - messages on a binding and on a control, and how often property and list bindings fire
+ *   change;
+ * - computeds, against the same function applied to JSONModel's data.
+ * Operations: setProperty (also through a context), a binding's setValue, typing into an
+ * input, setData replace and merge, mergeProperty, loadData, setContext, sort, filter,
+ * suspend and resume, redefining a computed, bindElement, growing a list, scrolling a
+ * table, expanding a tree, setMessages.
+ * The options autoCreatePaths and strictLeafCheck run against JSONModel plus the rule
+ * the option adds.
+ * Seeds are fixed, so a failure names the seed and step to replay.
+ */
+
+/** Deterministic PRNG (mulberry32). */
+function prng(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+class Point {
+  x = 1;
+}
+const SHARED_SYMBOL = Symbol("fuzz");
+
+/** Factories, so each model gets its own copy of object values. */
+const VALUES: (() => unknown)[] = [
+  () => 0,
+  () => 1,
+  () => -1.5,
+  () => NaN,
+  () => "",
+  () => "0",
+  () => "text",
+  () => "a longer text",
+  () => true,
+  () => false,
+  () => null,
+  () => undefined,
+  () => ({}),
+  () => ({ v: 1 }),
+  () => ({ v: 2, nested: { v: 3 } }),
+  () => ({ length: 3 }),
+  () => [],
+  () => [1, 2, 3],
+  () => [{ name: "a" }, { name: "b" }],
+  () => new Date(0),
+  () => BigInt(10),
+  () => SHARED_SYMBOL,
+  () => (): number => 1,
+  () => new Point(),
+  () => ({ at: new Point(), when: new Date(0) }),
+  () => new Map([["k", 1]]),
+  () => new Set([1]),
+  () => {
+    const sparse: unknown[] = [1];
+    sparse[2] = 3;
+    return sparse;
+  },
+  // Data a write cannot change, and an object that is not plain for UI5
+  () => Object.freeze({ v: 1, nested: Object.freeze({ v: 2 }) }),
+  () => Object.freeze([Object.freeze({ name: "a" })]),
+  () => ({ v: 1, [Symbol.toStringTag]: "Tagged" }),
+];
+
+const WRITE_PATHS = [
+  "/s",
+  "/n",
+  "/zero",
+  "/flag",
+  "/nul",
+  "/obj",
+  "/obj/v",
+  "/obj/nested",
+  "/obj/nested/v",
+  "/list",
+  "/list/0",
+  "/list/0/name",
+  "/list/1",
+  "/list/3",
+  "/list/length",
+  "/missing",
+  "/missing/x",
+];
+
+const READ_PATHS = [
+  ...WRITE_PATHS,
+  "/",
+  "/s/length",
+  "/s/0",
+  "/zero/x",
+  "/flag/x",
+  "/list/length",
+  "/list/1/name",
+  "/obj/nested/v/deeper",
+  "/obj/length",
+];
+
+/** [context path, path relative to it] for property bindings and for writes */
+const RELATIVE_PATHS: [string, string][] = [
+  ["/", "n"],
+  ["/obj", "v"],
+  ["/obj", "nested/v"],
+  ["/list", "length"],
+  ["/list/0", "name"],
+  ["/list/1", "name"],
+  ["/s", "length"],
+  ["/missing", "x"],
+];
+
+/** [path, context path or "", a key of CHANGE_DETECTION, "sorted" or a key of FILTERS] */
+const LIST_BINDINGS: [string, string, string][] = [
+  ["/list", "", ""],
+  ["/list", "", "ecd"],
+  ["/list", "", "sorted"],
+  ["/list", "", "filtered"],
+  ["/list", "", "eq"],
+  ["/list", "", "gt"],
+  ["/list", "", "contains"],
+  ["/list", "", "test"],
+  ["/list", "", "any"],
+  ["/list", "", "ecd-nokey"],
+  ["/list", "", "ecd-name"],
+  ["/list", "", "ecd-detect"],
+  ["list", "/", ""],
+  ["nested", "/obj", ""],
+  ["/obj", "", ""],
+  ["/obj", "", "ecd"],
+  ["/obj", "", "sorted"],
+  ["/", "", ""],
+  ["/s", "", ""],
+  ["/missing", "", ""],
+];
+
+const isContainer = (value: unknown): value is Record<string, unknown> =>
+  (typeof value === "object" && value !== null) || typeof value === "function";
+
+// A tagged object reads "[object Object]" like any other: which object a binding on an
+// object still holds is a documented difference
+const typed = (value: unknown): string =>
+  `${typeof value}:${String(value).replace(/^\[object \w+\]$/, "[object Object]")}`;
+
+/**
+ * Computeds on the SignalModel. JSONModel has none, so the expected value is the same
+ * function applied to JSONModel's data. The functions accept any value.
+ */
+const COMPUTEDS: [path: string, deps: string[], fn: (...values: unknown[]) => unknown][] = [
+  ["/cLabel", ["/s", "/n"], (s, n) => `${typed(s)}|${typed(n)}`],
+  [
+    "/cObj",
+    ["/obj"],
+    (obj) => ({
+      kind: typeof obj,
+      keys: isContainer(obj) ? Object.keys(obj).join(",") : "",
+      v: isContainer(obj) ? obj.v : undefined,
+    }),
+  ],
+  [
+    "/cRows",
+    ["/list"],
+    (list) =>
+      Array.isArray(list)
+        ? list.flatMap((item: unknown, i) =>
+            item === undefined ? [] : [{ i, name: isContainer(item) ? item.name : item }],
+          )
+        : [],
+  ],
+  [
+    "/cChain",
+    ["/cLabel", "/cRows"],
+    (label, rows) => `${(label as string).length}/${(rows as unknown[]).length}`,
+  ],
+];
+
+/** [computed path, path below it] read through bindings and getProperty */
+const COMPUTED_READS: [string, string][] = [
+  ["/cLabel", ""],
+  ["/cObj", "kind"],
+  ["/cObj", "keys"],
+  ["/cObj", "v"],
+  ["/cRows", "0/name"],
+  ["/cRows", "1/i"],
+  ["/cRows", "length"],
+  ["/cChain", ""],
+];
+
+function expectedComputed(path: string, json: JSONModel): unknown {
+  const computed = COMPUTEDS.find(([computedPath]) => computedPath === path);
+  return computed
+    ? computed[2](...computed[1].map((dep) => expectedComputed(dep, json)))
+    : (json.getProperty(path) as unknown);
+}
+
+type Mode = "default" | "autoCreatePaths" | "strictLeafCheck" | "both options";
+type AnyModel = JSONModel | SignalModel<Record<string, unknown>>;
+
+const contextAt = (model: AnyModel, path: string): Context | undefined =>
+  path ? new Context(model, path) : undefined;
+
+/** What autoCreatePaths adds to JSONModel: objects for missing (null or undefined) parents. */
+function createParents(json: JSONModel, path: string): boolean {
+  let created = false;
+  let current = "";
+  for (const part of path.split("/").slice(1, -1)) {
+    current += `/${part}`;
+    const value = json.getProperty(current) as unknown;
+    if (value == null) {
+      json.setProperty(current, {});
+      created = true;
+    } else if (!isContainer(value)) {
+      break;
+    }
+  }
+  return created;
+}
+
+/**
+ * What strictLeafCheck adds to JSONModel: no new property on an existing parent.
+ */
+function isNewLeaf(model: AnyModel, path: string): boolean {
+  const cut = path.lastIndexOf("/");
+  const parent = model.getProperty(path.slice(0, cut) || "/") as unknown;
+  return isContainer(parent) && !(path.slice(cut + 1) in parent);
+}
+
+/** JSONModel's merge descends only into two arrays or two plain objects. */
+function canMerge(target: unknown, payload: unknown): boolean {
+  return (
+    (Array.isArray(target) && Array.isArray(payload)) ||
+    (isPlainObject(target as object) && isPlainObject(payload as object))
+  );
+}
+
+/** List filters by name. Operators that need strings throw for other values, in both models. */
+const FILTERS: Record<string, () => Filter> = {
+  filtered: () => new Filter({ path: "name", test: (name: unknown) => typeof name === "string" }),
+  eq: () => new Filter("name", FilterOperator.EQ, "a"),
+  gt: () => new Filter("name", FilterOperator.GT, "a"),
+  contains: () => new Filter("name", FilterOperator.Contains, "a"),
+  // Without a path the test function gets the row
+  test: () => new Filter({ test: (row: unknown) => isContainer(row) } as never),
+  any: () =>
+    new Filter({
+      filters: [
+        new Filter("name", FilterOperator.EQ, "a"),
+        new Filter({ path: "name", test: (name: unknown) => typeof name === "number" }),
+      ],
+      and: false,
+    }),
+};
+
+/** Extended change detection: [bDetectUpdates, key]. Controls use no key. */
+const CHANGE_DETECTION: Record<string, [boolean, string | undefined]> = {
+  ecd: [false, ""],
+  "ecd-nokey": [false, undefined],
+  "ecd-name": [false, "name"],
+  "ecd-detect": [true, undefined],
+};
+
+const VIEW = `<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">
+  <Text id="expression" text="{= typeof \${/s} + '|' + typeof \${/obj/v} }"/>
+  <VBox binding="{/obj}"><Text id="element" text="{= typeof \${nested/v} }"/></VBox>
+  <List id="list" items="{/list}"><StandardListItem title="{= typeof \${name} }"/></List>
+</mvc:View>`;
+
+/**
+ * Expression bindings on Text controls. They use typeof where a value could not be turned
+ * into text (a symbol), and read the default model, a named one and a second model.
+ * None reads the content of an object through a binding on the object: JSONModel keeps
+ * the old text there after a write below the object (a documented difference).
+ */
+const EXPRESSIONS = [
+  "{= ${/n} > 0 ? 'positive' : ${/flag} ? 'flag' : 'other' }",
+  "{= typeof ${/obj/nested/v} + '/' + (${/flag} && !${/s} ? 'x' : typeof ${/list/0/name}) }",
+  "{= ${/list/1/name} !== undefined ? typeof ${/list/1/name} : ${/list/0} ? 'one' : typeof ${/list} }",
+  "{= ${named>/n} === ${/n} ? ${other>/label} + typeof ${named>/s} : 'differs' }",
+  "{= Array.isArray(${/list}) ? 'array' : typeof ${/obj} === 'object' && ${/obj} !== null ? 'object' : 'else' }",
+  "{= typeof ${/obj} === 'function' ? 'fn' : String(typeof ${/obj/v}) + (${/obj/nested/v} === undefined ? '?' : '!') }",
+  "n={= typeof ${/n} }, length={= typeof ${/s/length} }, {= ${/flag} ? 'on' : 'off' }",
+  "{= isNaN(${/n}) ? 'no number' : Math.round(Number(${/n}) * 10) > 5 ? 'large' : 'small' }",
+];
+/** For a row or an element: its own path and an absolute one in one expression */
+const ROW_EXPRESSION = "{= ${name} === 'a' ? 'A' : ${/n} > 1 ? 'big' : typeof ${name} }";
+
+/** Paths the element binding of a control switches between */
+const ELEMENT_PATHS = ["/list/0", "/list/1", "/obj", "/missing", "/s"];
+
+type Controls = {
+  /** Index in texts() and rendered() of the first control with a list binding */
+  lists: number;
+  texts: () => string[];
+  rendered: () => string[];
+  type: (text: string) => void;
+  act: (action: string, argument: number) => void;
+  destroy: () => void;
+};
+
+/**
+ * Rendered controls with the binding kinds an app uses.
+ * `texts` reads the control properties, `rendered` the DOM.
+ */
+async function createControls(model: AnyModel): Promise<Controls> {
+  const composite = new Text({
+    text: {
+      parts: [{ path: "/s" }, { path: "/obj/v" }],
+      formatter: (s: unknown, v: unknown) => `${typed(s)}|${typeof v}`,
+    },
+  });
+  const element = new Text({ text: { path: "name", formatter: typed } });
+  const elementExpression = new Text({ text: ROW_EXPRESSION });
+  for (const control of [element, elementExpression]) control.bindElement("/list/0");
+  const integer = new Text({ text: { path: "/n", type: new Integer() } });
+  // The model under a name, next to the default model and a second model
+  const other = new JSONModel({ label: "other" });
+  const named = new Text({
+    text: {
+      parts: [{ path: "named>/s" }, { path: "other>/label" }, { path: "/obj/v" }],
+      formatter: (s: unknown, label: unknown, v: unknown) =>
+        `${typed(s)}|${typed(label)}|${typeof v}`,
+    },
+  });
+  named.setModel(model, "named").setModel(other, "other");
+  const expressions = EXPRESSIONS.map((text) =>
+    new Text({ text }).setModel(model, "named").setModel(other, "other"),
+  );
+  const input = new Input({ value: { path: "/n", type: new Integer() } });
+  const item = (): StandardListItem =>
+    new StandardListItem({ title: { path: "name", formatter: typed } });
+  const list = new List({ items: { path: "/list", template: item() } });
+  const mixed = new List({
+    items: { path: "/list", template: new StandardListItem({ title: ROW_EXPRESSION }) },
+  });
+  const growing = new List({
+    growing: true,
+    growingThreshold: 1,
+    items: { path: "/list", template: item() },
+  });
+  const grouped = new List({
+    items: { path: "/list", sorter: new Sorter("name", false, true), template: item() },
+  });
+  const table = new Table({
+    visibleRowCount: 2,
+    rows: { path: "/list" },
+    columns: [new Column({ template: new Text({ text: { path: "name", formatter: typed } }) })],
+  });
+  const tree = new Tree({
+    items: {
+      path: "/",
+      template: new StandardTreeItem({ title: { path: "v", formatter: typed } }),
+    },
+  });
+  const treeTable = new TreeTable({
+    visibleRowCount: 60,
+    rows: { path: "/" },
+    columns: [new Column({ template: new Text({ text: { path: "v", formatter: typed } }) })],
+  });
+  const view = await XMLView.create({ definition: VIEW });
+  const secondView = await XMLView.create({ definition: VIEW });
+  const created = [...expressions, composite, element, elementExpression, integer, named];
+  const texts = [
+    ...created,
+    ...[view, secondView].flatMap((each) => [
+      each.byId("expression") as Text,
+      each.byId("element") as Text,
+    ]),
+  ];
+  const all = [
+    ...created,
+    input,
+    list,
+    mixed,
+    growing,
+    grouped,
+    table,
+    treeTable,
+    tree,
+    view,
+    secondView,
+  ];
+  const host = document.body.appendChild(document.createElement("div"));
+  for (const control of all) {
+    control.setModel(model);
+    control.placeAt(host);
+  }
+
+  const rowsOf = (control: List | Tree, read: (row: StandardListItem) => string): string =>
+    (control.getItems() as StandardListItem[]).map(read).join(",");
+  const cells = (read: (cell: Text) => string): string =>
+    table
+      .getRows()
+      .filter((row) => row.getBindingContext())
+      .map((row) => read(row.getCells()[0] as Text))
+      .join(",");
+  const nodes = (read: (cell: Text) => string): string =>
+    treeTable
+      .getRows()
+      .filter((row) => row.getBindingContext())
+      .map((row) => `${row.getBindingContext()!.getPath()}=${read(row.getCells()[0] as Text)}`)
+      .join(",");
+  const dom = (control: { getDomRef: () => Element | null }): string =>
+    control.getDomRef()?.textContent ?? "not rendered";
+  const dataState = (): string => {
+    const state = (
+      input.getBinding("value") as unknown as { getDataState(): DataState }
+    ).getDataState();
+    return [state.getValue(), state.getInvalidValue(), state.isDirty()].map(typed).join("|");
+  };
+  return {
+    lists: texts.length + 3,
+    texts: () => [
+      ...texts.map((text) => text.getText()),
+      `input:${input.getValue()}`,
+      `input:${input.getValueState()} ${input.getValueStateText()}`,
+      `data state:${dataState()}`,
+      rowsOf(list, (row) => row.getTitle()),
+      rowsOf(mixed, (row) => row.getTitle()),
+      rowsOf(growing, (row) => row.getTitle()),
+      rowsOf(grouped, (row) => row.getTitle()),
+      cells((cell) => cell.getText()),
+      nodes((cell) => cell.getText()),
+      rowsOf(tree, (row) => `${row.getBindingContext()?.getPath()}=${row.getTitle()}`),
+      rowsOf(view.byId("list") as List, (row) => row.getTitle()),
+      rowsOf(secondView.byId("list") as List, (row) => row.getTitle()),
+    ],
+    rendered: () => [
+      ...texts.map(dom),
+      `input:${(input.getFocusDomRef() as HTMLInputElement | null)?.value ?? "not rendered"}`,
+      "input:",
+      "data state:",
+      rowsOf(list, dom),
+      rowsOf(mixed, dom),
+      rowsOf(growing, dom),
+      rowsOf(grouped, dom),
+      cells(dom),
+      nodes(dom),
+      rowsOf(tree, dom),
+      rowsOf(view.byId("list") as List, dom),
+      rowsOf(secondView.byId("list") as List, dom),
+    ],
+    // What typing into the field does: the binding parses the text and writes the model
+    type: (text) => input.setValue(text),
+    act: (action, argument) => {
+      for (const control of [element, elementExpression]) {
+        if (action === "bindElement") control.bindElement(ELEMENT_PATHS[argument]);
+        if (action === "unbindElement") control.unbindElement();
+      }
+      // What the "More" button of a growing list does
+      if (action === "grow") {
+        (
+          growing as unknown as { _oGrowingDelegate: { requestNewPage: () => void } }
+        )._oGrowingDelegate.requestNewPage();
+      }
+      if (action === "scroll") table.setFirstVisibleRow(argument % 3);
+      if (action === "expand") {
+        tree.expandToLevel(2);
+        treeTable.expandToLevel(2);
+      }
+      if (action === "collapse") {
+        tree.collapseAll();
+        treeTable.collapseAll();
+      }
+      if (action === "refresh") {
+        for (const control of [
+          list,
+          mixed,
+          growing,
+          grouped,
+          tree,
+          view.byId("list") as List,
+          secondView.byId("list") as List,
+        ]) {
+          control.getBinding("items")?.refresh(true);
+        }
+        table.getBinding("rows")?.refresh(true);
+        treeTable.getBinding("rows")?.refresh(true);
+      }
+      if (action === "message") {
+        model.setMessages(
+          argument % 2
+            ? { "/n": [new Message({ message: "wrong", type: "Error", processor: model })] }
+            : {},
+        );
+      }
+    },
+    destroy: () => {
+      for (const control of all) control.destroy();
+      other.destroy();
+      host.remove();
+    },
+  };
+}
+
+/** Actions on the controls: [name, number of variants] */
+const ACTIONS: [string, number][] = [
+  ["bindElement", ELEMENT_PATHS.length],
+  ["unbindElement", 1],
+  ["grow", 1],
+  ["scroll", 3],
+  ["expand", 1],
+  ["collapse", 1],
+  ["message", 2],
+];
+
+/**
+ * Whether a key or an array entry holds undefined. JSONModel's list and tree bindings
+ * compare with a copy that leaves those out, so they fire on every update of the model.
+ */
+function holdsUndefined(value: unknown): boolean {
+  const container = Array.isArray(value) || canMerge(value, value);
+  // an array hole counts as undefined
+  if (Array.isArray(value) && Object.keys(value).length < value.length) return true;
+  return (container ? Object.values(value as object) : []).some(
+    (child) => child === undefined || holdsUndefined(child),
+  );
+}
+
+/** [path, with a filter and a sorter, context path, with arrayNames] for tree bindings */
+const TREE_BINDINGS: [string, boolean, string?, boolean?][] = [
+  ["/", false],
+  ["/obj", false],
+  ["/list", false],
+  ["/missing", false],
+  ["/", true],
+  ["/list", true],
+  ["obj", false, "/"],
+  ["nested", true, "/obj"],
+  ["/", false, "", true],
+  ["/", true, "", true],
+];
+
+/** Paths of property bindings that get suspended and resumed */
+const SUSPEND_PATHS = ["/s", "/n", "/obj/v", "/list/0/name"];
+
+const TESTDATA = "/test-resources/ui5/model/signal/qunit/testdata";
+/** [url, merge] for loadData; the last file does not exist */
+const LOADS: [string, boolean][] = [
+  [`${TESTDATA}/sample.json`, false],
+  [`${TESTDATA}/merge.json`, true],
+  [`${TESTDATA}/missing.json`, false],
+];
+
+const initialData = (): Record<string, unknown> => ({
+  s: "Al",
+  n: 42,
+  zero: 0,
+  flag: false,
+  nul: null,
+  obj: { v: 1, nested: { v: 2 } },
+  list: [{ name: "a" }, { name: "b" }],
+});
+
+const show = (value: unknown): string => {
+  if (value instanceof Date) return `Date(${value.getTime()})`;
+  if (typeof value !== "object" || value === null) return `${typeof value} ${String(value)}`;
+  if (Object.isFrozen(value)) return `frozen ${JSON.stringify(value)}`;
+  if (Symbol.toStringTag in value) return `tagged ${JSON.stringify(value)}`;
+  const name = (Object.getPrototypeOf(value) as { constructor?: { name: string } } | null)
+    ?.constructor?.name;
+  return `${name ?? "Object"} ${JSON.stringify(value)}`;
+};
+
+/**
+ * First difference between two values as "path: actual, JSONModel expected", or "".
+ * A key that holds undefined and an absent key are a difference, and so are an array hole
+ * and another order of the keys.
+ */
+// oxlint-disable-next-line complexity -- one recursive comparison, clearer in one piece
+function difference(actual: unknown, expected: unknown, path = ""): string {
+  if (
+    isContainer(actual) &&
+    isContainer(expected) &&
+    !(actual instanceof Date) &&
+    !(expected instanceof Date) &&
+    Object.getPrototypeOf(actual) === Object.getPrototypeOf(expected)
+  ) {
+    for (const key of new Set([...Object.keys(actual), ...Object.keys(expected)])) {
+      const found = difference(actual[key], expected[key], `${path}/${key}`);
+      if (found) return found;
+    }
+    const [own, expectedOwn] = [Object.keys(actual), Object.keys(expected)];
+    if (own.join() !== expectedOwn.join()) {
+      return `${path || "/"}: keys [${own.join()}], JSONModel [${expectedOwn.join()}]`;
+    }
+    return Array.isArray(actual) && actual.length !== (expected as unknown as unknown[]).length
+      ? `${path}/length: ${actual.length}, JSONModel ${(expected as unknown as unknown[]).length}`
+      : "";
+  }
+  const same =
+    actual instanceof Date && expected instanceof Date
+      ? actual.getTime() === expected.getTime()
+      : Object.is(actual, expected);
+  return same ? "" : `${path || "/"}: ${show(actual)}, JSONModel ${show(expected)}`;
+}
+
+/** Outcome of a write: accepted, rejected, or thrown (a primitive parent, an invalid array length). */
+function attempt(write: () => boolean): string {
+  try {
+    return write() ? "accepted" : "rejected";
+  } catch (error) {
+    return (error as Error).name;
+  }
+}
+
+/**
+ * Paths of the contexts a list binding returns, or the name of the error it throws.
+ */
+function listShape(binding: ListBinding): string {
+  try {
+    return binding
+      .getContexts(0, 100)
+      .map((context) => context.getPath())
+      .join(" ");
+  } catch (error) {
+    return (error as Error).name;
+  }
+}
+
+/**
+ * Paths of the first three levels of a tree binding, or the name of the error it throws.
+ */
+function treeShape(binding: TreeBinding): string {
+  const walk = (contexts: Context[], depth: number): string =>
+    contexts
+      .map((context) =>
+        depth < 2
+          ? `${context.getPath()}(${walk(binding.getNodeContexts(context, 0, 100), depth + 1)})`
+          : `${context.getPath()}:${binding.getChildCount(context)}${binding.hasChildren(context) ? "+" : ""}`,
+      )
+      .join(" ");
+  try {
+    return walk(binding.getRootContexts(0, 100), 0);
+  } catch (error) {
+    return (error as Error).name;
+  }
+}
+
+const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** What a long-lived property binding shows; an object only as its type (see runSeed). */
+const shown = (value: unknown): string => (isContainer(value) ? typeof value : typed(value));
+
+/** The first divergence of a seed, with the steps that led to it, or "". */
+// oxlint-disable-next-line complexity -- one step loop: operation, wait, comparisons
+async function runSeed(seed: number, steps: number, mode: Mode): Promise<string> {
+  const random = prng(seed);
+  const pick = <V>(list: V[]): V => list[Math.floor(random() * list.length)];
+  const autoCreatePaths = mode === "autoCreatePaths" || mode === "both options";
+  const strictLeafCheck = mode === "strictLeafCheck" || mode === "both options";
+
+  const json = new JSONModel(initialData());
+  const signal = new SignalModel<Record<string, unknown>>(initialData(), {
+    autoCreatePaths,
+    strictLeafCheck,
+  });
+  for (const [path, deps, fn] of COMPUTEDS) signal.createComputed(path, deps, fn);
+
+  // UI5's sorter, some filter operators and some types throw for some values (a symbol, an
+  // object with a "length" key). JSONModel then skips the bindings it has not updated yet,
+  // while SignalModel logs the error and goes on. To keep comparing, JSONModel updates its
+  // bindings one by one here as well. The binding that threw is in the same state in both.
+  const jsonInternal = json as unknown as {
+    checkUpdate: (force?: boolean, async?: boolean) => number;
+    getBindings: () => { checkUpdate: (force?: boolean) => void }[];
+    bForceUpdate?: boolean;
+    sUpdateTimer?: ReturnType<typeof setTimeout> | null;
+  };
+  const checkUpdate = jsonInternal.checkUpdate;
+  jsonInternal.checkUpdate = (force, async) => {
+    if (async) return checkUpdate.call(json, force, true);
+    const forced = jsonInternal.bForceUpdate || force;
+    if (jsonInternal.sUpdateTimer) {
+      clearTimeout(jsonInternal.sUpdateTimer);
+      jsonInternal.sUpdateTimer = null;
+      jsonInternal.bForceUpdate = undefined;
+    }
+    const all = jsonInternal.getBindings();
+    for (const binding of all) {
+      try {
+        binding.checkUpdate(forced);
+      } catch {
+        // see above
+      }
+    }
+    return all.length;
+  };
+  /** Runs an operation on a JSONModel binding and its SignalModel twin; either may throw. */
+  const onBoth = <B>(pair: [B, B], operation: (binding: B) => void): void => {
+    for (const binding of pair) {
+      try {
+        operation(binding);
+      } catch {
+        // see above
+      }
+    }
+  };
+
+  const bindings = READ_PATHS.map((path) => signal.bindProperty(path));
+  // Long-lived JSONModel twins: for the number of change events, and for messages
+  const jsonBindings = READ_PATHS.map((path) => json.bindProperty(path));
+  const fired = READ_PATHS.map(() => [0, 0]);
+  const jsonBefore = jsonBindings.map((binding) => binding.getValue() as unknown);
+  READ_PATHS.forEach((_, i) => {
+    jsonBindings[i].attachChange(() => fired[i][0]++);
+    jsonBindings[i].initialize();
+    bindings[i].attachChange(() => fired[i][1]++);
+  });
+  const relativeContexts = RELATIVE_PATHS.map(([contextPath]) => contextPath);
+  const relativeBindings = RELATIVE_PATHS.map(([contextPath, path]) =>
+    signal.bindProperty(path, new Context(signal, contextPath)),
+  );
+  const computedBindings = COMPUTED_READS.map(([path, below], i) =>
+    // every second one relative to the computed
+    below && i % 2
+      ? signal.bindProperty(below, new Context(signal, path))
+      : signal.bindProperty(below ? `${path}/${below}` : path),
+  );
+  const computedList = signal.bindList("/cRows");
+  // List, tree and suspended bindings are compared with long-lived JSONModel bindings:
+  // like those, a list binding only sorts and filters again once it notices a change.
+  const bindLists = (model: AnyModel): ListBinding[] =>
+    LIST_BINDINGS.map(([path, contextPath, kind]) => {
+      const binding = model.bindList(
+        path,
+        contextAt(model, contextPath),
+        kind === "sorted" ? new Sorter("name") : undefined,
+        FILTERS[kind]?.(),
+      );
+      if (CHANGE_DETECTION[kind]) {
+        const [detectUpdates, key] = CHANGE_DETECTION[kind];
+        binding.enableExtendedChangeDetection(detectUpdates, key as string, {});
+      }
+      return binding;
+    });
+  const bindTrees = (model: AnyModel): TreeBinding[] =>
+    TREE_BINDINGS.map(([path, filteredAndSorted, contextPath = "", arrayNames]) =>
+      model.bindTree(
+        path,
+        contextAt(model, contextPath),
+        filteredAndSorted
+          ? [new Filter({ path: "name", test: (name: unknown) => name !== "b" })]
+          : undefined,
+        arrayNames ? { arrayNames: ["list", "nested"] } : undefined,
+        filteredAndSorted ? [new Sorter("name")] : undefined,
+      ),
+    );
+  const bindSuspendable = (model: AnyModel): (PropertyBinding | ListBinding)[] => [
+    ...SUSPEND_PATHS.map((path) => model.bindProperty(path)),
+    model.bindList("/list"),
+  ];
+  const listBindings = bindLists(signal);
+  const jsonListBindings = bindLists(json);
+  const treeBindings = bindTrees(signal);
+  const jsonTreeBindings = bindTrees(json);
+  const suspendable = bindSuspendable(signal);
+  const jsonSuspendable = bindSuspendable(json);
+  const suspended = suspendable.map(() => false);
+  // The rows of the list among them, in both models, when it was last suspended or resumed
+  let frozen: (string | undefined)[] = [];
+  const contextPaths = (binding: PropertyBinding | ListBinding): string | undefined =>
+    "getValue" in binding
+      ? undefined
+      : binding
+          .getContexts(0, 100)
+          .map((context) => context.getPath())
+          .join(" ");
+  for (const binding of [
+    ...bindings,
+    ...relativeBindings,
+    ...computedBindings,
+    computedList,
+    ...listBindings,
+    ...jsonListBindings,
+    ...treeBindings,
+    ...jsonTreeBindings,
+    ...suspendable,
+    ...jsonSuspendable,
+  ]) {
+    binding.attachChange(() => {});
+    try {
+      binding.initialize();
+    } catch {
+      // see above
+    }
+  }
+  const listFired = LIST_BINDINGS.map(() => [0, 0]);
+  const treeFired = TREE_BINDINGS.map(() => [0, 0]);
+  // Set while JSONModel's tree binding can miss a change: its merge drops a key holding
+  // undefined, and a comparison of objects with the same number of keys does not see that
+  // one key went and another came. Until it fires again, it compares with outdated data.
+  const treeBlind = TREE_BINDINGS.map(() => false);
+  TREE_BINDINGS.forEach((_, i) => {
+    jsonTreeBindings[i].attachChange(() => treeFired[i][0]++);
+    treeBindings[i].attachChange(() => treeFired[i][1]++);
+  });
+  // JSONModel's list binding fires on every update of the model while its path holds
+  // something truthy that is neither an array nor a plain object, or that holds undefined
+  // (the copy it compares with leaves undefined out), NaN (never equal to itself) or, in an
+  // object, a "length" key.
+  const firesAlways = (i: number): boolean => {
+    const [listPath, contextPath, listKind] = LIST_BINDINGS[i];
+    return [json, signal].some((model) => {
+      const value = model.getProperty(listPath, contextAt(model, contextPath)) as unknown;
+      if (!value) return false;
+      if (!Array.isArray(value) && (!canMerge(value, value) || "length" in (value as object))) {
+        return true;
+      }
+      return (
+        holdsUndefined(value) ||
+        Object.values(value).some(
+          (row) =>
+            Number.isNaN(row) ||
+            // the key of a row, compared on every update of the model
+            (listKind === "ecd-name" && isContainer(row) && Number.isNaN(row.name)),
+        )
+      );
+    });
+  };
+  const listFiredAlways = LIST_BINDINGS.map((_, i) => firesAlways(i));
+  LIST_BINDINGS.forEach((_, i) => {
+    // Read once: until then a binding with change detection fires on every update
+    listShape(jsonListBindings[i]);
+    listShape(listBindings[i]);
+    jsonListBindings[i].attachChange(() => listFired[i][0]++);
+    listBindings[i].attachChange(() => listFired[i][1]++);
+  });
+  const controls = await createControls(signal);
+  const jsonControls = await createControls(json);
+
+  // Set when JSONModel reached the same data in more steps than SignalModel
+  let resync = false;
+  // Set when JSONModel took more than one write for a step, so its bindings fired more often
+  let stepwise = false;
+  let keysThrow = false;
+  /** A write on JSONModel, with the rules of the options under test applied first. */
+  const jsonWrite = (path: string, write: () => boolean): string => {
+    let created = false;
+    try {
+      created = autoCreatePaths && createParents(json, path);
+    } catch (error) {
+      // A frozen parent refuses the new object, in SignalModel as well
+      return (error as Error).name;
+    }
+    if (created) {
+      resync = stepwise = true;
+      // A list with change detection builds its keys with JSON.stringify, which throws for a
+      // BigInt. JSONModel's list then stops at the empty parent it saw first, SignalModel's
+      // at the state before: the list controls are not compared from here on.
+      try {
+        JSON.stringify(signal.getProperty("/list"));
+      } catch {
+        keysThrow = true;
+      }
+    }
+    // A parent that was just created has no properties yet
+    if (strictLeafCheck && (created || isNewLeaf(signal, path))) return "rejected";
+    return attempt(write);
+  };
+
+  let failure = "";
+  let descending = false;
+  let filterKind = "filtered";
+  const history: string[] = [];
+  for (let step = 0; step < steps && !failure; step++) {
+    const kind = random();
+    const value = pick(VALUES);
+    const path = pick(WRITE_PATHS);
+    const async = random() < 0.3;
+    let description: string;
+    let jsonAccepted = "";
+    let signalAccepted = "";
+
+    for (const counts of [...fired, ...listFired, ...treeFired]) counts.fill(0);
+    stepwise = false;
+    let merging = false;
+    let refreshed = false;
+    if (kind < 0.1) {
+      const [action, variants] = pick(ACTIONS);
+      const argument = Math.floor(random() * variants);
+      description = `${action}(${action === "bindElement" ? ELEMENT_PATHS[argument] : argument})`;
+      onBoth([jsonControls, controls], (target) => target.act(action, argument));
+    } else if (kind < 0.5) {
+      // A quarter of the writes go through a context: "/obj/v" as "v" relative to "/obj"
+      const cut = random() < 0.25 ? path.lastIndexOf("/") : 0;
+      const contextPath = cut ? path.slice(0, cut) : "";
+      const written = cut ? path.slice(cut + 1) : path;
+      description = `setProperty("${written}", ${show(value())}${
+        contextPath ? `, context ${contextPath}` : ""
+      }${async ? ", async" : ""})`;
+      const write = (model: AnyModel): boolean =>
+        model.setProperty(written, value(), contextAt(model, contextPath), async);
+      jsonAccepted = jsonWrite(path, () => write(json));
+      signalAccepted = attempt(() => write(signal));
+    } else if (kind < 0.57) {
+      // What a two-way binding does when the user changes a control
+      description = `binding ${path}: setValue(${show(value())})`;
+      // setValue writes only a changed value, so the option rules apply only then
+      const jsonBinding = jsonBindings[WRITE_PATHS.indexOf(path)];
+      if (!deepEqual(jsonBinding.getValue(), value())) {
+        jsonWrite(path, () => {
+          jsonBinding.setValue(value());
+          return true;
+        });
+      }
+      attempt(() => {
+        bindings[WRITE_PATHS.indexOf(path)].setValue(value());
+        return true;
+      });
+    } else if (kind < 0.62) {
+      const text = pick(["7", "-3", "abc", "", "1.5"]);
+      description = `type "${text}" into the input bound to /n`;
+      // Not if strictLeafCheck would reject the write: JSONModel cannot show a field
+      // whose text did not reach the model
+      if (!(strictLeafCheck && isNewLeaf(signal, "/n"))) {
+        jsonControls.type(text);
+        controls.type(text);
+      }
+    } else if (kind < 0.68) {
+      description = "setData(replace)";
+      json.setData(initialData());
+      signal.setData(initialData());
+    } else if (kind < 0.76) {
+      const key = path.split("/")[1];
+      // Now and then the value itself as payload, whatever it is
+      const whole = random() < 0.2;
+      const payload = (): object => (whole ? value() : { [key]: value() }) as object;
+      description = `setData(${whole ? show(value()) : `{${key}: ${show(value())}}`}, merge)`;
+      merging = true;
+      jsonAccepted = attempt(() => (json.setData(payload(), true), true));
+      signalAccepted = attempt(() => (signal.setData(payload(), true), true));
+    } else if (kind < 0.81) {
+      // JSONModel has no mergeProperty: the expected result is its merge applied at the path
+      description = `mergeProperty("${path}", ${show(value())})`;
+      merging = true;
+      const existing = json.getProperty(path) as unknown;
+      if (canMerge(existing, value())) {
+        const merged = deepExtend(
+          Array.isArray(existing) ? [] : {},
+          existing as object,
+          value() as object,
+        ) as unknown;
+        // A merge that changes nothing leaves the data as it is
+        if (difference(merged, existing)) {
+          try {
+            json.setProperty(path, merged);
+          } catch {
+            // The parent is frozen: SignalModel rebuilds the data as a setData merge does
+            const data = json.getData() as object;
+            json.setData(deepExtend(Array.isArray(data) ? [] : {}, data));
+            json.setProperty(path, merged);
+          }
+        }
+        jsonAccepted = "accepted";
+      } else {
+        jsonAccepted = jsonWrite(path, () => json.setProperty(path, value()));
+      }
+      signalAccepted = attempt(() => signal.mergeProperty(path, value()));
+    } else if (kind < 0.84) {
+      const [url, merge] = pick(LOADS);
+      description = `loadData(${url.slice(TESTDATA.length)}${merge ? ", merge" : ""})`;
+      merging = true;
+      [jsonAccepted, signalAccepted] = await Promise.all(
+        [json, signal].map((model) =>
+          (model.loadData(url, undefined, true, "GET", merge) as Promise<unknown>).then(
+            () => "accepted",
+            () => "rejected",
+          ),
+        ),
+      );
+    } else if (kind < 0.88) {
+      const index = Math.floor(random() * RELATIVE_PATHS.length);
+      relativeContexts[index] = pick(RELATIVE_PATHS)[0];
+      description = `binding ${RELATIVE_PATHS[index][1]}: setContext(${relativeContexts[index]})`;
+      relativeBindings[index].setContext(new Context(signal, relativeContexts[index]));
+    } else if (kind < 0.91) {
+      descending = !descending;
+      description = `sort(${descending ? "descending" : "ascending"})`;
+      LIST_BINDINGS.forEach(([, , listKind], i) => {
+        if (listKind === "sorted") {
+          onBoth([jsonListBindings[i], listBindings[i]], (binding) =>
+            // oxlint-disable-next-line unicorn/no-array-sort -- a list binding, not an array
+            binding.sort(new Sorter("name", descending)),
+          );
+        }
+      });
+      TREE_BINDINGS.forEach(([, filteredAndSorted], i) => {
+        if (filteredAndSorted) {
+          onBoth([jsonTreeBindings[i], treeBindings[i]], (binding) =>
+            // oxlint-disable-next-line unicorn/no-array-sort -- a tree binding, not an array
+            binding.sort([new Sorter("name", descending)]),
+          );
+        }
+      });
+    } else if (kind < 0.94) {
+      filterKind = pick(Object.keys(FILTERS));
+      description = `filter(${filterKind})`;
+      const index = LIST_BINDINGS.findIndex(([, , listKind]) => listKind === "filtered");
+      onBoth([jsonListBindings[index], listBindings[index]], (binding) =>
+        binding.filter(FILTERS[filterKind]()),
+      );
+      const tree = TREE_BINDINGS.findIndex(([, filteredAndSorted]) => filteredAndSorted);
+      onBoth([jsonTreeBindings[tree], treeBindings[tree]], (binding) =>
+        binding.filter(FILTERS[filterKind]()),
+      );
+    } else if (kind < 0.97) {
+      const index = Math.floor(random() * suspendable.length);
+      suspended[index] = !suspended[index];
+      description = `${suspended[index] ? "suspend" : "resume"} binding ${
+        SUSPEND_PATHS[index] ?? "/list (list)"
+      }`;
+      onBoth([jsonSuspendable[index], suspendable[index]], (binding) =>
+        suspended[index] ? binding.suspend() : binding.resume(),
+      );
+      frozen = [suspendable, jsonSuspendable].map((list) => contextPaths(list[index]));
+    } else if (kind < 0.985) {
+      // What apps do instead of a write: change the data object, then refresh the model
+      const key = path.split("/")[1];
+      const forced = random() < 0.3;
+      description = `data.${key} = ${show(value())}; refresh(${forced ? "true" : ""})`;
+      for (const model of [json, signal]) {
+        (model.getData() as Record<string, unknown>)[key] = value();
+        try {
+          model.refresh(forced);
+        } catch {
+          // A binding threw (see above). JSONModel goes on here; let SignalModel's do so too
+          // (the bindings before it check twice, so their change events are not compared)
+          stepwise = true;
+          // What a forced refresh does after the bindings: it drops the model's messages
+          if (forced) model.setMessages({});
+          for (const binding of (model as unknown as typeof jsonInternal).getBindings()) {
+            try {
+              binding.checkUpdate(forced);
+            } catch {
+              // see above
+            }
+          }
+        }
+      }
+      // A forced refresh fires every binding
+      refreshed = forced;
+    } else {
+      const [computedPath, deps, fn] = pick(COMPUTEDS);
+      description = `redefine computed ${computedPath}`;
+      signal.removeComputed(computedPath);
+      signal.createComputed(computedPath, deps, fn);
+    }
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await macrotask();
+    await macrotask();
+    refreshed ||= resync;
+    if (resync) {
+      resync = false;
+      // What a binding notices differs with the autoCreatePaths rule, which is applied to
+      // JSONModel one parent at a time. Update both sides.
+      LIST_BINDINGS.forEach((_, i) => {
+        onBoth([jsonListBindings[i], listBindings[i]], (binding) => binding.refresh(true));
+      });
+      onBoth([jsonControls, controls], (target) => target.act("refresh", 0));
+    }
+    await nextUIUpdate();
+
+    const where = `${mode} seed ${seed}, step ${step}: ${description}`;
+    history.push(description);
+    if (jsonAccepted !== signalAccepted) {
+      failure = `${where}: write ${signalAccepted}, JSONModel ${jsonAccepted}`;
+    } else {
+      const found = difference(signal.getData(), json.getData());
+      if (found) failure = `${where}: data differs at ${found}`;
+    }
+    for (let i = 0; i < READ_PATHS.length && !failure; i++) {
+      // Oracle: JSONModel's data at the path, i.e. what a fresh JSONModel binding shows.
+      // (A long-lived JSONModel binding can keep an outdated object that was deep-equal.)
+      const readPath = READ_PATHS[i];
+      const expected = json.getProperty(readPath) as unknown;
+      const found = difference(bindings[i].getValue(), expected);
+      if (found) failure = `${where}: binding ${readPath} differs at ${found}`;
+    }
+    for (let i = 0; i < READ_PATHS.length; i++) {
+      // Change events of a binding on a primitive. On an object the two differ by design:
+      // SignalModel fires for every write below it. A length: see above.
+      const after = jsonBindings[i].getValue() as unknown;
+      const [expected, actual] = fired[i];
+      if (
+        !failure &&
+        !stepwise &&
+        !READ_PATHS[i].endsWith("/length") &&
+        !isContainer(jsonBefore[i]) &&
+        !isContainer(after) &&
+        actual !== expected
+      ) {
+        failure = `${where}: binding ${READ_PATHS[i]} fired change ${actual} times, JSONModel ${expected}`;
+      }
+      jsonBefore[i] = after;
+    }
+    if (!failure) {
+      const [actual, expected] = [bindings, jsonBindings].map((list) =>
+        (list[READ_PATHS.indexOf("/n")] as unknown as { getDataState: () => DataState })
+          .getDataState()
+          .getMessages()
+          .map((message: Message) => message.getMessage())
+          .join(","),
+      );
+      if (actual !== expected) {
+        failure = `${where}: binding /n has the messages [${actual}], JSONModel [${expected}]`;
+      }
+    }
+    for (let i = 0; i < RELATIVE_PATHS.length && !failure; i++) {
+      const contextPath = relativeContexts[i];
+      const relative = RELATIVE_PATHS[i][1];
+      // The length of an array: see above
+      const ownArray = relative === "length" && (signal.getProperty(contextPath) as unknown);
+      const expected = Array.isArray(ownArray)
+        ? ownArray.length
+        : (json.getProperty(relative, new Context(json, contextPath)) as unknown);
+      const found = difference(relativeBindings[i].getValue(), expected);
+      if (found) failure = `${where}: binding ${relative} in ${contextPath} differs at ${found}`;
+    }
+    for (let i = 0; i < COMPUTED_READS.length && !failure; i++) {
+      const [computedPath, below] = COMPUTED_READS[i];
+      // Read below the computed value as JSONModel reads below data: stop at a falsy value
+      const expected = below
+        .split("/")
+        .reduce<unknown>(
+          (node, part) => (part && node ? (node as Record<string, unknown>)[part] : node),
+          expectedComputed(computedPath, json),
+        );
+      const readPath = below ? `${computedPath}/${below}` : computedPath;
+      const found =
+        difference(computedBindings[i].getValue(), expected) ||
+        difference(signal.getProperty(readPath), expected);
+      if (found) failure = `${where}: computed ${readPath} differs at ${found}`;
+    }
+    if (!failure) {
+      const actual = listShape(computedList);
+      const expected = (expectedComputed("/cRows", json) as unknown[])
+        .map((_, i) => `/cRows/${i}`)
+        .join(" ");
+      if (actual !== expected) {
+        failure = `${where}: list binding /cRows: [${actual}], expected [${expected}]`;
+      }
+    }
+    for (let i = 0; i < LIST_BINDINGS.length && !failure; i++) {
+      const listKind = LIST_BINDINGS[i][2];
+      const actual = listShape(listBindings[i]);
+      let expected = listShape(jsonListBindings[i]);
+      const [jsonFired, signalFired] = listFired[i];
+      if (actual !== expected && jsonFired === 0 && firesAlways(i)) {
+        // SignalModel alone updated (see firesAlways) and its filter or
+        // sorter threw, which leaves the rows unfiltered. JSONModel's binding gets there
+        // with its next update.
+        try {
+          (jsonListBindings[i] as unknown as { checkUpdate(force: boolean): void }).checkUpdate(
+            true,
+          );
+        } catch {
+          // see above
+        }
+        expected = listShape(jsonListBindings[i]);
+      }
+      if (actual !== expected) {
+        failure = `${where}: list binding ${LIST_BINDINGS[i].join(",")}: [${actual}], JSONModel [${expected}]`;
+      } else if (
+        !stepwise &&
+        !refreshed &&
+        !listFiredAlways[i] &&
+        !firesAlways(i) &&
+        // After a merge JSONModel's rows are new objects. A binding that compares the rows
+        // themselves, or objects in them, then fires even if nothing in them changed.
+        ((listKind === "ecd" || listKind === "ecd-name") && merging
+          ? signalFired > jsonFired
+          : signalFired !== jsonFired)
+      ) {
+        failure = `${where}: list binding ${LIST_BINDINGS[i].join(",")} fired change ${signalFired} times, JSONModel ${jsonFired}`;
+      }
+    }
+    LIST_BINDINGS.forEach((_, i) => {
+      listFiredAlways[i] = firesAlways(i);
+    });
+    for (let i = 0; i < TREE_BINDINGS.length && !failure; i++) {
+      const actual = treeShape(treeBindings[i]);
+      const expected = treeShape(jsonTreeBindings[i]);
+      if (actual !== expected) {
+        failure = `${where}: tree binding ${TREE_BINDINGS[i].join(",")}: [${actual}], JSONModel [${expected}]`;
+        // JSONModel's tree binding also fires for unrelated writes in some states (while its
+        // data is missing, for one), so only "not more often" can be compared
+      } else if (!stepwise && !refreshed && !treeBlind[i] && treeFired[i][1] > treeFired[i][0]) {
+        failure = `${where}: tree binding ${TREE_BINDINGS[i].join(",")} fired change ${treeFired[i][1]} times, JSONModel ${treeFired[i][0]}`;
+      }
+    }
+    TREE_BINDINGS.forEach(([treePath, , contextPath = ""], i) => {
+      treeBlind[i] =
+        holdsUndefined(signal.getProperty(treePath, contextAt(signal, contextPath))) ||
+        (treeBlind[i] && treeFired[i][0] === 0);
+    });
+    for (let i = 0; i < suspendable.length && !failure; i++) {
+      // A suspended list that has not changed is not compared with the other model's: which
+      // of its old rows count depends on the data of now (see listShape())
+      if (
+        suspended[i] &&
+        [suspendable, jsonSuspendable].every((list, k) => contextPaths(list[i]) === frozen[k])
+      ) {
+        continue;
+      }
+      // Objects by type only: a long-lived JSONModel binding keeps an object that is
+      // deep-equal to the new one, which can differ in ways deepEqual does not see.
+      const [actual, expected] = [suspendable[i], jsonSuspendable[i]].map((binding) =>
+        "getValue" in binding ? shown(binding.getValue()) : listShape(binding as ListBinding),
+      );
+      if (actual !== expected) {
+        failure = `${where}: ${suspended[i] ? "suspended" : "resumed"} binding ${
+          SUSPEND_PATHS[i] ?? "/list (list)"
+        } shows ${actual}, JSONModel ${expected}`;
+      }
+    }
+    if (!failure && controls.rendered().includes("not rendered")) {
+      failure = `${where}: a control has no DOM`;
+    }
+    for (const read of ["texts", "rendered"] as const) {
+      const actual = controls[read]();
+      const expected = jsonControls[read]();
+      // While /n holds an object, SignalModel's binding fires on every update (a documented
+      // difference), which resets a text the user typed that could not be parsed, in the input and in its
+      // data state
+      const typedOver = isContainer(json.getProperty("/n"));
+      const index = failure
+        ? -1
+        : actual.findIndex(
+            (text, i) =>
+              text !== expected[i] &&
+              !(typedOver && /^(input|data state):/.test(text)) &&
+              !(keysThrow && i >= controls.lists),
+          );
+      if (index !== -1) {
+        failure = `${where}: control ${index} ${read}: "${actual[index]}", JSONModel "${expected[index]}"`;
+      }
+    }
+  }
+
+  controls.destroy();
+  jsonControls.destroy();
+  json.destroy();
+  signal.destroy();
+  return failure && [failure, "Steps so far:", ...history].join("\n");
+}
+
+QUnit.module("Parity fuzz (JSONModel as oracle)", () => {
+  // More seeds on demand: open the test page with ?fuzzFrom=11&fuzzCount=25
+  const query = new URLSearchParams(location.search);
+  const from = Number(query.get("fuzzFrom") ?? 1);
+  const count = Number(query.get("fuzzCount") ?? 8);
+  const MODES: [Mode, number][] = [
+    ["default", count],
+    ["autoCreatePaths", Math.ceil(count / 4)],
+    ["strictLeafCheck", Math.ceil(count / 4)],
+    ["both options", Math.ceil(count / 4)],
+  ];
+  for (const [mode, seeds] of MODES) {
+    for (let seed = from; seed < from + seeds; seed++) {
+      QUnit.test(`${mode}: random operations keep parity (seed ${seed})`, async (assert) => {
+        assert.strictEqual(await runSeed(seed, 40, mode), "", "no divergence in 40 steps");
+      });
+    }
+  }
+});

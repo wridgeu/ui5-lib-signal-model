@@ -74,7 +74,7 @@ QUnit.module("ComputedSignals", () => {
 
   QUnit.test("createComputed on raw data path throws", (assert) => {
     const model = new SignalModel({ name: "Alice" });
-    model.bindProperty("/name");
+    model.bindProperty("/name").attachChange(() => {});
     assert.throws(
       () => model.createComputed("/name", [], () => "x"),
       TypeError,
@@ -121,6 +121,7 @@ QUnit.module("ComputedSignals", () => {
     model.createComputed("/quad", ["/double"], (d) => (d as number) * 2);
 
     const doubleBinding = model.bindProperty("/double");
+    doubleBinding.attachChange(() => {});
     const quadBinding = model.bindProperty("/quad");
     assert.strictEqual(doubleBinding.getValue(), 10, "double = 5 * 2 = 10");
     assert.strictEqual(quadBinding.getValue(), 20, "quad = 10 * 2 = 20");
@@ -387,6 +388,7 @@ QUnit.module("ComputedSignals", () => {
     });
 
     const binding = model.bindProperty("/firstItem/name");
+    binding.attachChange(() => {});
     assert.strictEqual(binding.getValue(), "Alice", "binding reads computed sub-path");
 
     model.setProperty("/items", [{ name: "Carol" }, { name: "Dave" }]);
@@ -625,6 +627,7 @@ QUnit.module("ComputedSignals", () => {
     });
 
     const binding = model.bindProperty("/topScorer/name");
+    binding.attachChange(() => {});
     assert.strictEqual(binding.getValue(), "Bob", "initial top scorer is Bob");
 
     model.setProperty("/items", [
@@ -670,6 +673,7 @@ QUnit.module("ComputedSignals", () => {
       model.createComputed("/c", ["/x"], (x) => ({ name: "x=" + (x as number) }));
 
       const binding = model.bindProperty("/c/name");
+      binding.attachChange(() => {});
       assert.strictEqual(binding.getValue(), "x=1", "initial value from /x");
 
       // Redefine with DIFFERENT dependency
@@ -732,8 +736,11 @@ QUnit.module("ComputedSignals", () => {
       }));
 
       const bindingA = model.bindProperty("/obj/a");
+      bindingA.attachChange(() => {});
       const bindingB = model.bindProperty("/obj/b");
+      bindingB.attachChange(() => {});
       const bindingC = model.bindProperty("/obj/c");
+      bindingC.attachChange(() => {});
 
       assert.strictEqual(bindingA.getValue(), "x-a-1", "initial a");
       assert.strictEqual(bindingB.getValue(), "x-b-1", "initial b");
@@ -770,6 +777,7 @@ QUnit.module("ComputedSignals", () => {
       model.createComputed("/derived", ["/base"], (b) => (b as number) + 1);
 
       const binding = model.bindProperty("/derived");
+      binding.attachChange(() => {});
       assert.strictEqual(binding.getValue(), 11, "initial: (5*2)+1 = 11");
 
       // Redefine both levels -- each removeComputed+createComputed triggers
@@ -795,6 +803,7 @@ QUnit.module("ComputedSignals", () => {
     model.createComputed("/val", ["/a"], (a) => "a=" + (a as number));
 
     const binding = model.bindProperty("/val");
+    binding.attachChange(() => {});
     assert.strictEqual(binding.getValue(), "a=1", "initial");
 
     // Rapid redefine -- 3 times without waiting
@@ -819,6 +828,7 @@ QUnit.module("ComputedSignals", () => {
     model.createComputed("/obj", ["/a"], (a) => ({ val: "a=" + (a as number) }));
 
     const binding = model.bindProperty("/obj/val");
+    binding.attachChange(() => {});
     assert.strictEqual(binding.getValue(), "a=1", "initial");
 
     // Rapid redefine with sub-path binding
@@ -880,6 +890,7 @@ QUnit.module("ComputedSignals", () => {
       });
 
       const riskyBinding = model.bindProperty("/risky");
+      riskyBinding.attachChange(() => {});
       const otherBinding = model.bindProperty("/other");
       assert.strictEqual(riskyBinding.getValue(), 100, "initial risky value");
 
@@ -930,6 +941,38 @@ QUnit.module("ComputedSignals", () => {
     model.destroy();
   });
 
+  // Like a throwing formatter on a JSONModel binding, and like Signal.Computed itself:
+  // the error reaches the caller instead of turning into a wrong value.
+  QUnit.test("reading a failing computed rethrows its error until it recovers", (assert) => {
+    const model = new SignalModel({ a: 1 });
+    model.createComputed("/checked", ["/a"], (a) => {
+      if (a === 2) throw new Error("computed failed");
+      return { value: a };
+    });
+
+    model.setProperty("/a", 2);
+    assert.throws(() => model.getProperty("/checked"), /computed failed/, "getProperty");
+    assert.throws(() => model.getProperty("/checked/value"), /computed failed/, "path below it");
+    assert.throws(() => model.bindProperty("/checked").getValue(), /computed failed/, "binding");
+    assert.strictEqual(model.getProperty("/a"), 2, "other paths are readable");
+
+    model.setProperty("/a", 3);
+    assert.strictEqual(model.getProperty("/checked/value"), 3, "readable again");
+    model.destroy();
+  });
+
+  QUnit.test("createComputed throws and registers nothing if the first run fails", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    const failing = (): never => {
+      throw new Error("first run failed");
+    };
+    assert.throws(() => model.createComputed("/bad", ["/a"], failing), /first run failed/);
+    assert.strictEqual(model.getProperty("/bad"), undefined, "no computed at the path");
+    model.createComputed("/bad", ["/a"], (a) => a);
+    assert.strictEqual(model.getProperty("/bad"), 1, "the path can be defined afterwards");
+    model.destroy();
+  });
+
   QUnit.test("binding keeps its value when its computed throws during a flush", (assert) => {
     const done = assert.async();
     const model = new SignalModel({ a: 1 });
@@ -950,4 +993,814 @@ QUnit.module("ComputedSignals", () => {
       done();
     }, 50);
   });
+
+  QUnit.test(
+    "a binding from before a computed above its path follows that computed",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, c: { name: "raw" } });
+      const binding = model.bindProperty("/c/name");
+      let fired = 0;
+      binding.attachChange(() => fired++);
+      model.createComputed("/c", ["/a"], (a) => ({ name: `computed ${String(a)}` }));
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "computed 1", "the computed's value, without a write");
+      assert.strictEqual(fired, 1, "change fired once");
+      model.setProperty("/a", 2);
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "computed 2", "follows the computed's input");
+      model.destroy();
+    },
+  );
+
+  QUnit.test("bindings follow the data again after removeComputed", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    model.createComputed("/c", ["/a"], (a) => ({ name: `computed ${String(a)}` }));
+    const at = model.bindProperty("/c");
+    const below = model.bindProperty("/c/name");
+    const fired = [0, 0];
+    at.attachChange(() => fired[0]++);
+    below.attachChange(() => fired[1]++);
+    model.removeComputed("/c");
+    await Promise.resolve();
+    assert.deepEqual([at.getValue(), below.getValue()], [undefined, undefined], "no data there");
+    assert.deepEqual(fired, [1, 1], "change fired once each");
+    model.setProperty("/a", 2);
+    await Promise.resolve();
+    assert.deepEqual(fired, [1, 1], "the removed computed's input no longer reaches them");
+    model.setProperty("/c", { name: "data" });
+    await Promise.resolve();
+    assert.strictEqual(below.getValue(), "data", "a write to the path does");
+    // The path can still be redefined while bindings are on it
+    model.setProperty("/c", undefined);
+    model.createComputed("/c", ["/a"], (a) => ({ name: `again ${String(a)}` }));
+    await Promise.resolve();
+    assert.strictEqual(below.getValue(), "again 2", "redefined later");
+    model.destroy();
+  });
+
+  QUnit.test(
+    "a computed follows a computed it depends on when that is redefined",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, x: 10 });
+      model.createComputed("/c", ["/a"], (a) => (a as number) * 2);
+      model.createComputed("/d", ["/c"], (c) => `d of ${String(c)}`);
+      const binding = model.bindProperty("/d");
+      let fired = 0;
+      binding.attachChange(() => fired++);
+      model.removeComputed("/c");
+      model.createComputed("/c", ["/x"], (x) => (x as number) + 1);
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "d of 11", "the new computed's value");
+      assert.strictEqual(fired, 1, "change fired once");
+      model.setProperty("/x", 20);
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "d of 21", "follows the new computed's input");
+      model.setProperty("/a", 5);
+      await Promise.resolve();
+      assert.strictEqual(fired, 2, "the old computed's input no longer reaches it");
+      model.destroy();
+    },
+  );
+
+  QUnit.test(
+    "a computed follows the data when a computed it depends on is removed",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+      model.createComputed("/c", ["/a"], (a) => (a as number) * 2);
+      model.createComputed("/d", ["/c"], (c) => `d of ${String(c)}`);
+      const binding = model.bindProperty("/d");
+      binding.attachChange(() => {});
+      model.removeComputed("/c");
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "d of undefined", "no data at the path");
+      assert.strictEqual(model.getProperty("/d"), "d of undefined", "the model reads the same");
+      model.setProperty("/c", 5);
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "d of 5", "a write to the path reaches it");
+      model.createComputed("/c", ["/a"], (a) => (a as number) * 3);
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), "d of 3", "and a computed created there again");
+      model.destroy();
+    },
+  );
+
+  QUnit.test("a list binding follows the data again after removeComputed", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ rows: [{ n: 1 }, { n: 2 }] });
+    model.createComputed("/list", ["/rows"], (rows) => (rows as object[]).map(() => ({})));
+    const list = model.bindList("/list");
+    list.attachChange(() => {});
+    list.initialize();
+    assert.strictEqual(list.getContexts(0, 10).length, 2, "the computed's rows");
+    model.removeComputed("/list");
+    await Promise.resolve();
+    assert.strictEqual(list.getContexts(0, 10).length, 0, "no data at the path");
+    model.setProperty("/list", [{}, {}, {}]);
+    await Promise.resolve();
+    assert.strictEqual(list.getContexts(0, 10).length, 3, "a write to the path reaches it");
+    model.destroy();
+  });
+
+  QUnit.test("a computed that depends on a path inside a computed follows it", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, x: "x1" });
+    model.createComputed("/c", ["/a"], (a) => ({ name: `n${String(a)}` }));
+    model.createComputed("/d", ["/c/name"], (name) => `d of ${String(name)}`);
+    const binding = model.bindProperty("/d");
+    binding.attachChange(() => {});
+    assert.strictEqual(binding.getValue(), "d of n1", "the value inside the computed");
+    model.setProperty("/a", 2);
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), "d of n2", "an input of the computed above");
+    model.removeComputed("/c");
+    model.createComputed("/c", ["/x"], (x) => ({ name: x }));
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), "d of x1", "the computed above redefined");
+    model.setProperty("/x", "x2");
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), "d of x2", "the new computed's input");
+    model.removeComputed("/c");
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), "d of undefined", "the computed above removed");
+    model.setProperty("/c", { name: "data" });
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), "d of data", "a write to the data");
+    model.destroy();
+  });
+
+  QUnit.test("a computed follows a computed created above its dependency later", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, c: { name: "n1" } });
+    model.createComputed("/d", ["/c/name"], (name) => `d of ${String(name)}`);
+    const binding = model.bindProperty("/d");
+    binding.attachChange(() => {});
+    // The same value as the data held: nothing changes at first
+    model.createComputed("/c", ["/a"], (a) => ({ name: `n${String(a)}` }));
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), "d of n1");
+    model.setProperty("/a", 2);
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), "d of n2", "follows the computed above");
+    model.destroy();
+  });
+
+  QUnit.test("computeds that no computed depends on cost no extra signal", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, o: { b: 2 } });
+    model.createComputed("/c", ["/a", "/o/b"], (a, b) => (a as number) + (b as number));
+    model.createComputed("/e", ["/o/b"], (b) => b);
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    const replaced = (model as any).registry.replaced as Map<string, unknown>;
+    assert.strictEqual(replaced.size, 0, "none for plain dependencies");
+    model.createComputed("/f", ["/c"], (c) => c);
+    assert.deepEqual([...replaced.keys()], ["/c"], "one for a computed another one depends on");
+    // Redefined while bound: the state signal in between leaves nothing in the path index
+    model.createComputed("/o/g", ["/a"], (a) => a);
+    model.bindProperty("/o/g").attachChange(() => {});
+    for (let i = 0; i < 3; i++) {
+      model.removeComputed("/o/g");
+      model.createComputed("/o/g", ["/a"], (a) => a);
+    }
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    const below = (model as any).registry.descendants.get("/o") as string[];
+    assert.deepEqual(below, ["/o/b", "/o/g"], "listed once, however often it was replaced");
+    model.destroy();
+  });
+
+  QUnit.test(
+    "a binding shows a redefined computed without a change of its inputs",
+    async (assert) => {
+      const model = new SignalModel({ a: 5 });
+      model.createComputed("/result", ["/a"], (a) => (a as number) + 10);
+      const binding = model.bindProperty("/result");
+      let fired = 0;
+      binding.attachChange(() => fired++);
+      model.removeComputed("/result");
+      model.createComputed("/result", ["/a"], (a) => (a as number) * 2);
+      await Promise.resolve();
+      assert.strictEqual(binding.getValue(), 10, "the new formula");
+      assert.strictEqual(fired, 1, "change fired once");
+      model.destroy();
+    },
+  );
+
+  QUnit.test("a redefinition whose first run throws changes nothing", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, x: null, total: 0 });
+    model.createComputed("/total", ["/a"], (a) => a);
+    model.createComputed("/double", ["/total"], (total) => (total as number) * 2);
+    const binding = model.bindProperty("/total");
+    const dependent = model.bindProperty("/double");
+    binding.attachChange(() => {});
+    dependent.attachChange(() => {});
+    model.removeComputed("/total");
+    assert.throws(
+      () => model.createComputed("/total", ["/x"], (x) => (x as { a: number }).a),
+      TypeError,
+    );
+    model.setProperty("/total", 5);
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), 5, "the binding still follows the data");
+    assert.strictEqual(dependent.getValue(), 10, "and so does a computed that depends on the path");
+    model.createComputed("/total", ["/a"], (a) => (a as number) + 1);
+    await Promise.resolve();
+    assert.strictEqual(binding.getValue(), 2, "a later redefinition works");
+    assert.strictEqual(dependent.getValue(), 4);
+    model.destroy();
+  });
+
+  QUnit.test(
+    "a computed below a removed computed it depends on follows the data",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+      model.createComputed("/r", ["/a"], (a) => ({ k: a }));
+      model.createComputed("/r/d", ["/r"], (r) => ({
+        name: (r as { k?: unknown } | undefined)?.k,
+      }));
+      model.createComputed("/z", ["/r/d/name"], (name) => name);
+      const binding = model.bindProperty("/z");
+      binding.attachChange(() => {});
+      assert.strictEqual(binding.getValue(), 1);
+      model.removeComputed("/r");
+      model.setProperty("/r", { k: 5 });
+      await Promise.resolve();
+      assert.deepEqual(model.getProperty("/r/d"), { name: 5 }, "runs again with the data");
+      assert.strictEqual(binding.getValue(), 5, "and so does what depends on it");
+      model.destroy();
+    },
+  );
+
+  QUnit.test("a removed computed that nothing depends on leaves no signal", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    model.createComputed("/c", ["/a"], (a) => a);
+    model.removeComputed("/c");
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    const signals = (model as any).registry.signals as Map<string, unknown>;
+    assert.deepEqual([...signals.keys()], [], "not for its dependency either");
+    model.destroy();
+  });
+
+  QUnit.test("a path a computed depends on is plain data for createComputed", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    model.createComputed("/b", ["/a"], (a) => a);
+    assert.throws(() => model.createComputed("/a", [], () => 7), /already holds raw data/);
+    model.destroy();
+
+    const ordered = new SignalModel<Record<string, unknown>>({});
+    ordered.createComputed("/a", [], () => 7);
+    ordered.createComputed("/b", ["/a"], (a) => a);
+    assert.strictEqual(ordered.getProperty("/b"), 7, "the computed that is depended on first");
+    ordered.destroy();
+  });
+
+  QUnit.test(
+    "list and tree bindings follow a computed created or removed above them",
+    async (assert) => {
+      const nodes = (name: string): object[] => [{ name, children: [{ name: `${name} child` }] }];
+      const model = new SignalModel<Record<string, unknown>>({
+        pick: "a",
+        a: nodes("a"),
+        b: nodes("b"),
+        view: { nodes: nodes("data") },
+      });
+      const list = model.bindList("/view/nodes");
+      const tree = model.bindTree("/view/nodes", undefined, [], { arrayNames: ["children"] }, []);
+      list.attachChange(() => {});
+      tree.attachChange(() => {});
+      const shown = (): string =>
+        [list.getContexts(0, 10), tree.getRootContexts(0, 10)]
+          .map((contexts) => String(contexts[0]?.getProperty("name")))
+          .join();
+      assert.strictEqual(shown(), "data,data");
+      model.createComputed("/view", ["/pick", "/a", "/b"], (pick, a, b) => ({
+        nodes: pick === "a" ? a : b,
+      }));
+      await Promise.resolve();
+      assert.strictEqual(shown(), "a,a", "the computed created above them");
+      model.setProperty("/pick", "b");
+      await Promise.resolve();
+      assert.strictEqual(shown(), "b,b", "an input of the computed");
+      model.removeComputed("/view");
+      await Promise.resolve();
+      assert.strictEqual(shown(), "data,data", "the data again");
+      model.setProperty("/view/nodes", nodes("written"));
+      await Promise.resolve();
+      assert.strictEqual(shown(), "written,written", "and writes to it");
+      model.destroy();
+    },
+  );
+
+  QUnit.test("a createComputed that fails leaves no signal for its dependencies", (assert) => {
+    const model = new SignalModel({ a: 1, b: 2 });
+    const signals = (model as unknown as { registry: { signals: Map<string, unknown> } }).registry
+      .signals;
+    model.getSignal("/a");
+    assert.throws(() =>
+      model.createComputed("/c", ["/a", "/b"], () => {
+        throw new Error("first run");
+      }),
+    );
+    assert.deepEqual([...signals.keys()], ["/a"], "only the signal that was there before");
+    model.destroy();
+  });
+
+  QUnit.test(
+    "a computed binding recovers from a refresh() that a change handler broke off",
+    async (assert) => {
+      const model = new SignalModel<Record<string, number>>({ x: 1, y: 1 });
+      model.createComputed("/c", ["/y"], (y) => (y as number) * 10);
+      const first = model.bindProperty("/x");
+      first.initialize();
+      first.attachChange(() => {
+        throw new Error("handler");
+      });
+      const computed = model.bindProperty("/c");
+      computed.initialize();
+      computed.attachChange(() => {});
+      model.getData().x = 2;
+      model.getData().y = 2;
+      assert.throws(() => model.refresh(), /handler/);
+      model.setProperty("/y", 3);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(computed.getValue(), 30, "it follows the next write");
+      model.destroy();
+    },
+  );
+
+  QUnit.test(
+    "refresh() of a binding does not run a computed on an unchanged object",
+    async (assert) => {
+      const model = new SignalModel({ o: { a: 1 } });
+      model.createComputed("/c", ["/o"], (o) => ({ a: (o as { a: number }).a }));
+      const binding = model.bindProperty("/o");
+      const computed = model.bindProperty("/c");
+      binding.initialize();
+      computed.initialize();
+      let events = 0;
+      binding.attachChange(() => {});
+      computed.attachChange(() => events++);
+      binding.refresh();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(events, 0);
+      model.destroy();
+    },
+  );
+
+  QUnit.test("a removed computed leaves no signal for its dependencies", async (assert) => {
+    const model = new SignalModel({ a: 1, b: 2 });
+    const signals = (model as unknown as { registry: { signals: Map<string, unknown> } }).registry
+      .signals;
+    model.createComputed("/sum", ["/a", "/b"], (a, b) => (a as number) + (b as number));
+    model.createComputed("/double", ["/a"], (a) => (a as number) * 2);
+    model.removeComputed("/sum");
+    assert.deepEqual([...signals.keys()], ["/a"], "/a is still read by the other computed");
+    const binding = model.bindProperty("/double");
+    binding.initialize();
+    binding.attachChange(() => {});
+    model.setProperty("/a", 5);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(binding.getValue(), 10, "which still follows it");
+    binding.destroy();
+    model.removeComputed("/double");
+    assert.deepEqual([...signals.keys()], []);
+    model.destroy();
+  });
+
+  QUnit.test(
+    "the state signal of a removed computed goes with the computeds that read it",
+    (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+      const signals = (model as unknown as { registry: { signals: Map<string, unknown> } }).registry
+        .signals;
+      model.createComputed("/c", ["/a"], (a) => a);
+      model.createComputed("/d", ["/c"], (c) => c);
+      model.createComputed("/e", ["/c"], (c) => c);
+      model.removeComputed("/c");
+      assert.deepEqual([...signals.keys()], ["/c"], "what /d and /e follow now");
+      model.setProperty("/c", 5);
+      assert.deepEqual([model.getProperty("/d"), model.getProperty("/e")], [5, 5]);
+      model.removeComputed("/d");
+      assert.deepEqual([...signals.keys()], ["/c"], "/e still reads it");
+      model.removeComputed("/e");
+      assert.deepEqual([...signals.keys()], []);
+      model.destroy();
+    },
+  );
+
+  QUnit.test("nothing is kept for a removed computed once nothing needs it", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    const registry = (
+      model as unknown as {
+        registry: {
+          released: Set<string>;
+          replaced: Map<string, unknown>;
+          signals: Map<string, unknown>;
+        };
+      }
+    ).registry;
+    const kept = (): number[] => [
+      registry.released.size,
+      registry.replaced.size,
+      registry.signals.size,
+    ];
+    for (let i = 0; i < 20; i++) {
+      model.createComputed(`/c${i}`, ["/a"], (a) => a);
+      model.createComputed(`/d${i}`, [`/c${i}`], (c) => c);
+      model.createComputed(`/e${i}`, [`/c${i}/x`], (x) => x);
+      model.removeComputed(`/c${i}`);
+      model.removeComputed(`/d${i}`);
+      model.removeComputed(`/e${i}`);
+    }
+    assert.deepEqual(kept(), [0, 0, 0], "computeds and their readers created and removed");
+
+    // Read only below its path: no state signal is needed at the path itself
+    model.createComputed("/c", ["/a"], () => ({ x: 1 }));
+    model.createComputed("/inner", ["/c/x"], (x) => x);
+    model.removeComputed("/c");
+    assert.deepEqual([...registry.signals.keys()], ["/c/x"]);
+    model.removeComputed("/inner");
+
+    // A reader that stays is still told when the path gets a computed again
+    model.createComputed("/c", ["/a"], (a) => a);
+    model.createComputed("/stays", ["/c"], (c) => c);
+    model.createComputed("/goes", ["/c"], (c) => c);
+    model.removeComputed("/c");
+    // Read now, so that it depends on what the registry keeps for the readers of /c
+    assert.strictEqual(model.getProperty("/stays"), undefined, "no data at /c");
+    model.removeComputed("/goes");
+    model.createComputed("/c", ["/a"], (a) => (a as number) * 10);
+    assert.strictEqual(model.getProperty("/stays"), 10);
+    model.removeComputed("/stays");
+    model.removeComputed("/c");
+    assert.deepEqual(kept(), [0, 0, 0]);
+
+    model.createComputed("/c", ["/a"], (a) => a);
+    const binding = model.bindProperty("/c");
+    binding.initialize();
+    model.removeComputed("/c");
+    model.createComputed("/c", ["/a"], (a) => (a as number) + 1);
+    assert.strictEqual(model.getProperty("/c"), 2, "created again while a binding is on the path");
+    model.removeComputed("/c");
+    binding.destroy();
+    assert.deepEqual(kept(), [0, 0, 0], "and forgotten with the last binding");
+    model.destroy();
+  });
+
+  QUnit.test(
+    "a computed removed, created again and removed keeps one pin per reader",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+      const deps = ["/c"];
+      model.createComputed("/c", ["/a"], (a) => a);
+      model.createComputed("/d", deps, (c) => c);
+      // The caller's array is not the model's
+      deps.length = 0;
+      model.removeComputed("/c");
+      model.setProperty("/c", 3);
+      assert.strictEqual(model.getProperty("/d"), 3, "/d follows the data at /c");
+      model.createComputed("/c", ["/a"], (a) => a);
+      model.removeComputed("/c");
+      model.createComputed("/e", ["/c"], (c) => c);
+      model.removeComputed("/d");
+      const binding = model.bindProperty("/e");
+      binding.initialize();
+      binding.attachChange(() => {});
+      model.setProperty("/c", 7);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(binding.getValue(), 7, "/e still follows /c after /d is gone");
+      model.destroy();
+    },
+  );
+
+  QUnit.test("a computed that depends on itself is refused", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    assert.throws(() => model.createComputed("/c", ["/c"], (c) => c), /depends on itself/);
+    assert.throws(() => model.createComputed("/c", ["/c/x"], (x) => x), /depends on itself/);
+    model.createComputed("/k", ["/kk"], (kk) => kk);
+    assert.strictEqual(model.getProperty("/k"), undefined, "a path that only starts alike is fine");
+    model.createComputed("/c", ["/a"], (a) => a);
+    model.removeComputed("/c");
+    assert.throws(() => model.createComputed("/c", ["/a", "/c"], (a) => a), /depends on itself/);
+    model.createComputed("/c", ["/a"], (a) => a);
+    assert.strictEqual(model.getProperty("/c"), 1, "the path is still free for a computed");
+    // Through another computed, which read the path while it was plain data
+    model.createComputed("/d", ["/c/x"], (x) => x);
+    model.createComputed("/e", ["/d"], (d) => d);
+    model.removeComputed("/c");
+    assert.throws(() => model.createComputed("/c", ["/e/y"], (y) => y), /depends on itself/);
+    model.createComputed("/c", ["/a"], (a) => a);
+    assert.strictEqual(model.getProperty("/e"), undefined, "the others still work");
+    assert.throws(() => model.createComputed("/f", ["a"], (a) => a), /dependency "a"/);
+    assert.throws(() => model.createComputed("/f", ["/a/"], (a) => a), /dependency "\/a\/"/);
+    model.createComputed("/f", ["/"], (root) => root);
+    model.destroy();
+  });
+
+  QUnit.test("a read below two computeds reads only the closest one", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ x: 1 });
+    let outer = 0;
+    model.createComputed("/a", ["/x"], () => {
+      outer++;
+      return { b: { c: "outer" } };
+    });
+    model.createComputed("/a/b", ["/x"], (x) => ({ c: x }));
+    assert.strictEqual(outer, 1, "created");
+    assert.strictEqual(model.getProperty("/a/b/c"), 1);
+    model.setProperty("/x", 2);
+    assert.strictEqual(model.getProperty("/a/b/c"), 2);
+    assert.strictEqual(outer, 1, "the computed above was not read");
+    assert.deepEqual(model.getProperty("/a"), { b: { c: "outer" } });
+    model.destroy();
+  });
+
+  QUnit.test("createComputed: a path no read would find is refused", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    assert.throws(() => model.createComputed("c", ["/a"], (a) => a), /not an absolute path/);
+    assert.throws(() => model.createComputed("/c/", ["/a"], (a) => a), /not an absolute path/);
+    model.destroy();
+  });
+
+  QUnit.test("a failing createComputed leaves nothing for the paths it read", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+    model.createComputed("/u", ["/a"], (a) => a);
+    const binding = model.bindProperty("/u");
+    binding.initialize();
+    binding.attachChange(() => {});
+    // The binding stays, so the registry remembers that /u was a computed
+    model.removeComputed("/u");
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    const replaced = (model as any).registry.replaced as Map<string, unknown>;
+    assert.throws(
+      () =>
+        model.createComputed("/bad", ["/u"], () => {
+          throw new Error("first run");
+        }),
+      /first run/,
+    );
+    assert.notOk(replaced.has("/u"));
+    model.destroy();
+  });
+
+  QUnit.test("a computed sees the write of a two-way binding at once", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ price: 10, qty: 1, o: { n: 1 } });
+    model.createComputed("/total", ["/price", "/qty"], (price, qty) => price * qty);
+    model.createComputed("/view", ["/o"], (o) => ({ n: o.n }));
+    const input = model.bindProperty("/qty");
+    input.attachChange(() => {});
+    input.initialize();
+    input.setValue(3);
+    assert.strictEqual(model.getProperty("/total"), 30);
+    model.setProperty("/o", { n: 2 }, undefined, true);
+    assert.strictEqual(model.getProperty("/view/n"), 2, "also read below a computed");
+    model.setProperty("/price", 20, undefined, true);
+    assert.strictEqual(model.getSignal("/price").get(), 20, "and a signal handed out");
+    model.destroy();
+  });
+
+  QUnit.test("a failing computed above a dependency does not stop setData", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ src: { x: { name: "n" } }, z: 1 });
+    model.createComputed("/cur", ["/src"], (src) => src.x);
+    model.createComputed("/greet", ["/cur/name"], (name) => "Hi " + name);
+    const binding = model.bindProperty("/z");
+    binding.attachChange(() => {});
+    binding.initialize();
+    model.setData({ z: 2 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.strictEqual(binding.getValue(), 2, "the bindings after that signal are told");
+    assert.throws(() => model.getProperty("/greet"), TypeError, "the computed has the error");
+    model.refresh();
+    model.setData({ src: { x: { name: "m" } }, z: 3 });
+    assert.strictEqual(model.getProperty("/greet"), "Hi m", "and recovers");
+    model.destroy();
+  });
+
+  QUnit.test("createComputed that fails at a later dependency keeps no pin", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, src: { x: { name: "n" } } });
+    model.createComputed("/cur", ["/src"], (src) => src.x);
+    model.setProperty("/src", null);
+    assert.throws(() => model.createComputed("/greet", ["/a", "/cur/name"], (a, n) => a + n));
+    model.createComputed("/a", ["/src"], () => 1);
+    assert.strictEqual(model.getProperty("/a"), 1, "the path is free for a computed");
+    model.destroy();
+  });
+
+  QUnit.test("a path that held a computed keeps that while its binding stays", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, o: {} });
+    model.createComputed("/o/c", ["/a"], (a) => a);
+    const binding = model.bindProperty("/o/c");
+    binding.attachChange(() => {});
+    binding.initialize();
+    model.removeComputed("/o/c");
+    model.createComputed("/o", ["/a"], (a) => ({ c: a }));
+    model.removeComputed("/o");
+    model.createComputed("/o/c", ["/a"], (a) => a + 1);
+    assert.strictEqual(model.getProperty("/o/c"), 2);
+    model.removeComputed("/o/c");
+    // The binding leaves while it follows a computed above its path
+    model.createComputed("/o", ["/a"], (a) => ({ c: a }));
+    binding.destroy();
+    model.removeComputed("/o");
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    assert.strictEqual((model as any).registry.released.size, 0, "forgotten with the binding");
+    model.destroy();
+  });
+
+  QUnit.test("many computeds are created without a scan per computed", (assert) => {
+    const rows = Array.from({ length: 4000 }, (_, i) => ({ price: i, qty: 2 }));
+    const model = new SignalModel<Record<string, unknown>>({ rows });
+    for (let i = 0; i < rows.length; i++) {
+      model.bindProperty(`/rows/${i}/price`).attachChange(() => {});
+    }
+    const start = performance.now();
+    for (let i = 0; i < rows.length; i++) {
+      model.createComputed(
+        `/rows/${i}/total`,
+        [`/rows/${i}/price`, `/rows/${i}/qty`],
+        (p, q) => p * q,
+      );
+    }
+    const took = performance.now() - start;
+    assert.strictEqual(model.getProperty("/rows/3999/total"), 7998);
+    // About 40 ms; with a scan of all computeds and bindings per call it was about 1 s
+    assert.ok(took < 500, `4,000 computeds in ${Math.round(took)} ms`);
+    model.destroy();
+  });
+
+  QUnit.test("types: an untyped model, an optional property, a merge flag", (assert) => {
+    const untyped = new SignalModel({ a: { b: 1 } } as Record<string, unknown>);
+    const value: unknown = untyped.getProperty("/a/b");
+    // @ts-expect-error -- unknown, not never: a number is not assignable from it
+    const wrong: number = untyped.getProperty("/a/b");
+    const typed = new SignalModel<{ opt?: { x: number } }>({ opt: { x: 1 } });
+    const x: number = typed.getProperty("/opt/x");
+    const merge = Math.random() < 2;
+    typed.setData({ opt: { x: 2 } }, merge);
+    assert.deepEqual([value, wrong, x, typed.getProperty("/opt/x")], [1, 1, 1, 2]);
+    untyped.destroy();
+    typed.destroy();
+  });
+
+  QUnit.test(
+    "a computed that runs while an asynchronous write waits is not left stale",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, b: 1, rate: 2 });
+      model.createComputed("/factor", ["/rate"], (rate) => rate);
+      model.createComputed(
+        "/sum",
+        ["/b", "/a"],
+        (b, a) => a + b * (model.getProperty("/factor") as number),
+      );
+      const sum = model.bindProperty("/sum");
+      sum.attachChange(() => {});
+      sum.initialize();
+      const input = model.bindProperty("/b");
+      input.attachChange(() => {});
+      input.initialize();
+      model.setProperty("/a", 2);
+      input.setValue(10);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.strictEqual(sum.getValue(), 22);
+      assert.strictEqual(model.getProperty("/sum"), 22);
+      model.destroy();
+    },
+  );
+
+  QUnit.test("many bindings on one path leave it without a scan per binding", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ busy: false });
+    const handler = (): void => {};
+    const bindings = Array.from({ length: 20000 }, () => model.bindProperty("/busy"));
+    for (const binding of bindings) binding.attachChange(handler);
+    const start = performance.now();
+    for (const binding of bindings) binding.detachChange(handler);
+    const took = performance.now() - start;
+    // About 30 ms; with an array per path it was about 300 ms
+    assert.ok(took < 150, `20,000 bindings left in ${Math.round(took)} ms`);
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    assert.strictEqual((model as any).registry.size, 0);
+    model.destroy();
+  });
+
+  QUnit.test("a computed is found above and below paths of other lengths", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ n: 1, deep: { a: { b: 1 } } });
+    model.createComputed("/xy", ["/n"], (n) => ({ v: n }));
+    model.createComputed("/deep/a/c", ["/n"], (n) => ({ v: n }));
+    assert.strictEqual(model.getProperty("/xy/v"), 1);
+    assert.strictEqual(model.getProperty("/deep/a/c/v"), 1);
+    assert.strictEqual(model.getProperty("/deep/a/b"), 1);
+    assert.notOk(model.setProperty("/deep/a/c/v", 2), "read-only below a computed");
+    assert.ok(model.setProperty("/deep/a/b", 2));
+    model.removeComputed("/xy");
+    assert.strictEqual(model.getProperty("/xy/v"), undefined, "gone with its computed");
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    assert.deepEqual([...(model as any).registry.computedLengths.keys()], ["/deep/a/c".length]);
+    model.destroy();
+  });
+
+  QUnit.test(
+    "a synchronous and then an asynchronous write: a computed over both",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+      model.createComputed("/c1", ["/a"], (a) => ({ v: a + 1 }));
+      model.createComputed("/c2", ["/a", "/c1/v"], (a, v) => a * 1000 + v);
+      const binding = model.bindProperty("/c2");
+      binding.attachChange(() => {});
+      binding.initialize();
+      await Promise.resolve();
+      model.setProperty("/a", 5);
+      model.setProperty("/a", 9, undefined, true);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.strictEqual(binding.getValue(), 9010);
+      model.setProperty("/a", 2, undefined, true);
+      const late = model.createComputed("/late", ["/a"], (a) => a * 2);
+      assert.strictEqual(late.get(), 4, "a computed created after an asynchronous write");
+      model.destroy();
+    },
+  );
+
+  QUnit.test("a computed created below another one takes the bindings below it", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, k: 1 });
+    model.createComputed("/p", ["/a"], (a) => ({ q: { r: a } }));
+    const binding = model.bindProperty("/p/q/r");
+    binding.attachChange(() => {});
+    binding.initialize();
+    model.createComputed("/p/q", ["/k"], (k) => ({ r: "k" + k }));
+    model.setProperty("/k", 2);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.strictEqual(binding.getValue(), "k2");
+    model.destroy();
+  });
+
+  QUnit.test(
+    "getSignal in the function of a computed while an asynchronous write waits",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, b: 1 });
+      model.createComputed("/c", ["/a"], (a) => a * 10 + (model.getSignal("/b").get() as number));
+      const binding = model.bindProperty("/c");
+      binding.attachChange(() => {});
+      binding.initialize();
+      model.setProperty("/b", 2);
+      model.setProperty("/a", 3, undefined, true);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.strictEqual(binding.getValue(), 32);
+      model.destroy();
+    },
+  );
+
+  QUnit.test(
+    "a binding without a handler while a computed comes and goes follows",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, c: 5, d: 0 });
+      const binding = model.bindProperty("/c");
+      const handler = (): void => {};
+      binding.attachChange(handler);
+      binding.initialize();
+      binding.detachChange(handler);
+      model.createComputed("/c", ["/a"], (a) => a * 2);
+      binding.attachChange(handler);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(binding.getValue(), 2, "created meanwhile");
+      binding.detachChange(handler);
+      model.removeComputed("/c");
+      binding.attachChange(handler);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(binding.getValue(), 5, "removed meanwhile");
+      // The refresh() of another binding after a direct change
+      const other = model.bindProperty("/d");
+      other.attachChange(() => {});
+      binding.detachChange(handler);
+      (model.getData() as { c: number }).c = 6;
+      other.refresh();
+      binding.attachChange(handler);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(binding.getValue(), 6, "refreshed meanwhile");
+      model.destroy();
+    },
+  );
+
+  QUnit.test(
+    "a binding on a computed keeps updating after setValue and initialize",
+    async (assert) => {
+      const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, rows: [1] });
+      model.createComputed("/c", ["/a"], (a) => a * 2);
+      model.createComputed("/list", ["/rows"], (rows) => [...rows]);
+      const binding = model.bindProperty("/c");
+      binding.attachChange(() => {});
+      binding.initialize();
+      const again = model.bindProperty("/c");
+      again.attachChange(() => {});
+      again.initialize();
+      const list = model.bindList("/list");
+      list.attachChange(() => {});
+      list.initialize();
+      await settle();
+      // Each with an update of the computed still queued
+      model.setProperty("/a", 2);
+      model.setProperty("/rows", [1, 2]);
+      binding.setValue(99);
+      again.initialize();
+      list.initialize();
+      await settle();
+      model.setProperty("/a", 3);
+      model.setProperty("/rows", [1, 2, 3]);
+      await settle();
+      assert.deepEqual([binding.getValue(), again.getValue(), list.getLength()], [6, 6, 3]);
+      model.destroy();
+    },
+  );
 });

@@ -346,4 +346,57 @@ QUnit.module("SignalListBinding", () => {
     assert.strictEqual(changeCount, 1, "forced update fires");
     model.destroy();
   });
+
+  QUnit.test(
+    "a list keyed by its row objects sees a row changed by the second merge of a task",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({
+        rows: [{ n: 1 }, { n: 2 }],
+        other: 0,
+      });
+      const list = model.bindList("/rows");
+      (
+        list as unknown as { enableExtendedChangeDetection(detect: boolean, key: string): void }
+      ).enableExtendedChangeDetection(false, "");
+      list.initialize();
+      list.getContexts(0, 10);
+      let events = 0;
+      list.attachChange(() => events++);
+      model.setData({ other: 1 }, true);
+      model.setData({ rows: [{ n: 9 }] }, true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(events, 1);
+      // The mark of the merge is gone: a plain write to a row is no change for this key
+      list.getContexts(0, 10);
+      model.setProperty("/rows/0/n", 5);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(events, 1, "as JSONModel, whose keys are the same objects");
+      model.destroy();
+    },
+  );
+
+  QUnit.test(
+    "a merge taken back while a list keyed by its row objects is suspended leaves no mark",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ rows: [{ n: 1 }, { n: 2 }] });
+      const list = model.bindList("/rows");
+      (
+        list as unknown as { enableExtendedChangeDetection(detect: boolean, key: string): void }
+      ).enableExtendedChangeDetection(false, "");
+      list.initialize();
+      list.getContexts(0, 10);
+      let events = 0;
+      list.attachChange(() => events++);
+      list.suspend();
+      model.setData({ rows: [{ n: 9 }] }, true);
+      model.setData({ rows: [{ n: 1 }] }, true);
+      list.resume();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const atResume = events;
+      model.setProperty("/rows/0/n", 5);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.strictEqual(events, atResume, "a plain write to a row is no change for this key");
+      model.destroy();
+    },
+  );
 });

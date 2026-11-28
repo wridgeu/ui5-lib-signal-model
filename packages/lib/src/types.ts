@@ -36,29 +36,32 @@ export type ModelPath<T> =
  * type Person = { name: string; age: number };
  * type Name = PathValue<Person, "/name">; // string
  */
-export type PathValue<T, P extends string> = P extends `/${number}`
+// `unknown` for a model without a data type: every path is possible there
+export type PathValue<T, P extends string> = unknown extends T[keyof T] ? unknown : ValueAt<T, P>;
+
+type ValueAt<T, P extends string> = P extends `/${number}`
   ? T extends Array<infer U>
     ? U
     : never
   : P extends `/${number}${infer Rest}`
     ? T extends Array<infer U>
-      ? PathValue<U, Rest>
+      ? ValueAt<U, Rest>
       : never
     : P extends `/${infer Key}/${number}/${infer Rest}`
       ? Key extends keyof T
-        ? T[Key] extends Array<infer U>
-          ? PathValue<U, `/${Rest}`>
+        ? NonNullable<T[Key]> extends Array<infer U>
+          ? ValueAt<U, `/${Rest}`>
           : never
         : never
       : P extends `/${infer Key}/${number}`
         ? Key extends keyof T
-          ? T[Key] extends Array<infer U>
+          ? NonNullable<T[Key]> extends Array<infer U>
             ? U
             : never
           : never
         : P extends `/${infer Key}/${infer Rest}`
           ? Key extends keyof T
-            ? PathValue<T[Key], `/${Rest}`>
+            ? ValueAt<NonNullable<T[Key]>, `/${Rest}`>
             : never
           : P extends `/${infer Key}`
             ? Key extends keyof T
@@ -82,8 +85,14 @@ export interface SignalModelOptions {
   /**
    * Reject setProperty writes to leaf properties that don't exist on the parent object.
    * When false (default): new properties are created on existing parents (JSONModel behavior).
-   * When true: writing to a nonexistent leaf returns false, and replacing an existing
-   * computed signal throws instead of warning.
+   * When true: writing to a nonexistent leaf returns false.
    */
   strictLeafCheck?: boolean;
+  /**
+   * Observe the data, like JSONModel's `bObserve` constructor argument: an assignment to a
+   * property of the data object (`model.getData().name = "x"`) updates the bindings.
+   * The data's properties are replaced by getters and setters, and every such assignment
+   * checks all bindings, so writes get slower.
+   */
+  observe?: boolean;
 }

@@ -12,6 +12,9 @@ coverage/
 packages/lib/src/**/*.js
 packages/demo-app/webapp/**/*.js
 
+# OpenUI5's own tests, downloaded by scripts/run-ui5-tests.mjs
+packages/lib/test/ui5native/upstream/
+
 # IDE
 .idea/
 .vscode/

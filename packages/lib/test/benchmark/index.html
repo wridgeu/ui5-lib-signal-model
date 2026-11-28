@@ -640,6 +640,52 @@
       }
 
       /**
+       * Replace ALL N row objects, one setProperty per row
+       *
+       * Like "Update all N bindings", but each write replaces the row object
+       * ("/items/i") while the bindings point one level below ("/items/i/value").
+       * Every write has to reach the binding below the written path.
+       */
+      async function benchReplaceAllRows(ModelClass, n, asyncUpdate, warmupRounds, measuredRounds) {
+        var data = generateData(n);
+        var model = new ModelClass(JSON.parse(JSON.stringify(data)));
+        var container = document.getElementById("hidden-container");
+        var controls = createBindings(model, n, container);
+        await flush();
+        await new Promise(function (r) {
+          setTimeout(r, 50);
+        });
+
+        var prefix;
+        function replaceRows() {
+          prefix = "row-" + ++seq + "-";
+          for (var i = 0; i < n; i++) {
+            model.setProperty("/items/" + i, { id: i, value: prefix + i }, undefined, asyncUpdate);
+          }
+        }
+        function rowsRendered() {
+          return (
+            controls[0].getText() === prefix + 0 && controls[n - 1].getText() === prefix + (n - 1)
+          );
+        }
+
+        for (var w = 0; w < warmupRounds; w++) {
+          replaceRows();
+          await settle(rowsRendered);
+        }
+
+        var times = [];
+        for (var round = 0; round < measuredRounds; round++) {
+          times.push(await timeOp(replaceRows, rowsRendered));
+          await flush();
+        }
+
+        destroyBindings(controls, container);
+        model.destroy();
+        return times;
+      }
+
+      /**
        * Sparse async: change 1 path out of N bindings with bAsyncUpdate=true
        *
        * The realistic Fiori pattern: a user edits one field in a form backed
@@ -1481,9 +1527,13 @@
           setTimeout(r, 50);
         });
 
-        // Warmup
+        // Warmup with new values: with unchanged values no binding would update
         for (var w = 0; w < warmupRounds; w++) {
-          model.setData(JSON.parse(JSON.stringify(generateData(n))));
+          var warmupData = generateData(n);
+          for (var wi = 0; wi < n; wi++) {
+            warmupData.items[wi].value = "warmup-" + w + "-" + wi;
+          }
+          model.setData(warmupData);
           await flush();
         }
 
@@ -2480,6 +2530,27 @@
           json: stats(r20.jsonTimes),
           signal: stats(r20.signalTimes),
         });
+
+        // --- Scenarios 23 and 24: replace every row object ---
+        var rowModes = [
+          { asyncUpdate: false, label: "sync" },
+          { asyncUpdate: true, label: "bAsyncUpdate" },
+        ];
+        for (var m = 0; m < rowModes.length; m++) {
+          setStatus("Running: replace all " + n + " row objects, " + rowModes[m].label + "...");
+          var rRows = await runAlternating(
+            benchReplaceAllRows,
+            Object.assign({}, base, { params: [n, rowModes[m].asyncUpdate] }),
+            measuredRounds,
+          );
+          pushResult({
+            name: "Replace all " + n + " row objects (" + rowModes[m].label + ")",
+            detail: n + " setProperty calls with an object value, bindings one level below",
+            category: "Property (sap.m.Text)",
+            json: stats(rRows.jsonTimes),
+            signal: stats(rRows.signalTimes),
+          });
+        }
 
         window.__bench.done = true;
         renderResults(results, n, iters, measuredRounds);

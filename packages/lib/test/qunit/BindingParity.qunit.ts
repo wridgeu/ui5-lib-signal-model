@@ -754,15 +754,26 @@ QUnit.module(
     );
 
     // =========================================================================
-    // 16. setProperty on primitive parent does not throw
+    // 16. setProperty on primitive parent throws like JSONModel
     // =========================================================================
 
-    QUnit.test("setProperty through primitive parent returns false safely", (assert) => {
-      const signal = new SignalModel<Record<string, unknown>>({ name: "Alice" });
-      const result = signal.setProperty("/name/sub", "value");
-      assert.strictEqual(result, false, "returns false instead of throwing TypeError");
-      assert.strictEqual(signal.getProperty("/name"), "Alice", "primitive unchanged");
-      signal.destroy();
+    QUnit.test("setProperty below a primitive: TypeError or false, like JSONModel", (assert) => {
+      for (const model of [
+        new JSONModel({ name: "Alice", empty: "", zero: 0 }),
+        new SignalModel<Record<string, unknown>>({ name: "Alice", empty: "", zero: 0 }),
+      ]) {
+        const name = model instanceof JSONModel ? "JSONModel" : "SignalModel";
+        assert.throws(
+          () => model.setProperty("/name/sub", "value"),
+          TypeError,
+          `${name}: a string`,
+        );
+        assert.throws(() => model.setProperty("/name/length", 1), TypeError, `${name}: its length`);
+        assert.strictEqual(model.setProperty("/empty/sub", 1), false, `${name}: an empty string`);
+        assert.strictEqual(model.setProperty("/zero/sub", 1), false, `${name}: zero`);
+        assert.strictEqual(model.getProperty("/name"), "Alice", `${name}: primitive unchanged`);
+        model.destroy();
+      }
     });
   },
 );
