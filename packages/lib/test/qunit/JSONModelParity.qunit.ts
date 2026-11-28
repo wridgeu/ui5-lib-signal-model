@@ -997,6 +997,7 @@ QUnit.module("JSONModel Parity", () => {
         other: {},
       });
       const binding = model.bindList("/data/list", undefined, new Sorter("name"));
+      binding.attachChange(() => {});
       binding.initialize();
       const merges: [string, unknown, string][] = [
         ["/data/list/0", { name: "c" }, "/data/list/1 /data/list/0"],

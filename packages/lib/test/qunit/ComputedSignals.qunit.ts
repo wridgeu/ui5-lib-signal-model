@@ -74,7 +74,7 @@ QUnit.module("ComputedSignals", () => {
 
   QUnit.test("createComputed on raw data path throws", (assert) => {
     const model = new SignalModel({ name: "Alice" });
-    model.bindProperty("/name");
+    model.bindProperty("/name").attachChange(() => {});
     assert.throws(
       () => model.createComputed("/name", [], () => "x"),
       TypeError,
@@ -121,6 +121,7 @@ QUnit.module("ComputedSignals", () => {
     model.createComputed("/quad", ["/double"], (d) => (d as number) * 2);
 
     const doubleBinding = model.bindProperty("/double");
+    doubleBinding.attachChange(() => {});
     const quadBinding = model.bindProperty("/quad");
     assert.strictEqual(doubleBinding.getValue(), 10, "double = 5 * 2 = 10");
     assert.strictEqual(quadBinding.getValue(), 20, "quad = 10 * 2 = 20");
@@ -387,6 +388,7 @@ QUnit.module("ComputedSignals", () => {
     });
 
     const binding = model.bindProperty("/firstItem/name");
+    binding.attachChange(() => {});
     assert.strictEqual(binding.getValue(), "Alice", "binding reads computed sub-path");
 
     model.setProperty("/items", [{ name: "Carol" }, { name: "Dave" }]);
@@ -625,6 +627,7 @@ QUnit.module("ComputedSignals", () => {
     });
 
     const binding = model.bindProperty("/topScorer/name");
+    binding.attachChange(() => {});
     assert.strictEqual(binding.getValue(), "Bob", "initial top scorer is Bob");
 
     model.setProperty("/items", [
@@ -670,6 +673,7 @@ QUnit.module("ComputedSignals", () => {
       model.createComputed("/c", ["/x"], (x) => ({ name: "x=" + (x as number) }));
 
       const binding = model.bindProperty("/c/name");
+      binding.attachChange(() => {});
       assert.strictEqual(binding.getValue(), "x=1", "initial value from /x");
 
       // Redefine with DIFFERENT dependency
@@ -732,8 +736,11 @@ QUnit.module("ComputedSignals", () => {
       }));
 
       const bindingA = model.bindProperty("/obj/a");
+      bindingA.attachChange(() => {});
       const bindingB = model.bindProperty("/obj/b");
+      bindingB.attachChange(() => {});
       const bindingC = model.bindProperty("/obj/c");
+      bindingC.attachChange(() => {});
 
       assert.strictEqual(bindingA.getValue(), "x-a-1", "initial a");
       assert.strictEqual(bindingB.getValue(), "x-b-1", "initial b");
@@ -770,6 +777,7 @@ QUnit.module("ComputedSignals", () => {
       model.createComputed("/derived", ["/base"], (b) => (b as number) + 1);
 
       const binding = model.bindProperty("/derived");
+      binding.attachChange(() => {});
       assert.strictEqual(binding.getValue(), 11, "initial: (5*2)+1 = 11");
 
       // Redefine both levels -- each removeComputed+createComputed triggers
@@ -795,6 +803,7 @@ QUnit.module("ComputedSignals", () => {
     model.createComputed("/val", ["/a"], (a) => "a=" + (a as number));
 
     const binding = model.bindProperty("/val");
+    binding.attachChange(() => {});
     assert.strictEqual(binding.getValue(), "a=1", "initial");
 
     // Rapid redefine -- 3 times without waiting
@@ -819,6 +828,7 @@ QUnit.module("ComputedSignals", () => {
     model.createComputed("/obj", ["/a"], (a) => ({ val: "a=" + (a as number) }));
 
     const binding = model.bindProperty("/obj/val");
+    binding.attachChange(() => {});
     assert.strictEqual(binding.getValue(), "a=1", "initial");
 
     // Rapid redefine with sub-path binding
@@ -880,6 +890,7 @@ QUnit.module("ComputedSignals", () => {
       });
 
       const riskyBinding = model.bindProperty("/risky");
+      riskyBinding.attachChange(() => {});
       const otherBinding = model.bindProperty("/other");
       assert.strictEqual(riskyBinding.getValue(), 100, "initial risky value");
 
@@ -1058,6 +1069,7 @@ QUnit.module("ComputedSignals", () => {
       model.createComputed("/c", ["/a"], (a) => (a as number) * 2);
       model.createComputed("/d", ["/c"], (c) => `d of ${String(c)}`);
       const binding = model.bindProperty("/d");
+      binding.attachChange(() => {});
       model.removeComputed("/c");
       await Promise.resolve();
       assert.strictEqual(binding.getValue(), "d of undefined", "no data at the path");
@@ -1522,5 +1534,104 @@ QUnit.module("ComputedSignals", () => {
     );
     assert.notOk(replaced.has("/u"));
     model.destroy();
+  });
+
+  QUnit.test("a computed sees the write of a two-way binding at once", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ price: 10, qty: 1, o: { n: 1 } });
+    model.createComputed("/total", ["/price", "/qty"], (price, qty) => price * qty);
+    model.createComputed("/view", ["/o"], (o) => ({ n: o.n }));
+    const input = model.bindProperty("/qty");
+    input.attachChange(() => {});
+    input.initialize();
+    input.setValue(3);
+    assert.strictEqual(model.getProperty("/total"), 30);
+    model.setProperty("/o", { n: 2 }, undefined, true);
+    assert.strictEqual(model.getProperty("/view/n"), 2, "also read below a computed");
+    model.setProperty("/price", 20, undefined, true);
+    assert.strictEqual(model.getSignal("/price").get(), 20, "and a signal handed out");
+    model.destroy();
+  });
+
+  QUnit.test("a failing computed above a dependency does not stop setData", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ src: { x: { name: "n" } }, z: 1 });
+    model.createComputed("/cur", ["/src"], (src) => src.x);
+    model.createComputed("/greet", ["/cur/name"], (name) => "Hi " + name);
+    const binding = model.bindProperty("/z");
+    binding.attachChange(() => {});
+    binding.initialize();
+    model.setData({ z: 2 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.strictEqual(binding.getValue(), 2, "the bindings after that signal are told");
+    assert.throws(() => model.getProperty("/greet"), TypeError, "the computed has the error");
+    model.refresh();
+    model.setData({ src: { x: { name: "m" } }, z: 3 });
+    assert.strictEqual(model.getProperty("/greet"), "Hi m", "and recovers");
+    model.destroy();
+  });
+
+  QUnit.test("createComputed that fails at a later dependency keeps no pin", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, src: { x: { name: "n" } } });
+    model.createComputed("/cur", ["/src"], (src) => src.x);
+    model.setProperty("/src", null);
+    assert.throws(() => model.createComputed("/greet", ["/a", "/cur/name"], (a, n) => a + n));
+    model.createComputed("/a", ["/src"], () => 1);
+    assert.strictEqual(model.getProperty("/a"), 1, "the path is free for a computed");
+    model.destroy();
+  });
+
+  QUnit.test("a path that held a computed keeps that while its binding stays", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, o: {} });
+    model.createComputed("/o/c", ["/a"], (a) => a);
+    const binding = model.bindProperty("/o/c");
+    binding.attachChange(() => {});
+    binding.initialize();
+    model.removeComputed("/o/c");
+    model.createComputed("/o", ["/a"], (a) => ({ c: a }));
+    model.removeComputed("/o");
+    model.createComputed("/o/c", ["/a"], (a) => a + 1);
+    assert.strictEqual(model.getProperty("/o/c"), 2);
+    model.removeComputed("/o/c");
+    // The binding leaves while it follows a computed above its path
+    model.createComputed("/o", ["/a"], (a) => ({ c: a }));
+    binding.destroy();
+    model.removeComputed("/o");
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
+    assert.strictEqual((model as any).registry.released.size, 0, "forgotten with the binding");
+    model.destroy();
+  });
+
+  QUnit.test("many computeds are created without a scan per computed", (assert) => {
+    const rows = Array.from({ length: 4000 }, (_, i) => ({ price: i, qty: 2 }));
+    const model = new SignalModel<Record<string, unknown>>({ rows });
+    for (let i = 0; i < rows.length; i++) {
+      model.bindProperty(`/rows/${i}/price`).attachChange(() => {});
+    }
+    const start = performance.now();
+    for (let i = 0; i < rows.length; i++) {
+      model.createComputed(
+        `/rows/${i}/total`,
+        [`/rows/${i}/price`, `/rows/${i}/qty`],
+        (p, q) => p * q,
+      );
+    }
+    const took = performance.now() - start;
+    assert.strictEqual(model.getProperty("/rows/3999/total"), 7998);
+    // About 40 ms; with a scan of all computeds and bindings per call it was about 1 s
+    assert.ok(took < 500, `4,000 computeds in ${Math.round(took)} ms`);
+    model.destroy();
+  });
+
+  QUnit.test("types: an untyped model, an optional property, a merge flag", (assert) => {
+    const untyped = new SignalModel({ a: { b: 1 } } as Record<string, unknown>);
+    const value: unknown = untyped.getProperty("/a/b");
+    // @ts-expect-error -- unknown, not never: a number is not assignable from it
+    const wrong: number = untyped.getProperty("/a/b");
+    const typed = new SignalModel<{ opt?: { x: number } }>({ opt: { x: 1 } });
+    const x: number = typed.getProperty("/opt/x");
+    const merge = Math.random() < 2;
+    typed.setData({ opt: { x: 2 } }, merge);
+    assert.deepEqual([value, wrong, x, typed.getProperty("/opt/x")], [1, 1, 1, 2]);
+    untyped.destroy();
+    typed.destroy();
   });
 });

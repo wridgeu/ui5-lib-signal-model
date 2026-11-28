@@ -135,9 +135,10 @@ const model = new SignalModel<AppData>({
 });
 
 model.getProperty("/customer/name"); // string (typed)
-model.setProperty("/customer/age", 31); // type-checked
-model.setProperty("/customer/age", "x"); // compile error
+model.getSignal("/customer/age"); // Signal<number>
 ```
+
+The types give a known path its value type and completion in the editor. They do not reject anything: a path that is not in the type, or a value of another type, falls back to the untyped signature of JSONModel (`path: string, value: unknown`), because paths are often built at run time.
 
 Path types follow the same conventions as UI5's typed model patterns from `@openui5/types`.
 
@@ -202,7 +203,7 @@ model.createComputed("/total", ["/price"], (p) => p);
 An error thrown by a computed's function is not turned into a value:
 
 - `getProperty`, `getObject` and a new binding on the path rethrow the error until a dependency changes and the function succeeds again. This is how `Signal.Computed` behaves, and how JSONModel behaves when a formatter throws.
-- A binding that already shows a value keeps it. The error is logged, and other bindings update as usual.
+- A binding that already shows a value keeps it. The error is logged, and other bindings update as usual. `model.refresh()` throws the error, as it throws the error of a change handler; the other bindings still update, in the next microtask.
 - `createComputed` runs the function once. If that first run throws, `createComputed` throws and nothing changes (after a `removeComputed`, the bindings keep following the data), so the function must handle the data the model holds at that moment (for example before `loadData` has finished).
 
 ### Creating, Removing and Redefining While Bound
@@ -408,10 +409,13 @@ signal.set(1); // on a state signal: the same as model.setProperty("/path", 1); 
 model.destroy(); // aborts in-flight requests, clears all subscriptions
 ```
 
+As in JSONModel, the model holds a binding from its first change handler to its last. A binding that is only read from (`model.bindList("/items", null, sorters, filters).getContexts()`) is not updated and needs no `destroy()`.
+
 Three things to know about a signal you keep:
 
 - Below a computed, `getSignal` returns that computed: `getSignal("/user/name")` with a computed at `/user` is the signal of the whole `/user` value.
 - A state signal is the signal of plain data. If a computed is created at its path or above it later, the signal no longer follows; call `getSignal` again.
+- A write with `bAsyncUpdate` (what a two-way binding does) reaches a state signal you kept when its timer runs. `getSignal`, `getProperty` on a computed and every synchronous write bring the signals in line before that.
 - The model keeps a state signal that `getSignal` handed out until `destroy()`. Signals it creates for bindings and for the dependencies of computeds go when the last of those is gone.
 
 ### Binding Classes

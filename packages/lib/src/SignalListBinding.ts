@@ -286,9 +286,13 @@ export default class SignalListBinding extends ClientListBinding {
     super.refresh(forceUpdate);
   }
 
+  /** Whether the model holds the binding: it has a change handler. @internal */
+  _held = false;
+
   /** @since 0.1.0 */
   subscribe(): void {
     this.unsubscribe();
+    if (!this._held) return;
 
     const resolvedPath = this.getResolvedPath();
     if (!resolvedPath) return;

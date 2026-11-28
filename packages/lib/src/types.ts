@@ -36,29 +36,32 @@ export type ModelPath<T> =
  * type Person = { name: string; age: number };
  * type Name = PathValue<Person, "/name">; // string
  */
-export type PathValue<T, P extends string> = P extends `/${number}`
+// `unknown` for a model without a data type: every path is possible there
+export type PathValue<T, P extends string> = unknown extends T[keyof T] ? unknown : ValueAt<T, P>;
+
+type ValueAt<T, P extends string> = P extends `/${number}`
   ? T extends Array<infer U>
     ? U
     : never
   : P extends `/${number}${infer Rest}`
     ? T extends Array<infer U>
-      ? PathValue<U, Rest>
+      ? ValueAt<U, Rest>
       : never
     : P extends `/${infer Key}/${number}/${infer Rest}`
       ? Key extends keyof T
-        ? T[Key] extends Array<infer U>
-          ? PathValue<U, `/${Rest}`>
+        ? NonNullable<T[Key]> extends Array<infer U>
+          ? ValueAt<U, `/${Rest}`>
           : never
         : never
       : P extends `/${infer Key}/${number}`
         ? Key extends keyof T
-          ? T[Key] extends Array<infer U>
+          ? NonNullable<T[Key]> extends Array<infer U>
             ? U
             : never
           : never
         : P extends `/${infer Key}/${infer Rest}`
           ? Key extends keyof T
-            ? PathValue<T[Key], `/${Rest}`>
+            ? ValueAt<NonNullable<T[Key]>, `/${Rest}`>
             : never
           : P extends `/${infer Key}`
             ? Key extends keyof T

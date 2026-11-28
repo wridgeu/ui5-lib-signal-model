@@ -21,7 +21,7 @@ flowchart TD
 
 ## Unified Microtask Flush Queue
 
-Each binding type (property, list, tree) subscribes to its path in the registry. The registry is the only writer of state signals, so when it sets one to a changed value it queues the bindings of that path itself. A binding on plain data therefore needs no `Signal.subtle.Watcher`; only a binding that resolves through a computed has one, because a computed changes through its dependencies.
+Each binding type (property, list, tree) subscribes to its path in the registry when it gets its first change handler, and leaves with its last one or with `destroy()`: the time JSONModel holds a binding. A binding without a handler costs nothing and can be dropped. The registry is the only writer of state signals, so when it sets one to a changed value it queues the bindings of that path itself. A binding on plain data therefore needs no `Signal.subtle.Watcher`; only a binding that resolves through a computed has one, because a computed changes through its dependencies.
 
 For the same reason `set()` on a state signal from `getSignal()` does not set the signal directly: it calls `setProperty` for the signal's path, so the data, the bindings and the computeds stay in line; `set()` returns nothing, so a write the model refuses is logged as a warning.
 
@@ -156,7 +156,7 @@ The cost is one loop over the list bindings per merge and one per value the merg
 
 JSONModel's `setProperty` accepts a `bAsyncUpdate` flag that defers `checkUpdate` into a `setTimeout`, collapsing N synchronous `setProperty` calls into a single binding check pass. This is SAP's recommended workaround for the O(N²) problem documented in [openui5 issue 2600](https://github.com/UI5/openui5/issues/2600).
 
-SignalModel supports this flag with targeted dirty-path tracking: when `bAsyncUpdate=true`, data is written immediately and the resolved path is recorded in `_pendingAsyncPaths`. A single `setTimeout` syncs only the dirty paths, the signals below them and their deduplicated ancestor signals (O(1) for sparse updates, O(N) for full-batch updates). Pending timers are cleared on `destroy()`. Without the flag (default), SignalModel uses its push-based microtask flush which provides O(1) per-path notification.
+SignalModel supports this flag with targeted dirty-path tracking: when `bAsyncUpdate=true`, data is written immediately and the resolved path is recorded in `_pendingAsyncPaths`. A single `setTimeout` syncs only the dirty paths, the signals below them and their deduplicated ancestor signals (O(1) for sparse updates, O(N) for full-batch updates). A read of a computed, `getSignal`, a synchronous write and a binding's `refresh()` do that sync at once, so a computed never shows a value from before such a write. Pending timers are cleared on `destroy()`. Without the flag (default), SignalModel uses its push-based microtask flush which provides O(1) per-path notification.
 
 ## Microtask vs Macrotask Scheduling
 

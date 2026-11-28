@@ -424,6 +424,7 @@ QUnit.module(
       assert.strictEqual(`${binding.getValue()}, ${changes}`, "5, 1", "the binding, once");
 
       const name = model.bindProperty("/customer/name");
+      name.attachChange(() => {});
       name.initialize();
       (model.getSignal("/customer") as Signal.State<{ name: string }>).set({ name: "Bob" });
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -600,17 +601,17 @@ QUnit.module(
     QUnit.test("setJSON with invalid JSON fires parseError event", (assert) => {
       const model = new SignalModel({ name: "Alice" });
       let errorFired = 0;
-      let srcText = "";
+      let srcText: unknown;
 
       model.attachParseError((event: { getParameter(name: string): unknown }) => {
         errorFired++;
-        srcText = event.getParameter("srcText") as string;
+        srcText = event.getParameter("srcText");
       });
 
       model.setJSON("{ not valid json }");
 
       assert.strictEqual(errorFired, 1, "parseError event fired for invalid JSON");
-      assert.ok(srcText.length > 0, "srcText parameter contains error message");
+      assert.ok(srcText instanceof SyntaxError, "srcText is the error, as in JSONModel");
       assert.strictEqual(
         model.getProperty("/name"),
         "Alice",
@@ -1481,6 +1482,20 @@ QUnit.module(
       const model = new SignalModel({ val: 1 });
       assert.throws(() => model.createComputed("/", ["/val"], (v) => v), TypeError);
       assert.strictEqual(model.setProperty("/", { val: 2 }), true, "the root stays writable");
+      model.destroy();
+    });
+
+    QUnit.test("a write onto an inherited method is refused", (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ list: [1], own: () => 1 });
+      for (const path of ["/hasOwnProperty/call", "/list/push/apply", "/own/call/x"]) {
+        assert.notOk(model.setProperty(path, "x"), path);
+        assert.notOk(model.mergeProperty(path, "x"), `${path} (merge)`);
+      }
+      model.mergeProperty("/toString", { call: "x" });
+      assert.strictEqual(typeof Object.prototype.toString.call, "function", "a merge into one");
+      assert.strictEqual(typeof Object.prototype.hasOwnProperty.call, "function");
+      assert.strictEqual(typeof Array.prototype.push.apply, "function");
+      assert.ok(model.setProperty("/own/label", "x"), "a function of the data takes a property");
       model.destroy();
     });
   },

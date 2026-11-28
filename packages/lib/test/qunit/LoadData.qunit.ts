@@ -1061,4 +1061,95 @@ QUnit.module("loadData", () => {
     assert.deepEqual(urls, ["/x.json?a=1", "/x.json?b=2&a=1"]);
     model.destroy();
   });
+
+  QUnit.test("object parameters are written as jQuery.param does", async (assert) => {
+    const parameters = {
+      q: "a b",
+      ids: [1, 2],
+      rows: [{ k: 1 }, [2]],
+      opt: undefined,
+      none: null,
+      f: { k: { deep: "ä&=" } },
+      fn: () => "called",
+      "x[]": [3],
+    };
+    const originalFetch = window.fetch;
+    const urls: unknown[] = [];
+    window.fetch = (url) => {
+      urls.push(url);
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    };
+    const model = new SignalModel();
+    try {
+      await model.loadData("/x.json", parameters);
+    } finally {
+      window.fetch = originalFetch;
+    }
+    assert.deepEqual(urls, [
+      "/x.json?" +
+        (window as unknown as { jQuery: { param(o: object): string } }).jQuery.param(parameters),
+    ]);
+    model.destroy();
+  });
+
+  QUnit.test("events of a load: the type as given, bindings updated", async (assert) => {
+    for (const Model of [SignalModel, JSONModel]) {
+      const model = new Model({ name: "before" });
+      const binding = model.bindProperty("/name");
+      binding.attachChange(() => {});
+      binding.initialize();
+      const seen: unknown[] = [];
+      model.attachRequestSent((event) => seen.push(event.getParameter("type")));
+      model.attachRequestCompleted((event) => {
+        seen.push(event.getParameter("type"), binding.getValue());
+      });
+      await model.loadData(SAMPLE_URL, undefined, true, "get");
+      assert.deepEqual(
+        seen,
+        ["get", "get", model.getProperty("/name")],
+        Model.getMetadata().getName(),
+      );
+      assert.notStrictEqual(binding.getValue(), "before");
+      model.destroy();
+    }
+  });
+
+  QUnit.test(
+    "loadData after destroy: requestSent, and a promise that stays pending",
+    async (assert) => {
+      for (const Model of [SignalModel, JSONModel]) {
+        const model = new Model({});
+        model.destroy();
+        let state = "pending";
+        void model.loadData(SAMPLE_URL)?.then(
+          () => (state = "resolved"),
+          () => (state = "rejected"),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.strictEqual(state, "pending", Model.getMetadata().getName());
+      }
+    },
+  );
+
+  QUnit.test(
+    "HEAD is a success without data; data that is no object is no data",
+    async (assert) => {
+      const originalFetch = window.fetch;
+      window.fetch = () => Promise.resolve(new Response("", { status: 200 }));
+      const model = new SignalModel<Record<string, unknown>>({ a: 1 });
+      let failed = 0;
+      model.attachRequestFailed(() => failed++);
+      try {
+        await model.loadData("/x.json", undefined, true, "HEAD");
+      } finally {
+        window.fetch = originalFetch;
+      }
+      assert.strictEqual(failed, 0);
+      model.destroy();
+      // oxlint-disable-next-line typescript/no-explicit-any -- what JavaScript callers can pass
+      const odd = new SignalModel(42 as any);
+      assert.deepEqual(odd.getData(), new JSONModel(42 as never).getData());
+      odd.destroy();
+    },
+  );
 });

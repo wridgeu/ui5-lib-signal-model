@@ -271,6 +271,7 @@ QUnit.module("SignalPropertyBinding", () => {
   QUnit.test("initialize skips subscribe when binding is already subscribed", (assert) => {
     const model = new SignalModel({ name: "Alice" });
     const binding = model.bindProperty("/name");
+    binding.attachChange(() => {});
 
     // After bindProperty, the binding is already subscribed.
     // Spy: count subscribe calls by wrapping the method
@@ -582,13 +583,17 @@ QUnit.module("SignalPropertyBinding", () => {
     model.createComputed("/sum", ["/rows/1/n"], (n) => n);
     // A table that is scrolled: the same bindings, on other rows each time
     const first = model.bindProperty("/rows/0/n");
+    first.attachChange(() => {});
     const second = model.bindProperty("/rows/0/n");
+    second.attachChange(() => {});
     model.bindProperty("/rows/1/n").destroy();
     // Dropped and created again before the index is swept
     model.bindProperty("/rows/3/n").destroy();
     const live = model.bindProperty("/rows/3/n");
+    live.attachChange(() => {});
     for (let row = 4; row < 2000; row++) {
       const binding = model.bindProperty(`/rows/${row}/n`);
+      binding.attachChange(() => {});
       assert.strictEqual(binding.getValue(), row);
       binding.destroy();
     }
@@ -609,6 +614,7 @@ QUnit.module("SignalPropertyBinding", () => {
     model.setProperty("/rows/0/n", 5);
     assert.strictEqual(kept.get(), 5, "the signal handed out still follows the model");
     const again = model.bindProperty("/rows/7/n");
+    again.attachChange(() => {});
     model.setProperty("/rows/7", { n: 70 });
     await Promise.resolve();
     assert.strictEqual(again.getValue(), 70, "a binding on a path that had a signal before");
@@ -985,11 +991,13 @@ QUnit.module("SignalPropertyBinding", () => {
   QUnit.test("writes skip the walk upwards again once the last signal is gone", (assert) => {
     const model = new SignalModel<Record<string, unknown>>({ a: 1 });
     const binding = model.bindProperty("/a");
+    binding.attachChange(() => {});
     binding.initialize();
     // oxlint-disable-next-line typescript/no-explicit-any -- private state of the registry
     const registry = (model as any).registry as { minDepth: number };
     assert.strictEqual(registry.minDepth, 1);
     const deep = model.bindProperty("/a/b/c");
+    deep.attachChange(() => {});
     deep.initialize();
     binding.destroy();
     assert.strictEqual(registry.minDepth, 3, "the shallowest signal left");
@@ -1223,5 +1231,62 @@ QUnit.module("SignalPropertyBinding", () => {
       assert.strictEqual(model.getProperty("/box/rows/0/v"), 9, "what was merged stays");
       model.destroy();
     }
+  });
+
+  QUnit.test("a binding is held from its first change handler to its last", async (assert) => {
+    await inBoth(assert, "1,1,2,2", async (Model) => {
+      const data: Data = { a: 1 };
+      const model = new Model(data);
+      const binding = model.bindProperty("/a");
+      binding.initialize();
+      model.setProperty("/a", 2);
+      await later(20);
+      const shown = [binding.getValue()];
+      const handler = (): void => {};
+      binding.attachChange(handler);
+      shown.push(binding.getValue());
+      model.setProperty("/a", 3);
+      await later(20);
+      // The binding had the 1: the write to 3 is its first change
+      shown.push(binding.getValue() === 3 ? 2 : 0);
+      binding.detachChange(handler);
+      model.setProperty("/a", 4);
+      await later(20);
+      shown.push(binding.getValue() === 3 ? 2 : 0);
+      model.destroy();
+      return shown;
+    });
+    const model = new SignalModel<Record<string, unknown>>({ a: 1, rows: [1] });
+    // oxlint-disable-next-line typescript/no-explicit-any -- private state
+    const internal = model as any;
+    model.bindProperty("/a").initialize();
+    model.bindList("/rows").initialize().getContexts(0, 10);
+    model.bindTree("/rows").initialize();
+    assert.strictEqual(
+      internal.registry.subscribers.size,
+      0,
+      "nothing is kept for a helper binding",
+    );
+    assert.strictEqual(internal._listBindings.size, 0);
+    assert.strictEqual(internal.registry.size, 0, "and no signal");
+    model.destroy();
+  });
+
+  QUnit.test("a check that throws leaves no binding behind", async (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({ users: [{ name: "A" }], id: 0, z: 1 });
+    model.createComputed("/cur", ["/users", "/id"], (users, id) => users[id].name);
+    const failing = model.bindProperty("/cur");
+    failing.attachChange(() => {});
+    failing.initialize();
+    const other = model.bindProperty("/z");
+    other.attachChange(() => {});
+    other.initialize();
+    model.setProperty("/id", 5);
+    await later(20);
+    (model.getData() as { z: number }).z = 2;
+    assert.throws(() => model.refresh(), TypeError, "the error of the computed");
+    await later(20);
+    assert.strictEqual(other.getValue(), 2, "the binding after it is told");
+    model.destroy();
   });
 });

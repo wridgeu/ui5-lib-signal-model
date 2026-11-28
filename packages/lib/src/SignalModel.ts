@@ -3,6 +3,7 @@ import Log from "sap/base/Log";
 import deepEqual from "sap/base/util/deepEqual";
 import deepExtend from "sap/base/util/deepExtend";
 import ui5IsPlainObject from "sap/base/util/isPlainObject";
+import type Binding from "sap/ui/model/Binding";
 import type Context from "sap/ui/model/Context";
 import SignalRegistry, { type Subscriber } from "./SignalRegistry";
 import { cancelFlush, flushNow, scheduleFlush, type FlushableBinding } from "./FlushQueue";
@@ -66,6 +67,34 @@ function asInternal(self: ClientModel): ClientModelInternal {
   return self as unknown as ClientModelInternal;
 }
 
+type BindingKeeper = { addBinding(binding: Binding): void; removeBinding(binding: Binding): void };
+type Held = { _held: boolean; subscribe(): void; unsubscribe(): void };
+
+/** Parameters as jQuery.param writes them, which is what JSONModel sends. */
+function toQuery(parameters: Record<string, unknown>): string {
+  const pairs: string[] = [];
+  const add = (key: string, value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach((item, i) => {
+        const indexed = typeof item === "object" && item !== null;
+        if (key.endsWith("[]")) put(key, item);
+        else add(`${key}[${indexed ? i : ""}]`, item);
+      });
+    } else if (Object.prototype.toString.call(value) === "[object Object]") {
+      const object = value as Record<string, unknown>;
+      for (const name in object) add(`${key}[${name}]`, object[name]);
+    } else {
+      put(key, value);
+    }
+  };
+  const put = (key: string, value: unknown): void => {
+    const text = typeof value === "function" ? value() : value;
+    pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(text == null ? "" : text)}`);
+  };
+  for (const name in parameters) add(name, parameters[name]);
+  return pairs.join("&");
+}
+
 /**
  * Reactive UI5 model using TC39 Signals for push-based change notification.
  * Drop-in replacement for JSONModel.
@@ -115,7 +144,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       this.oData = {} as T;
       this.loadData(dataOrUrl);
     } else {
-      this.oData = (dataOrUrl || {}) as T;
+      // As JSONModel: anything but an object is no data
+      this.oData = (dataOrUrl && typeof dataOrUrl === "object" ? dataOrUrl : {}) as T;
       this._observeData();
     }
   }
@@ -206,7 +236,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    */
   loadData(
     url: string,
-    parameters?: Record<string, string> | string,
+    parameters?: Record<string, unknown> | string,
     async?: true,
     type?: string,
     merge?: boolean,
@@ -230,7 +260,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   ): Promise<void> | undefined;
   loadData(
     url: string,
-    parameters?: Record<string, string> | string,
+    parameters?: Record<string, unknown> | string,
     async?: boolean,
     type?: string,
     merge?: boolean,
@@ -239,11 +269,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     abortSignal?: AbortSignal,
   ): Promise<void> | undefined {
     const isAsync = async !== false;
-    if (asInternal(this).bDestroyed) {
-      return isAsync ? Promise.resolve() : undefined;
-    }
+    // The events carry the type as given
+    const sentType = type || "GET";
     // Upper case, as jQuery.ajax does
-    const method = (type || "GET").toUpperCase();
+    const method = sentType.toUpperCase();
     // Without the fragment, as jQuery.ajax: parameters behind it would not be sent
     let fullURL = url.replace(/#.*$/, "");
     // Fall back to model-level cache setting (set via forceNoCache), matching JSONModel.
@@ -255,11 +284,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const inUrl = method === "GET" || method === "HEAD";
     // Empty for an empty object: no "?" without a query then, and no body
     const paramString =
-      typeof parameters === "string"
-        ? parameters
-        : parameters
-          ? new URLSearchParams(parameters).toString()
-          : "";
+      typeof parameters === "string" ? parameters : parameters ? toQuery(parameters) : "";
     if (paramString && inUrl) {
       fullURL += (fullURL.includes("?") ? "&" : "?") + paramString;
     }
@@ -289,13 +314,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     asInternal(this).fireRequestSent({
       url,
-      type: method,
+      type: sentType,
       async: isAsync,
       headers: customHeaders,
       info,
       infoObject,
     });
-    // A requestSent handler has destroyed the model: the promise stays pending, as JSONModel's
+    // The model is destroyed, also by a requestSent handler: no request, and the promise
+    // stays pending, as JSONModel's
     if (asInternal(this).bDestroyed) {
       return isAsync ? new Promise<void>(() => {}) : undefined;
     }
@@ -312,6 +338,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // Not modified and no content are a success without data, as with jQuery.ajax
       if (statusCode === 204 || statusCode === 304) return undefined;
       if (statusCode < 200 || statusCode >= 300) throw failure;
+      if (method === "HEAD") return undefined;
       try {
         return JSON.parse(responseText) as T;
       } catch {
@@ -333,9 +360,11 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       } else {
         this.setData(data as T);
       }
+      // A requestCompleted handler finds the bindings updated, as with JSONModel
+      flushNow();
       asInternal(this).fireRequestCompleted({
         url,
-        type: method,
+        type: sentType,
         async: isAsync,
         headers: customHeaders,
         info,
@@ -350,7 +379,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       );
       asInternal(this).fireRequestCompleted({
         url,
-        type: method,
+        type: sentType,
         async: isAsync,
         headers: customHeaders,
         info,
@@ -505,7 +534,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         url: "",
         errorCode: -1,
         reason: "",
-        srcText: e instanceof Error ? e.message : String(e),
+        // The error itself, as JSONModel, whatever the type of the parameter says
+        srcText: e as string,
         line: -1,
         linepos: -1,
         filepos: -1,
@@ -517,6 +547,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   setData(data: T): void;
   /** @since 0.1.0 */
   setData(data: Partial<T>, merge: true): void;
+  /** @since 0.1.0 */
+  setData(data: T | Partial<T>, merge?: boolean): void;
   setData(data: T | Partial<T>, merge?: boolean): void {
     this._syncPending();
     if (merge) {
@@ -612,15 +644,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       return false;
     }
 
-    if (this._leadsIntoPrototype(resolvedPath)) {
-      Log.warning(
-        `Cannot write at "${resolvedPath}": the path leads into a prototype`,
-        undefined,
-        "ui5.model.signal.SignalModel",
-      );
-      return false;
-    }
-
     if (resolvedPath === "/") {
       this.setData(value as T);
       return true;
@@ -632,6 +655,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     if (!asyncUpdate) this._syncPending();
     let parent = this._getObject(objectPath) as Record<string, unknown> | undefined;
+    // A function can be one the data only inherits, like /hasOwnProperty
+    if (this._leadsIntoPrototype(resolvedPath, typeof parent === "function")) {
+      Log.warning(
+        `Cannot write at "${resolvedPath}": the path leads into a prototype`,
+        undefined,
+        "ui5.model.signal.SignalModel",
+      );
+      return false;
+    }
 
     if (
       value === undefined ||
@@ -701,7 +733,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   private _bulkSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private _pendingAsyncPaths = new Set<string>();
-  private readonly _readPath = (path: string): unknown => this._getObject(path);
+  /** For a signal: a computed above its path that fails leaves it nothing to hold. */
+  private readonly _readPath = (path: string): unknown => {
+    try {
+      return this._getObject(path);
+    } catch {
+      return undefined;
+    }
+  };
+  /** For a computed: the error of a computed it reads is its own. */
+  private readonly _readDependency = (path: string): unknown => this._getObject(path);
 
   /**
    * Schedule a single deferred sync of all dirty paths from `bAsyncUpdate=true` writes.
@@ -884,8 +925,29 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       context?: Context,
       params?: object,
     ) => SignalPropertyBinding)(this, path, context, parameters);
-    binding.subscribe();
     return binding;
+  }
+
+  /**
+   * A binding follows its path from its first change handler to its last: that is when
+   * JSONModel holds a binding. One that is only read from, and never destroyed, costs nothing.
+   *
+   * @internal
+   */
+  addBinding(binding: Binding): void {
+    (ClientModel.prototype as unknown as BindingKeeper).addBinding.call(this, binding);
+    // Not a context binding, which follows no path
+    if (!("_held" in binding)) return;
+    (binding as unknown as Held)._held = true;
+    (binding as unknown as Held).subscribe();
+  }
+
+  /** @internal */
+  removeBinding(binding: Binding): void {
+    (ClientModel.prototype as unknown as BindingKeeper).removeBinding.call(this, binding);
+    if (!("_held" in binding)) return;
+    (binding as unknown as Held)._held = false;
+    (binding as unknown as Held).unsubscribe();
   }
 
   /** @since 0.1.0 */
@@ -905,7 +967,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       filters?: object | object[],
       params?: object,
     ) => SignalListBinding)(this, path, context, sorters, filters, parameters);
-    binding.subscribe();
     return binding;
   }
 
@@ -926,7 +987,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       params?: object,
       sorters?: object | object[],
     ) => SignalTreeBinding)(this, path, context, filters, parameters, sorters);
-    binding.subscribe();
     return binding;
   }
 
@@ -980,8 +1040,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         asyncMode,
       );
     } catch (error) {
-      // A change handler threw, so the bindings after it were not checked. A computed that
-      // is not read again never notifies its watcher again: read those now.
+      // A change handler or a computed threw, so the bindings after it were not checked.
+      // Their signals are in line already and would not tell them: they check in the flush.
+      for (const [subscribedPath, subscribed] of this.registry.subscribers) {
+        const signal = this._getSignal(subscribedPath);
+        for (const binding of Array.isArray(subscribed) ? subscribed : [subscribed]) {
+          scheduleFlush(binding, signal);
+        }
+      }
+      // A computed that is not read again never notifies its watcher again: read those now.
       for (const binding of asInternal(this).getBindings()) {
         for (const pending of binding.watcher?.getPending() ?? []) {
           try {
@@ -1002,6 +1069,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   /** @since 0.1.0 */
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown>;
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown> {
+    // The caller reads it: an asynchronous write so far has to be in it
+    this._syncPending();
     return this._getSignal(path, true);
   }
 
@@ -1031,12 +1100,25 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   /** Per computed: its dependencies, and the state signals among them that it keeps alive */
   private readonly _deps = new Map<string, { all: string[]; pinned: Set<string> }>();
+  /** Per path: how many dependencies of computeds are there or below it */
+  private readonly _readAt = new Map<string, number>();
+
+  private _countReads(deps: string[], by: 1 | -1): void {
+    for (const dep of deps) {
+      for (let at = dep; at.length > 1; at = at.substring(0, at.lastIndexOf("/"))) {
+        const count = (this._readAt.get(at) ?? 0) + by;
+        if (count) this._readAt.set(at, count);
+        else this._readAt.delete(at);
+      }
+    }
+  }
 
   /** @since 0.1.0 */
   createComputed(
     path: string,
     deps: string[],
-    fn: (...args: unknown[]) => unknown,
+    // oxlint-disable-next-line typescript/no-explicit-any -- the values at `deps`, which no type relates to the paths
+    fn: (...args: any[]) => unknown,
   ): Signal.Computed<unknown> {
     // Ensure dependency signals exist before creating the computed.
     // Skip deps that already exist -- they may be computed signals from
@@ -1065,10 +1147,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // A copy: the caller's array may change, the dependencies of the computed do not
     deps = [...deps];
     const pinned = new Set(deps.filter((dep) => !this.registry.isComputed(dep)));
-    for (const dep of pinned) this.registry.getOrCreate(dep, this._getObject(dep), true);
+    for (const dep of pinned) this.registry.getOrCreate(dep, this._readPath(dep), true);
     let result: Signal.Computed<unknown>;
     try {
-      result = this.registry.addComputed(path, deps, fn, this._readPath);
+      result = this.registry.addComputed(path, deps, fn, this._readDependency);
     } catch (error) {
       // Nothing has changed: the signals created for its dependencies go again, and what
       // its first run made the registry keep
@@ -1078,10 +1160,14 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
     // The state signal of the path is gone, and with it the pins the readers of a computed
     // removed here before had on it
-    for (const other of this._deps.values()) other.pinned.delete(path);
+    if (this._readAt.has(path)) {
+      for (const other of this._deps.values()) other.pinned.delete(path);
+    }
     this._deps.set(path, { all: deps, pinned });
-    // Bindings at this path or below it have to follow the new computed
-    this._firePathResubscribe(path);
+    this._countReads(deps, 1);
+    // Bindings at this path or below it have to follow the new computed. They are on state
+    // signals, which the index lists.
+    this._resubscribe([path, ...this.registry.below(path)]);
     return result;
   }
 
@@ -1090,14 +1176,15 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @since 0.1.0
    */
   removeComputed(path: string): void {
-    if (!this.registry.removeComputed(path, this._readPath)) return;
+    if (!this.registry.removeComputed(path, this._readDependency)) return;
     const own = this._deps.get(path);
     this._deps.delete(path);
+    this._countReads(own?.all ?? [], -1);
     // The computeds that read exactly this path follow its state signal from now on, and
     // keep it alive as they do with their other dependencies
-    for (const other of this._deps.values()) {
+    for (const other of this._readAt.has(path) ? this._deps.values() : []) {
       if (other.all.includes(path) && !other.pinned.has(path)) {
-        this.registry.getOrCreate(path, this._getObject(path), true);
+        this.registry.getOrCreate(path, this._readPath(path), true);
         other.pinned.add(path);
       }
     }
@@ -1106,8 +1193,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // What the registry keeps for the readers of a path goes with the last of them: here
     // for the path itself, and for the paths this computed read
     this._forgetUnread([path, ...(own?.all ?? [])]);
-    // Bindings at the path or below it follow the data again
-    this._firePathResubscribe(path);
+    // Bindings at the path or below it follow the data again. Those below had no signal
+    // of their own, so no index lists them.
+    const prefix = path + "/";
+    this._resubscribe(
+      [...this.registry.subscribers.keys()].filter((at) => at === path || at.startsWith(prefix)),
+    );
   }
 
   /**
@@ -1149,11 +1240,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   /** Whether a computed reads `path` or a path below it. */
   private _isRead(path: string): boolean {
-    const prefix = path + "/";
-    for (const { all } of this._deps.values()) {
-      if (all.some((dep) => dep === path || dep.startsWith(prefix))) return true;
-    }
-    return false;
+    return this._readAt.has(path);
   }
 
   /** Used by binding classes to check whether a signal is registered directly at `path`. @internal */
@@ -1216,7 +1303,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Computed signals live in the registry, not in oData.
     // Return the computed value so list/tree bindings can see it.
     const computed = this.registry.hasComputeds && this.registry.getComputed(resolvedPath);
-    if (computed) return computed.get();
+    if (computed) {
+      this._syncPending();
+      return computed.get();
+    }
 
     if (resolvedPath === "/") {
       return this.oData;
@@ -1233,6 +1323,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       ) {
         const above = this.registry.getComputed(resolvedPath.substring(0, idx));
         if (above) {
+          // It reads signals: an asynchronous write so far has to be in them
+          this._syncPending();
           node = above.get();
           start = idx + 1;
           break;
@@ -1278,12 +1370,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   /**
    * Whether a write at `path` would land in a prototype instead of in the data: through a
-   * `__proto__` segment, or through a `constructor` the data only inherits. JSONModel makes
-   * such a write.
+   * `__proto__` segment, or through something the data only inherits, like `constructor` or
+   * a method. JSONModel makes such a write. `walk`: the caller has seen a reason to look.
    */
-  private _leadsIntoPrototype(path: string): boolean {
+  private _leadsIntoPrototype(path: string, walk = false): boolean {
     // Runs on every write, and nearly every path ends here
-    if (!path.includes("__proto__") && !path.includes("constructor")) return false;
+    if (!walk && !path.includes("__proto__") && !path.includes("constructor")) return false;
     const parts = path.substring(1).split("/");
     // Wherever it is: autoCreatePaths may create the objects before it
     if (parts.includes("__proto__")) return true;
@@ -1291,7 +1383,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Walked as _getObject does, so also through a truthy primitive: it has a prototype too.
     // Not the last segment: there, "constructor" becomes a property of the data.
     for (let i = 0; i < parts.length - 1 && node; i++) {
-      if (parts[i] === "constructor" && !Object.hasOwn(node, "constructor")) return true;
+      if (!Object.hasOwn(node, parts[i]) && parts[i] in Object(node)) return true;
       node = (node as Record<string, unknown>)[parts[i]];
     }
     return false;
@@ -1539,19 +1631,21 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   }
 
   /** Re-subscribes the bindings at `path` and below it: they have to follow another signal. */
-  private _firePathResubscribe(path: string): void {
-    const prefix = path + "/";
+  private _resubscribe(paths: string[]): void {
     // Collected first: subscribe() changes the map
     const bindings: [string, Subscriber][] = [];
-    for (const [subscribedPath, subscribed] of this.registry.subscribers) {
-      if (subscribedPath === path || subscribedPath.startsWith(prefix)) {
-        for (const binding of Array.isArray(subscribed) ? subscribed : [subscribed]) {
-          bindings.push([subscribedPath, binding]);
-        }
+    for (const subscribedPath of new Set(paths)) {
+      const subscribed = this.registry.subscribers.get(subscribedPath);
+      if (!subscribed) continue;
+      for (const binding of Array.isArray(subscribed) ? subscribed : [subscribed]) {
+        bindings.push([subscribedPath, binding]);
       }
     }
     for (const [subscribedPath, binding] of bindings) {
+      // Leaving and coming back is no leaving: the path can get a computed again
+      const released = this.registry.isReleased(subscribedPath);
       binding.subscribe();
+      if (released) this.registry.keepReleased(subscribedPath);
       // The other signal may hold another value
       scheduleFlush(binding, this._getSignal(subscribedPath));
     }
@@ -1572,6 +1666,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     for (const binding of asInternal(this).getBindings()) cancelFlush(binding);
     this._listBindings.clear();
     this._deps.clear();
+    this._readAt.clear();
     this.registry.destroy();
     super.destroy();
   }

@@ -115,6 +115,8 @@ export default class SignalRegistry {
 
   /** Removes the state signal of `path`. Its index entries go with a later sweep. */
   private drop(path: string): void {
+    // The last binding has left a path whose computed was removed: a path like any other
+    if (!this.replaced.has(path)) this.released.delete(path);
     if (!this.signals.delete(path)) return;
     // Otherwise one binding near the root, long gone, costs every write its walk upwards
     let depth = path === "/" ? 0 : 1;
@@ -123,8 +125,6 @@ export default class SignalRegistry {
       const next = this.depths.findIndex((count) => count > 0);
       this.minDepth = next === -1 ? Infinity : next;
     }
-    // The last binding has left a path whose computed was removed: a path like any other
-    if (!this.replaced.has(path)) this.released.delete(path);
     // Only a path below another one is in the index
     if (depth > 1) this.dropped.add(path);
     // Amortised: a sweep visits every index entry, so only once half of them are stale
@@ -171,6 +171,16 @@ export default class SignalRegistry {
   refresh(path: string, resolver: ValueResolver, force = false): void {
     const signal = this.signals.get(path);
     if (signal) this.write(path, signal, resolver(path), true, force);
+  }
+
+  /** Whether `path` held a computed that was removed. */
+  isReleased(path: string): boolean {
+    return this.released.has(path);
+  }
+
+  /** After a binding has subscribed again: `path` still counts as one that held a computed. */
+  keepReleased(path: string): void {
+    if (this.subscribers.has(path) && !this.computeds.has(path)) this.released.add(path);
   }
 
   /** Whether something is kept for a computed that `path` holds or held. */
@@ -263,6 +273,11 @@ export default class SignalRegistry {
    */
   get(path: string): Signal.State<unknown> | Signal.Computed<unknown> | undefined {
     return this.computeds.get(path) ?? this.signals.get(path);
+  }
+
+  /** The paths below `path` that have or had a state signal. */
+  below(path: string): readonly string[] {
+    return this.descendants.get(path) ?? [];
   }
 
   /** @returns The computed at exactly `path`, if there is one. */
@@ -412,7 +427,12 @@ export default class SignalRegistry {
     for (const below of this.descendants.get(path) ?? []) {
       const signal = this.signals.get(below);
       if (!signal) continue;
-      const value = read ? read(below) : signal.get();
+      let value: unknown;
+      try {
+        value = read ? read(below) : signal.get();
+      } catch {
+        // below a computed that fails: nothing to hold
+      }
       signal.apply(REPLACED);
       signal.apply(value);
     }

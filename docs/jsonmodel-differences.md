@@ -46,6 +46,10 @@ await Promise.resolve();
 text.getText(); // "Bob"
 ```
 
+The order of the change events of one write differs as well. JSONModel checks its bindings in the order in which they got their first change handler. SignalModel tells the bindings of the written path first, then those of the paths above it, then those below it. Code should not depend on which of two bindings hears first.
+
+`loadData` is an exception to the microtask: the bindings are updated before `requestCompleted` fires, as with JSONModel.
+
 For the same reason an error in a formatter, sorter or filter does not come out of `setProperty`. JSONModel throws it there and skips the remaining bindings; SignalModel logs it and continues with the other bindings.
 
 **What to do.** Read from the model, not from the control, in code that runs right after a write, or wait a microtask. Rendering is asynchronous in both models, so a test that waits for the render pass needs no change. A `try`/`catch` around `setProperty` does not see a formatter's error: catch inside the formatter, sorter or filter, where the error belongs to one binding, and return a fallback value there.
@@ -95,6 +99,8 @@ model.setProperty("/busy", false);
 // JSONModel: the list shows the new item. SignalModel: it does not.
 ```
 
+The same holds for one object that the data holds at two paths, like a selected row that is also in the list: a write through `/selected/name` tells the bindings of `/selected`, not those of `/items/0/name`. JSONModel updates both.
+
 A binding's own `refresh()` does the same for its path and the paths below it. That binding checks its value at once, as in JSONModel, and does nothing while it is suspended. Other bindings on those paths update in the next microtask; in JSONModel they wait for the next write. A computed whose dependencies were changed directly needs `model.refresh()`.
 
 **What to do.** Write through the model (`setProperty("/items", [...items, newItem])`), or call `model.refresh()` after the direct change. With the `observe` option an assignment to an existing property counts as a write; a `push` or a new key does not, as in JSONModel.
@@ -119,7 +125,7 @@ For both kinds of load, `jQuery.ajaxSetup`, prefilters and global ajax events do
 
 JSONModel follows a path wherever it leads. `setProperty("/__proto__/isAdmin", true)` or `setProperty("/constructor/prototype/isAdmin", true)` therefore writes to `Object.prototype`, and every object in the page has the property afterwards. A path built from user input or from a backend key is enough for that.
 
-SignalModel refuses such a write: `setProperty` and `mergeProperty` return `false` and log a warning when the path has a `__proto__` segment, or goes on through a `constructor` that the data only inherits. A key named `constructor` that the data holds itself is data and stays writable. Reading is unchanged.
+SignalModel refuses such a write: `setProperty` and `mergeProperty` return `false` and log a warning when the path has a `__proto__` segment, or goes on through something the data only inherits: a `constructor`, or a method as in `/hasOwnProperty/call`. A key of that name that the data holds itself is data and stays writable. Reading is unchanged.
 
 **What to do.** Nothing, unless code relied on reaching a prototype through the model; change the prototype directly then.
 
