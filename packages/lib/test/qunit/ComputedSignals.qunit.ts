@@ -1466,6 +1466,16 @@ QUnit.module("ComputedSignals", () => {
     assert.throws(() => model.createComputed("/c", ["/a", "/c"], (a) => a), /depends on itself/);
     model.createComputed("/c", ["/a"], (a) => a);
     assert.strictEqual(model.getProperty("/c"), 1, "the path is still free for a computed");
+    // Through another computed, which read the path while it was plain data
+    model.createComputed("/d", ["/c/x"], (x) => x);
+    model.createComputed("/e", ["/d"], (d) => d);
+    model.removeComputed("/c");
+    assert.throws(() => model.createComputed("/c", ["/e/y"], (y) => y), /depends on itself/);
+    model.createComputed("/c", ["/a"], (a) => a);
+    assert.strictEqual(model.getProperty("/e"), undefined, "the others still work");
+    assert.throws(() => model.createComputed("/f", ["a"], (a) => a), /dependency "a"/);
+    assert.throws(() => model.createComputed("/f", ["/a/"], (a) => a), /dependency "\/a\/"/);
+    model.createComputed("/f", ["/"], (root) => root);
     model.destroy();
   });
 

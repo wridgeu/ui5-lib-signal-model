@@ -127,9 +127,9 @@ SignalModel refuses such a write: `setProperty` and `mergeProperty` return `fals
 
 With the `observe` option (JSONModel's `bObserve`) both models put getters and setters on the data. JSONModel has four gaps there that SignalModel does not copy:
 
-- A key created by `setProperty` is observed, and so is everything below it. JSONModel observes only what `setData` saw, so a later assignment to such a property updates nothing.
+- A key created by `setProperty` is observed, and so is everything below it, including the objects `autoCreatePaths` creates on the way. JSONModel observes only what `setData` saw, so a later assignment to such a property updates nothing.
 - A hole in an array stays visible after it was filled. In JSONModel the index is hidden from `Object.keys` from then on, and a merge into that array throws.
 - Data that refers to itself is observed. JSONModel ends in a stack overflow.
-- A frozen or sealed object in the data is left as it is; it takes no change that would need observing. JSONModel throws a `TypeError`.
+- A frozen or sealed object in the data, or a single property that cannot be redefined, is left as it is. JSONModel throws a `TypeError`.
 
 A key added by a direct assignment and a `push` are not observed in either model; call `refresh()` after those.

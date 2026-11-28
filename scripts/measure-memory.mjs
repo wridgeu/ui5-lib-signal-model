@@ -11,11 +11,12 @@ const browser = await remote({
     },
   },
 });
-await browser.setTimeout({ script: 600000 });
-await browser.url("http://localhost:8080/test-resources/ui5/model/signal/benchmark/index.html");
+let result;
+try {
+  await browser.setTimeout({ script: 600000 });
+  await browser.url("http://localhost:8080/test-resources/ui5/model/signal/benchmark/index.html");
 
-const result = await browser
-  .executeAsync((done) => {
+  result = await browser.executeAsync((done) => {
     sap.ui.require(
       ["sap/ui/model/json/JSONModel", "ui5/model/signal/SignalModel", "sap/m/Text"],
       async (JSONModel, SignalModel, Text) => {
@@ -151,8 +152,10 @@ const result = await browser
         done(out);
       },
     );
-  })
-  .finally(() => browser.deleteSession());
+  });
+} finally {
+  await browser.deleteSession();
+}
 
 console.log(
   `N = ${result.N}; ${result.N} rows as JSON text: ${(result.dataJson / 1e6).toFixed(2)} MB`,

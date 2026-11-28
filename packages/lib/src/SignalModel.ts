@@ -152,8 +152,10 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
           for (const name in value) observe(value[name], value, name);
         }
       }
-      // Nothing to observe on an object that takes no change, like a frozen one
-      if (!parent || Object.isSealed(parent)) return;
+      if (!parent) return;
+      // Nothing to observe on a property that cannot be redefined, like one of a frozen object
+      const own = Object.getOwnPropertyDescriptor(parent, key);
+      if (own ? !own.configurable : !Object.isExtensible(parent)) return;
       Object.defineProperty(
         parent,
         key,
@@ -1049,8 +1051,16 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         `Cannot create computed signal at "${path}": not an absolute path without trailing slash`,
       );
     }
-    if (deps.some((dep) => dep === path || dep.startsWith(`${path}/`))) {
-      throw new TypeError(`Cannot create computed signal at "${path}": it depends on itself`);
+    for (const dep of deps) {
+      if (dep !== "/" && (!dep.startsWith("/") || dep.endsWith("/"))) {
+        // No write would reach it
+        throw new TypeError(
+          `Cannot create computed signal at "${path}": dependency "${dep}" is not an absolute path without trailing slash`,
+        );
+      }
+      if (this._reads(dep, path, new Set())) {
+        throw new TypeError(`Cannot create computed signal at "${path}": it depends on itself`);
+      }
     }
     // A copy: the caller's array may change, the dependencies of the computed do not
     deps = [...deps];
@@ -1121,6 +1131,20 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         if (this.registry.remembers(at) && !this._isRead(at)) this.registry.forget(at);
       }
     }
+  }
+
+  /** Whether a read of `dep` reads `path`: itself, or through the computeds on the way. */
+  private _reads(dep: string, path: string, seen: Set<string>): boolean {
+    if (dep === path || dep.startsWith(`${path}/`)) return true;
+    // The closest computed at `dep` or above it is the one a read goes through
+    for (let at = dep; at.length > 1; at = at.substring(0, at.lastIndexOf("/"))) {
+      const computed = this._deps.get(at);
+      if (!computed) continue;
+      if (seen.has(at)) return false;
+      seen.add(at);
+      return computed.all.some((next) => this._reads(next, path, seen));
+    }
+    return false;
   }
 
   /** Whether a computed reads `path` or a path below it. */
@@ -1298,6 +1322,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       // Own properties only: "constructor" must not lead into Object
       if (!Object.hasOwn(node, part) || node[part] == null) {
         this._assign(node, part, {});
+        if (Array.isArray(node) || isPlainObject(node)) this._observeData(node[part], node, part);
         createdAt ||= current + "/" + part;
         // A new element can grow the array
         if (Array.isArray(node)) {

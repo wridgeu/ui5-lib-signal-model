@@ -1014,6 +1014,31 @@ QUnit.module("SignalPropertyBinding", () => {
     created.setProperty("/point/y", 2);
     const y = Object.getOwnPropertyDescriptor(created.getProperty("/point"), "y");
     assert.strictEqual(y?.value, 2, "a class instance keeps plain properties");
+    created.setProperty(
+      "/fixed",
+      Object.defineProperty({ free: 1 }, "id", { value: 1, enumerable: true }),
+    );
+    assert.strictEqual(created.getProperty("/fixed/id"), 1, "a fixed property is left alone");
+    assert.ok(
+      Object.getOwnPropertyDescriptor(created.getProperty("/fixed"), "free")?.set,
+      "the property next to it is observed",
+    );
+    const holed: unknown[] = [1];
+    holed.length = 2;
+    created.setProperty("/holed", Object.freeze(holed));
+    assert.strictEqual(created.getProperty("/holed/0"), 1, "so is a frozen array with a hole");
+    const made = new SignalModel<Record<string, unknown>>(
+      {},
+      { observe: true, autoCreatePaths: true },
+    );
+    made.setProperty("/a/b/c", 1);
+    const viaCreated = made.bindProperty("/a/b/c");
+    viaCreated.initialize();
+    viaCreated.attachChange(() => {});
+    (made.getData() as { a: { b: unknown } }).a.b = { c: 2 };
+    await later(20);
+    assert.strictEqual(viaCreated.getValue(), 2, "objects made by autoCreatePaths are observed");
+    made.destroy();
     created.setProperty("/frozen", Object.freeze({ x: 1 }));
     assert.strictEqual(created.getProperty("/frozen/x"), 1, "a frozen object is left alone");
     (created.getData() as { n: unknown }).n = 7;
