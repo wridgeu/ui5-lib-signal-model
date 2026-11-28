@@ -54,9 +54,11 @@ text.getText(); // "Bob"
 
 The order of the change events of one write differs as well. JSONModel checks its bindings in the order in which they got their first change handler. SignalModel tells the bindings of the written path first, then those of the paths above it, then those below it. Code should not depend on which of two bindings hears first.
 
-A binding that lost its last change handler and gets one again has missed the writes in between. JSONModel's binding notices at the next write anywhere in the model, SignalModel's in the next microtask after the handler is attached. A list binding fires then if a merge took place in between, also when that merge did not change its rows.
+A binding that lost its last change handler and gets one again has missed the writes in between. JSONModel's binding notices at the next write anywhere in the model, SignalModel's in the next microtask after the handler is attached. A list binding fires then if a merge took place in between, also when that merge did not change its rows. A write in the same task as the removal of the handler counts as missed too. A `setValue` on a binding that has not caught up yet is compared with the value the model holds; JSONModel compares with the stale one and may drop the write.
 
-One check for several writes can also end with another result. A sorted or filtered list that gets two writes in one task is sorted once, with both applied. JSONModel sorts at the first write and does not look again at the second when that one changed a row in place, so its order or length can be the stale one.
+One check for several writes can also end with another result. A sorted or filtered list that gets two writes in one task is sorted once, with both applied. JSONModel sorts at the first write and does not look again at the second when that one changed a row in place, so its order or length can be the stale one. A list with extended change detection compares the keys of its rows, as in JSONModel. Two rows that change places leave a sorted or filtered list with the same keys in the same order, so no event fires and the controls stay on the old rows. JSONModel has that for a swap in one write; SignalModel also for a swap in two writes in one task, which it checks once.
+
+A relative tree binding with filters applies them when its context changes. JSONModel's applies them at the next write to the model and shows no nodes until then.
 
 `loadData` is an exception to the microtask: the bindings are updated before `requestCompleted` fires, as with JSONModel.
 
@@ -109,7 +111,7 @@ model.setProperty("/busy", false);
 // JSONModel: the list shows the new item. SignalModel: it does not.
 ```
 
-A merge compares its payload with the data, not with what the bindings show. After a direct change, a merge that carries the same values therefore tells nobody. The exception is the data itself as payload: `setData(model.getData(), true)`, or `mergeProperty(path, model.getProperty(path))`, checks every binding like `refresh()`.
+A merge compares its payload with the data, not with what the bindings show. After a direct change, a merge that carries the same values therefore tells nobody. The exception is the data itself as payload: `setData(model.getData(), true)`, or `mergeProperty(path, model.getProperty(path))`, checks every binding like `refresh()`. A binding on an object is not told by either: the object is the same as before. JSONModel's binding holds a copy from before the last merge, so there the first direct change after each merge is noticed and later ones are not.
 
 The same holds for one object that the data holds at two paths, like a selected row that is also in the list: a write through `/selected/name` tells the bindings of `/selected`, not those of `/items/0/name`. JSONModel updates both.
 

@@ -113,6 +113,31 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
   }
 
   /**
+   * Takes the update that was queued for the binding. The value is that of the signal: an
+   * asynchronous write the model has not told of yet is not in it, as in JSONModel.
+   */
+  private _hear(): void {
+    if (this._isDirectSignal && this._subscribedPath) {
+      let value: unknown;
+      try {
+        value = this.oModel._getSignal(this._subscribedPath).get();
+      } catch {
+        // A computed that fails
+        return;
+      }
+      this._checkUpdateFromSignal(value);
+    } else {
+      this.checkUpdate();
+    }
+  }
+
+  /** As in JSONModel, a write from before is told before the binding is suspended. */
+  override suspend(): void {
+    if (cancelFlush(this)) this._hear();
+    super.suspend();
+  }
+
+  /**
    * @param value - The new value to set on the bound property.
    * @since 0.1.0
    */
@@ -123,11 +148,14 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     }
     // A write the binding has not heard of yet is told first, as JSONModel has done by
     // now: the value is compared with what the binding shows
-    if (cancelFlush(this)) this.checkUpdate();
+    if (cancelFlush(this)) this._hear();
 
     if (!deepEqual(self.oValue, value)) {
       if (this.oModel.setProperty(self.sPath, value, self.oContext, true)) {
         self.oValue = value;
+        // An update queued by a change handler of the check above is of a write that this
+        // one replaces
+        cancelFlush(this);
         // The model tells of this write later: no event for the binding that made it
         this._shown = value;
         self.getDataState().setValue(self.oValue);

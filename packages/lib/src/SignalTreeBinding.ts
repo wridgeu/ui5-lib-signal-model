@@ -146,6 +146,10 @@ export default class SignalTreeBinding extends ClientTreeBinding {
         const treeData = this.oModel._getObject(internal.sPath, internal.oContext);
         internal.oTreeData = internal.cloneData(treeData);
         this.subscribe();
+        // The filters hold for the data of the new context. JSONModel's tree applies them
+        // only at the next write and shows nothing until then.
+        internal.applyFilter();
+        internal._mLengthsCache = {};
         internal._fireChange({ reason: ChangeReason.Context });
       }
     }

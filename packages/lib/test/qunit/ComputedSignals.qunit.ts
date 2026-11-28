@@ -1771,4 +1771,36 @@ QUnit.module("ComputedSignals", () => {
       model.destroy();
     },
   );
+
+  QUnit.test(
+    "a binding on a computed keeps updating after setValue and initialize",
+    async (assert) => {
+      const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, rows: [1] });
+      model.createComputed("/c", ["/a"], (a) => a * 2);
+      model.createComputed("/list", ["/rows"], (rows) => [...rows]);
+      const binding = model.bindProperty("/c");
+      binding.attachChange(() => {});
+      binding.initialize();
+      const again = model.bindProperty("/c");
+      again.attachChange(() => {});
+      again.initialize();
+      const list = model.bindList("/list");
+      list.attachChange(() => {});
+      list.initialize();
+      await settle();
+      // Each with an update of the computed still queued
+      model.setProperty("/a", 2);
+      model.setProperty("/rows", [1, 2]);
+      binding.setValue(99);
+      again.initialize();
+      list.initialize();
+      await settle();
+      model.setProperty("/a", 3);
+      model.setProperty("/rows", [1, 2, 3]);
+      await settle();
+      assert.deepEqual([binding.getValue(), again.getValue(), list.getLength()], [6, 6, 3]);
+      model.destroy();
+    },
+  );
 });

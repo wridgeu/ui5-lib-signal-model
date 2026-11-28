@@ -1240,4 +1240,27 @@ QUnit.module("loadData", () => {
       model.destroy();
     },
   );
+
+  QUnit.test("requests as jQuery.ajax: holes at the end, two cache parameters", async (assert) => {
+    const originalFetch = window.fetch;
+    const sent: string[] = [];
+    window.fetch = (url) => {
+      sent.push(String(url).replace(/_=\d+$/, "_=TS"));
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    };
+    const model = new SignalModel();
+    const holed = [1, 2];
+    holed.length = 4;
+    const empty: number[] = [];
+    empty.length = 2;
+    try {
+      await model.loadData("/h.json", { a: holed });
+      await model.loadData("/e.json", { a: empty });
+      await model.loadData("/d.json?_=5&_=6", undefined, true, "GET", false, false);
+    } finally {
+      window.fetch = originalFetch;
+    }
+    assert.deepEqual(sent, ["/h.json?a%5B%5D=1&a%5B%5D=2", "/e.json", "/d.json?&_=6&_=TS"]);
+    model.destroy();
+  });
 });

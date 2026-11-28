@@ -86,7 +86,10 @@ function toQuery(parameters: Record<string, unknown> | unknown[]): string {
   const add = (key: string, value: unknown): void => {
     if (Array.isArray(value)) {
       // By index: a hole is sent as an empty value
-      for (let i = 0; i < value.length; i++) {
+      // but not holes at the end, which jQuery's copy of the options drops
+      let length = value.length;
+      while (length > 0 && !(length - 1 in value)) length--;
+      for (let i = 0; i < length; i++) {
         const item: unknown = value[i];
         const indexed = typeof item === "object" && item !== null;
         if (key.endsWith("[]")) put(key, item);
@@ -320,7 +323,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Only where a browser would cache, as jQuery.ajax
     if (effectiveCache === false && inUrl) {
       // In place of one the URL has already
-      fullURL = fullURL.replace(/([?&])_=[^&]*/g, "$1");
+      fullURL = fullURL.replace(/([?&])_=[^&]*/, "$1");
       fullURL += (fullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
     }
 
@@ -591,6 +594,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     this._syncPending();
     if (merge) {
       this._merges++;
+      for (const binding of this._listBindings) binding._beforeMerge();
       // Nothing to merge in, but JSONModel still rebuilds its data: see _dropUndefined().
       // Of a string, the characters are merged in, as there.
       if (!data || typeof data !== "object") {
@@ -821,6 +825,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
   private _syncPending(): void {
     if (this._pendingAsyncPaths.size === 0) return;
+    // Told now: a binding that is not held at this moment has to catch up on it
+    this._writes++;
     const dirty = this._pendingAsyncPaths;
     this._pendingAsyncPaths = new Set();
     // Called by a synchronous write: the timer has nothing left to do
@@ -900,6 +906,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     }
 
     this._syncPending();
+    for (const binding of this._listBindings) binding._beforeMerge();
     const existing = this._getObject(resolvedPath);
     // Like a merge with setData: only two arrays or two plain objects are merged
     if (

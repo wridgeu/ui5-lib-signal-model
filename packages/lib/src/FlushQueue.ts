@@ -110,6 +110,11 @@ export function flushNow(): void {
   if (!flushing && pendingUpdates.size > 0) flush();
 }
 
+/** Whether an update is queued for the binding. */
+export function isQueued(binding: FlushableBinding): boolean {
+  return pendingUpdates.has(binding) || (flushing?.has(binding) ?? false);
+}
+
 /**
  * Remove a binding from the pending flush queue.
  *
@@ -118,8 +123,12 @@ export function flushNow(): void {
  * @since 0.1.0
  */
 export function cancelFlush(binding: FlushableBinding): boolean {
-  const queued = pendingUpdates.delete(binding);
-  return (flushing?.delete(binding) ?? false) || queued;
+  const inBatch = flushing?.delete(binding) ?? false;
+  const queued = pendingUpdates.delete(binding) || inBatch;
+  // The watcher of a computed notifies once per watch(): without the delivery that would
+  // have armed it again, it would stay silent for good
+  if (queued) binding.watcher?.watch();
+  return queued;
 }
 
 /**

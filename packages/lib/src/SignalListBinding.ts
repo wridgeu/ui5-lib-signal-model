@@ -6,7 +6,7 @@ import deepExtend from "sap/base/util/deepExtend";
 import extend from "sap/base/util/extend";
 import { Signal } from "signal-polyfill";
 import type SignalModel from "./SignalModel";
-import { scheduleFlush, cancelFlush, teardownWatcher } from "./FlushQueue";
+import { scheduleFlush, cancelFlush, isQueued, teardownWatcher } from "./FlushQueue";
 
 // Runtime properties/methods not exposed by @openui5/types.
 // getResolvedPath, isRelative are on the public API and don't need casting.
@@ -69,10 +69,31 @@ export default class SignalListBinding extends ClientListBinding {
   private _mergedNow = false;
   /** Counts the merges, so that the end of one does not take the mark of a later one */
   private _merges = 0;
+  /** A change event is owed for rows that were taken ahead of a merge (see _beforeMerge) */
+  private _owed = false;
+  /** The rows are to be copied again at the next check (see _missedMerge) */
+  private _missed = false;
   /** The rows are a copy of the model's (see _copyRows), taken since the last update() */
   private _ownRows = false;
   /** The rows as they were before _onRowChange() copied them in the merge that is running */
   private _sharedRows?: unknown[] | Record<string, unknown>;
+
+  /**
+   * A merge is about to take place. A write from before it that the list has not been told
+   * of is taken now, as JSONModel's list has it by then: what the merge does is then seen
+   * against the rows of that write. The change event follows with the queued update.
+   * Used by SignalModel, not part of the public API.
+   *
+   * @internal
+   */
+  _beforeMerge(): void {
+    const internal = asInternal(this);
+    if (internal.bUseExtendedChangeDetection || internal.bSuspended || !isQueued(this)) return;
+    const list = this.oModel._getObject(internal.sPath, internal.oContext) || [];
+    if (deepEqual(internal.oList, list) && !(this._merged && this._rowChanged)) return;
+    this.update();
+    this._owed = true;
+  }
 
   /**
    * A merge at `path` took place. JSONModel's merge rebuilds the merged data, so the row
@@ -163,6 +184,12 @@ export default class SignalListBinding extends ClientListBinding {
     return path.startsWith(this._below);
   }
 
+  /** As in JSONModel, a write from before is told before the binding is suspended. */
+  override suspend(): void {
+    if (cancelFlush(this)) this.checkUpdate();
+    super.suspend();
+  }
+
   /** @since 0.1.0 */
   update(): void {
     const internal = asInternal(this);
@@ -229,8 +256,19 @@ export default class SignalListBinding extends ClientListBinding {
 
     if (!internal.bUseExtendedChangeDetection) {
       // A merge that changed a row did so in place, where the comparison cannot see it
+      const missed = this._missed;
+      const owed = this._owed;
+      this._missed = this._owed = false;
       if (!deepEqual(internal.oList, list) || (this._merged && this._rowChanged) || forceUpdate) {
         this.update();
+        if (missed) {
+          // As after a merge it was told of: its own rows, so that it notices the next
+          // change in a row, which JSONModel's list does with its rows from before
+          this._copyRows();
+          this._merged = true;
+        }
+        internal._fireChange({ reason: ChangeReason.Change });
+      } else if (owed) {
         internal._fireChange({ reason: ChangeReason.Change });
       }
       return;
@@ -303,7 +341,7 @@ export default class SignalListBinding extends ClientListBinding {
    * @internal
    */
   _missedMerge(): void {
-    this._merged = this._rowChanged = true;
+    this._merged = this._rowChanged = this._missed = true;
   }
 
   /** @since 0.1.0 */

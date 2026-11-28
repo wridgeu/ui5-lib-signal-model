@@ -1,3 +1,5 @@
+import Filter from "sap/ui/model/Filter";
+import Sorter from "sap/ui/model/Sorter";
 import JSONModel from "sap/ui/model/json/JSONModel";
 import SignalModel from "ui5/model/signal/SignalModel";
 
@@ -1505,5 +1507,159 @@ QUnit.module("SignalPropertyBinding", () => {
       model.destroy();
       return shown;
     });
+  });
+
+  QUnit.test(
+    "an asynchronous write whose binding has no handler when the timer runs",
+    async (assert) => {
+      await inBoth(assert, "2,2", async (Model) => {
+        const data: Data = { a: 1, rows: [1], x: 0 };
+        const model = new Model(data);
+        const binding = model.bindProperty("/a");
+        const list = model.bindList("/rows");
+        const handler = (): void => {};
+        binding.attachChange(handler);
+        binding.initialize();
+        list.attachChange(handler);
+        list.initialize();
+        model.setProperty("/a", 2, undefined, true);
+        model.setProperty("/rows", [1, 2], undefined, true);
+        binding.detachChange(handler);
+        list.detachChange(handler);
+        await later(20);
+        binding.attachChange(handler);
+        list.attachChange(handler);
+        model.setProperty("/x", 1);
+        await later(20);
+        const shown = [binding.getValue(), list.getLength()];
+        model.destroy();
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test("setValue after a write whose change handler writes again", async (assert) => {
+    await inBoth(assert, "3,3,3,3", async (Model) => {
+      const data: Data = { a: 1 };
+      const model = new Model(data);
+      const binding = model.bindProperty("/a");
+      binding.attachChange(() => {
+        if (binding.getValue() === 2) model.setProperty("/a", 10);
+      });
+      binding.initialize();
+      model.setProperty("/a", 2);
+      binding.setValue(3);
+      await Promise.resolve();
+      await Promise.resolve();
+      const shown = [binding.getValue(), model.getProperty("/a")];
+      await later(20);
+      shown.push(binding.getValue(), model.getProperty("/a"));
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test("a list that missed a merge notices the next change in a row", async (assert) => {
+    await inBoth(assert, "z,b", async (Model) => {
+      const data: Data = { items: [{ n: "a" }, { n: "b" }], x: 0 };
+      const model = new Model(data);
+      const list = model.bindList("/items", undefined, [new Sorter("n", true)]);
+      const handler = (): void => {};
+      list.attachChange(handler);
+      list.initialize();
+      list.detachChange(handler);
+      model.setData({ x: 1 }, true);
+      list.attachChange(handler);
+      await later(20);
+      model.setProperty("/items/0/n", "z");
+      await later(20);
+      const shown = list.getContexts(0, 10).map((context) => model.getProperty("n", context));
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test("a write and suspend() in one task: the binding has the write", async (assert) => {
+    await inBoth(assert, "2,1", async (Model) => {
+      const data: Data = { a: 1, items: [1, 2, 3] };
+      const model = new Model(data);
+      const binding = model.bindProperty("/a");
+      const list = model.bindList("/items");
+      binding.attachChange(() => {});
+      binding.initialize();
+      list.attachChange(() => {});
+      list.initialize();
+      model.setProperty("/a", 2);
+      model.setProperty("/items", [9]);
+      binding.suspend();
+      list.suspend();
+      await later(20);
+      const shown = [binding.getValue(), list.getLength()];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test(
+    "a list replaced and a merge in one task: the next row write sorts",
+    async (assert) => {
+      await inBoth(assert, "1,5,2,1,1,5,2,1", async (Model) => {
+        const shown: unknown[] = [];
+        for (const own of [false, true]) {
+          const data: Data = { p: { items: [{ v: 0 }], busy: true } };
+          const model = new Model(data);
+          const list = model.bindList("/p/items", undefined, [new Sorter("v", true)]);
+          let events = 0;
+          list.attachChange(() => events++);
+          list.initialize();
+          events = 0;
+          model.setProperty("/p/items", [{ v: 2 }, { v: 1 }, { v: 1 }]);
+          // SignalModel's own way to merge, where there is one
+          if (own && model instanceof SignalModel) model.mergeProperty("/p", { busy: false });
+          else model.setData({ p: { busy: false } }, true);
+          await later(20);
+          shown.push(events);
+          model.setProperty("/p/items/1/v", 5);
+          await later(20);
+          shown.push(...list.getContexts(0, 10).map((context) => model.getProperty("v", context)));
+          model.destroy();
+        }
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test("two bindings of one path: setValue of each after a write", async (assert) => {
+    await inBoth(assert, "5,5,5", async (Model) => {
+      const data: Data = { a: 1 };
+      const model = new Model(data);
+      const first = model.bindProperty("/a");
+      const second = model.bindProperty("/a");
+      first.attachChange(() => {});
+      first.initialize();
+      second.attachChange(() => {});
+      second.initialize();
+      model.setProperty("/a", 4);
+      first.setValue(5);
+      // Has heard of 4 only, so this is no write
+      second.setValue(4);
+      const now = model.getProperty("/a");
+      await later(20);
+      const shown = [now, model.getProperty("/a"), second.getValue()];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test("a filtered tree that gets its context", (assert) => {
+    const model = new SignalModel<Record<string, unknown>>({
+      t: { kids: [{ name: "a", kids: [{ name: "a1" }] }, { name: "b" }] },
+    });
+    const tree = model.bindTree("kids", undefined, undefined, { arrayNames: ["kids"] });
+    tree.attachChange(() => {});
+    tree.filter([new Filter("name", "StartsWith", "a")], "Control");
+    tree.setContext(model.createBindingContext("/t")!);
+    assert.strictEqual(tree.getRootContexts(0, 10).length, 1, "filtered for the new context");
+    model.destroy();
   });
 });
