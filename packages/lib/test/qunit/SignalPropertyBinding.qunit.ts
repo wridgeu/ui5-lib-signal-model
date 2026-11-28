@@ -1312,7 +1312,7 @@ QUnit.module("SignalPropertyBinding", () => {
       own.items[0].n = "A";
       model.setData(own, true);
       own.o.x = 2;
-      model.setData({ o: { ...own.o } }, true);
+      model.setData(own, true);
       await later(20);
       const shown = [...bindings.map((binding) => binding.getValue()), listEvents];
       model.destroy();
@@ -1357,6 +1357,151 @@ QUnit.module("SignalPropertyBinding", () => {
       queued.attachChange(() => {});
       await later(20);
       const shown = [binding.getValue(), list.getLength(), events, listEvents, queued.getValue()];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test("a merge of a copy of the rows is no change for the list", async (assert) => {
+    await inBoth(assert, "0", async (Model) => {
+      const data: Data = { items: [{ n: "a" }, { n: "b" }] };
+      const model = new Model(data);
+      const list = model.bindList("/items");
+      let events = 0;
+      list.attachChange(() => events++);
+      list.initialize();
+      list.getContexts(0, 10);
+      events = 0;
+      model.setData({ items: (model.getData() as { items: unknown[] }).items.slice() }, true);
+      await later(20);
+      model.destroy();
+      return [events];
+    });
+  });
+
+  QUnit.test("setValue right after a write to the path writes", async (assert) => {
+    await inBoth(assert, "5,5,change 5,change 0,0,0", async (Model) => {
+      const data: Data = { qty: 5, other: 0 };
+      const model = new Model(data);
+      const binding = model.bindProperty("/qty");
+      const seen: string[] = [];
+      binding.attachChange(() => seen.push(`change ${binding.getValue()}`));
+      binding.initialize();
+      model.setProperty("/qty", 0);
+      binding.setValue(5);
+      const now = model.getProperty("/qty");
+      await later(20);
+      const first = [now, binding.getValue(), ...seen];
+      // The mirror: the value that was written just now is no write
+      let changes = 0;
+      model.attachPropertyChange(() => changes++);
+      model.setProperty("/qty", 0);
+      binding.setValue(0);
+      await later(20);
+      first.push(model.getProperty("/qty"), changes);
+      model.destroy();
+      return first;
+    });
+  });
+
+  QUnit.test(
+    "a list that was not held during a merge fires when it is held again",
+    async (assert) => {
+      await inBoth(assert, "1,1,9", async (Model) => {
+        const data: Data = { rows: [{ v: 1 }, { v: 2 }], early: [{ v: 1 }], other: 0 };
+        const model = new Model(data);
+        const list = model.bindList("/rows");
+        let events = 0;
+        const handler = (): void => void events++;
+        list.attachChange(handler);
+        list.initialize();
+        list.getContexts(0, 10);
+        // Read from before it has a handler
+        const early = model.bindList("/early");
+        early.getContexts(0, 10);
+        let earlyEvents = 0;
+        list.detachChange(handler);
+        events = 0;
+        model.setData({ rows: [{ v: 9 }], early: [{ v: 9 }] }, true);
+        list.attachChange(handler);
+        early.attachChange(() => earlyEvents++);
+        model.setProperty("/other", 1);
+        await later(20);
+        const shown = [events, earlyEvents, model.getProperty("v", list.getContexts(0, 10)[0])];
+        model.destroy();
+        return shown;
+      });
+    },
+  );
+
+  QUnit.test("initialize: suspended lists, trees and a binding that catches up", async (assert) => {
+    await inBoth(assert, "0,1,3,1,2,1,1", async (Model) => {
+      const data: Data = { l: [1], t: { kids: [{ name: "k" }] }, o: { a: 1 }, x: 0, y: { n: 0 } };
+      const model = new Model(data);
+      // A list that is initialized while suspended: resume() tells
+      const list = model.bindList("/l");
+      model.setProperty("/l", [1, 2, 3]);
+      list.suspend();
+      let listEvents = 0;
+      list.attachChange(() => listEvents++);
+      list.initialize();
+      const before = listEvents;
+      list.resume();
+      // A tree: initialize() reads again
+      const tree = model.bindTree("/t", undefined, undefined, { arrayNames: ["kids"] });
+      model.setProperty("/t/kids", [{ name: "x" }, { name: "y" }]);
+      let treeEvents = 0;
+      tree.attachChange(() => treeEvents++);
+      tree.initialize();
+      const roots = tree.getRootContexts(0, 10).length;
+      // A binding on an object that has missed a write: initialize() is its one event
+      const object = model.bindProperty("/o");
+      model.setProperty("/x", 1);
+      let objectEvents = 0;
+      object.attachChange(() => objectEvents++);
+      object.initialize();
+      // A handler that takes itself off and on again while it runs
+      const self = model.bindProperty("/y");
+      let selfEvents = 0;
+      const handler = (): void => {
+        selfEvents++;
+        self.detachChange(handler);
+        self.attachChange(handler);
+      };
+      self.attachChange(handler);
+      self.initialize();
+      selfEvents = 0;
+      // An object: a second check of it would be a second event
+      model.setProperty("/y", { n: 1 });
+      await later(20);
+      const shown = [
+        before,
+        listEvents,
+        list.getLength(),
+        treeEvents,
+        roots,
+        objectEvents,
+        selfEvents,
+      ];
+      model.destroy();
+      return shown;
+    });
+  });
+
+  QUnit.test("a list with a hole: a length written and a merge in one task", async (assert) => {
+    await inBoth(assert, "2,1", async (Model) => {
+      const data: Data = { items: [{ v: 1 }] };
+      const model = new Model(data);
+      const list = model.bindList("/items");
+      list.attachChange(() => {});
+      list.initialize();
+      model.setProperty("/items/length", 2);
+      await later(20);
+      const shown = [list.getLength()];
+      model.setProperty("/items/length", 1);
+      model.setData({ a: 1 }, true);
+      await later(20);
+      shown.push(list.getLength());
       model.destroy();
       return shown;
     });

@@ -54,7 +54,9 @@ text.getText(); // "Bob"
 
 The order of the change events of one write differs as well. JSONModel checks its bindings in the order in which they got their first change handler. SignalModel tells the bindings of the written path first, then those of the paths above it, then those below it. Code should not depend on which of two bindings hears first.
 
-A binding that lost its last change handler and gets one again has missed the writes in between. JSONModel's binding notices at the next write anywhere in the model, SignalModel's in the next microtask after the handler is attached.
+A binding that lost its last change handler and gets one again has missed the writes in between. JSONModel's binding notices at the next write anywhere in the model, SignalModel's in the next microtask after the handler is attached. A list binding fires then if a merge took place in between, also when that merge did not change its rows.
+
+One check for several writes can also end with another result. A sorted or filtered list that gets two writes in one task is sorted once, with both applied. JSONModel sorts at the first write and does not look again at the second when that one changed a row in place, so its order or length can be the stale one.
 
 `loadData` is an exception to the microtask: the bindings are updated before `requestCompleted` fires, as with JSONModel.
 
@@ -107,7 +109,7 @@ model.setProperty("/busy", false);
 // JSONModel: the list shows the new item. SignalModel: it does not.
 ```
 
-A merge covers every path of its payload, also where the payload holds the value or the very object the data holds already: `setData(model.getData(), true)` after direct changes tells of all of them.
+A merge compares its payload with the data, not with what the bindings show. After a direct change, a merge that carries the same values therefore tells nobody. The exception is the data itself as payload: `setData(model.getData(), true)`, or `mergeProperty(path, model.getProperty(path))`, checks every binding like `refresh()`.
 
 The same holds for one object that the data holds at two paths, like a selected row that is also in the list: a write through `/selected/name` tells the bindings of `/selected`, not those of `/items/0/name`. JSONModel updates both.
 

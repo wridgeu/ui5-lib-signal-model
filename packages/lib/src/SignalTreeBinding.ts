@@ -123,9 +123,13 @@ export default class SignalTreeBinding extends ClientTreeBinding {
     if (!this._subscribedPath) {
       this.subscribe();
     }
-    // Fire initial change so controls (e.g. sap.m.Tree) populate their aggregation; not
-    // while suspended, as Binding.initialize
-    if (!this.isSuspended()) asInternal(this)._fireChange({ reason: ChangeReason.Change });
+    // The forced check of Binding.initialize, which fires the initial change so controls
+    // (e.g. sap.m.Tree) populate their aggregation; not while suspended. An update queued
+    // for the binding would be a second event.
+    if (!this.isSuspended()) {
+      cancelFlush(this);
+      this.checkUpdate(true);
+    }
     return this;
   }
 

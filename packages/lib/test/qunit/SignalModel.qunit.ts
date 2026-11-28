@@ -1498,5 +1498,17 @@ QUnit.module(
       assert.ok(model.setProperty("/own/label", "x"), "a function of the data takes a property");
       model.destroy();
     });
+
+    QUnit.test("mergeProperty with what is there tells of a direct change", async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ o: { x: 1 } });
+      const binding = model.bindProperty("/o/x");
+      binding.attachChange(() => {});
+      binding.initialize();
+      (model.getData().o as { x: number }).x = 2;
+      model.mergeProperty("/o", model.getProperty("/o"));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(binding.getValue(), 2);
+      model.destroy();
+    });
   },
 );

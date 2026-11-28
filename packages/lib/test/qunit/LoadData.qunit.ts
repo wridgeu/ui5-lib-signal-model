@@ -1204,4 +1204,40 @@ QUnit.module("loadData", () => {
       model.destroy();
     },
   );
+
+  QUnit.test(
+    "requests as jQuery.ajax: a JSON body, a URL object, the cache parameter, a hole",
+    async (assert) => {
+      const originalFetch = window.fetch;
+      const sent: unknown[] = [];
+      window.fetch = (url, init) => {
+        sent.push(init?.body ?? String(url).replace(/_=\d+$/, "_=TS"));
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      };
+      const model = new SignalModel();
+      const json = '{"link":"/My%20File.pdf"}';
+      const holed = [1];
+      holed[2] = 3;
+      try {
+        await model.loadData("/a", json, true, "POST", false, true, {
+          "content-type": "application/json",
+        });
+        await model.loadData("/a", "q=a%20b", true, "POST");
+        // oxlint-disable-next-line typescript/no-explicit-any -- what JavaScript callers pass
+        await model.loadData(new URL("http://x.test/d.json?u=1") as any);
+        await model.loadData("/d.json?_=5&x=1", undefined, true, "GET", false, false);
+        await model.loadData("/h.json", { h: holed });
+      } finally {
+        window.fetch = originalFetch;
+      }
+      assert.deepEqual(sent, [
+        json,
+        "q=a+b",
+        "http://x.test/d.json?u=1",
+        "/d.json?&x=1&_=TS",
+        "/h.json?h%5B%5D=1&h%5B%5D=&h%5B%5D=3",
+      ]);
+      model.destroy();
+    },
+  );
 });

@@ -67,6 +67,8 @@ function deliver(batch: typeof pendingUpdates): void {
   // A binding destroyed or re-subscribed by an earlier update of this batch has been
   // removed from it by cancelFlush(): its queued signal is no longer the one it shows.
   for (const [b, s] of batch) {
+    // Delivered from here on: cancelFlush() no longer finds it queued
+    batch.delete(b);
     let value: unknown;
     let readFailed = false;
     try {

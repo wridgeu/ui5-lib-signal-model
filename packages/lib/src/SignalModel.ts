@@ -71,6 +71,8 @@ type BindingKeeper = { addBinding(binding: Binding): void; removeBinding(binding
 type Held = FlushableBinding & {
   _held: boolean;
   _seenWrites: number;
+  _seenMerges?: number;
+  _missedMerge?(): void;
   _subscribedPath: string | null;
   subscribe(): void;
   unsubscribe(): void;
@@ -83,11 +85,13 @@ function toQuery(parameters: Record<string, unknown> | unknown[]): string {
   const other = new Set(["Boolean", "Number", "String", "Date", "RegExp", "Error", "Symbol"]);
   const add = (key: string, value: unknown): void => {
     if (Array.isArray(value)) {
-      value.forEach((item, i) => {
+      // By index: a hole is sent as an empty value
+      for (let i = 0; i < value.length; i++) {
+        const item: unknown = value[i];
         const indexed = typeof item === "object" && item !== null;
         if (key.endsWith("[]")) put(key, item);
         else add(`${key}[${indexed ? i : ""}]`, item);
-      });
+      }
     } else if (
       typeof value === "object" &&
       value !== null &&
@@ -297,7 +301,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Upper case, as jQuery.ajax does
     const method = sentType.toUpperCase();
     // Without the fragment, as jQuery.ajax: parameters behind it would not be sent
-    let fullURL = url.replace(/#.*$/, "");
+    // Whatever turns into a string, like a URL object
+    let fullURL = String(url).replace(/#.*$/, "");
     // Fall back to model-level cache setting (set via forceNoCache), matching JSONModel.
     const effectiveCache = cache === undefined ? asInternal(this).bCache : cache;
     const info = "cache=" + effectiveCache + ";bMerge=" + merge;
@@ -314,6 +319,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
 
     // Only where a browser would cache, as jQuery.ajax
     if (effectiveCache === false && inUrl) {
+      // In place of one the URL has already
+      fullURL = fullURL.replace(/([?&])_=[^&]*/g, "$1");
       fullURL += (fullURL.includes("?") ? "&" : "?") + "_=" + Date.now();
     }
 
@@ -333,11 +340,12 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Callers wanting JSON POST must stringify manually and set Content-Type via customHeaders.
     let body: string | undefined;
     if (!inUrl && paramString) {
-      // As jQuery.ajax for a form body
-      body = paramString.replace(/%20/g, "+");
-      if (!Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
-        headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
-      }
+      body = paramString;
+      const form = "application/x-www-form-urlencoded";
+      const given = Object.keys(headers).find((name) => name.toLowerCase() === "content-type");
+      if (!given) headers["Content-Type"] = `${form}; charset=UTF-8`;
+      // As jQuery.ajax for a form body, and only for that: a JSON text stays as it is
+      if (!given || String(headers[given]).startsWith(form)) body = body.replace(/%20/g, "+");
     }
 
     asInternal(this).fireRequestSent({
@@ -582,6 +590,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     this._writes++;
     this._syncPending();
     if (merge) {
+      this._merges++;
       // Nothing to merge in, but JSONModel still rebuilds its data: see _dropUndefined().
       // Of a string, the characters are merged in, as there.
       if (!data || typeof data !== "object") {
@@ -620,6 +629,9 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
         for (const binding of this._listBindings) binding._onMerge("/");
       }
       this._observeData();
+      // The data itself as payload, after changes made to it directly: nothing to merge,
+      // every binding checks. JSONModel does that on every write.
+      if (data === this.oData) this.checkUpdate();
     } else {
       this.oData = data as T;
       this._mayHoldUndefined = true;
@@ -850,6 +862,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   mergeProperty(path: string, value: unknown, context?: Context): boolean;
   mergeProperty(path: string, value: unknown, context?: Context): boolean {
     this._writes++;
+    this._merges++;
     const resolvedPath = this._resolvePath(path, context);
     if (!resolvedPath) {
       return false;
@@ -943,6 +956,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       }
       // Objects the merge added are observed too
       if (changed) this._observeData(existing);
+      // What is there already as payload, after changes made to it directly
+      if (existing === value) this.checkUpdate();
 
       return true;
     }
@@ -984,6 +999,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     // Written since the binding was last held: it has not heard of that. JSONModel's
     // binding hears at the next write anywhere, this one in the next microtask.
     if (held._seenWrites !== this._writes && held._subscribedPath) {
+      // A merge changes rows in place, where the comparison of a list cannot see it
+      if (held._seenMerges !== this._merges) held._missedMerge?.();
       scheduleFlush(held, this._getSignal(held._subscribedPath));
     }
   }
@@ -995,6 +1012,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     const held = binding as unknown as Held;
     // With an update still queued it has not heard of every write: it catches up when held again
     held._seenWrites = cancelFlush(held) ? -1 : this._writes;
+    held._seenMerges = this._merges;
     held._held = false;
     held.unsubscribe();
   }
@@ -1017,6 +1035,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       params?: object,
     ) => SignalListBinding)(this, path, context, sorters, filters, parameters);
     binding._seenWrites = this._writes;
+    binding._seenMerges = this._merges;
     return binding;
   }
 
@@ -1122,7 +1141,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown>;
   getSignal(path: string): Signal.State<unknown> | Signal.Computed<unknown> {
     // The caller reads it: an asynchronous write so far has to be in it
-    this._syncPending();
+    this._syncForRead();
     return this._getSignal(path, true);
   }
 
@@ -1154,6 +1173,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
   private readonly _deps = new Map<string, { all: string[]; pinned: Set<string> }>();
   /** Counts the writes and checks: a binding that was not held meanwhile has to catch up */
   private _writes = 0;
+  /** Counts the merges among them */
+  private _merges = 0;
   /** Per path: how many dependencies of computeds are there or below it */
   private readonly _readAt = new Map<string, number>();
 
@@ -1220,6 +1241,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
     if (this._readAt.has(path)) {
       for (const other of this._deps.values()) other.pinned.delete(path);
     }
+    this._writes++;
     this._deps.set(path, { all: deps, pinned });
     this._countReads(deps, 1);
     // Bindings at this path or below it have to follow the new computed. They are on state
@@ -1234,6 +1256,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    */
   removeComputed(path: string): void {
     if (!this.registry.removeComputed(path, this._readDependency)) return;
+    this._writes++;
     const own = this._deps.get(path);
     this._deps.delete(path);
     this._countReads(own?.all ?? [], -1);
@@ -1262,6 +1285,7 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
    * @internal
    */
   _syncSignals(path: string): void {
+    this._writes++;
     this._mayHoldUndefined = true;
     // As a synchronous write: the asynchronous ones so far are told now. Told again by
     // their timer, a binding on an object would fire twice.
@@ -1608,19 +1632,8 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
       const oldValue = Object.hasOwn(target, key) ? target[key] : undefined;
       const newValue = source[key];
       // Like JSONModel's deepExtend: an undefined value in the payload changes nothing.
-      if (newValue === undefined) continue;
-      if (newValue === oldValue && typeof newValue === "object" && newValue !== null) {
-        // The object that is there already, like a merge of getData() after a direct
-        // change: what changed in it is unknown, so its signals are brought in line. Data
-        // that refers to itself ends here.
-        if (hasSignals) {
-          changed = true;
-          for (const binding of this._listBindings) {
-            if (binding._isAbove(childPath)) binding._onRowChange();
-          }
-          this.registry.refresh(childPath, this._readPath);
-          this.registry.invalidateChildren(childPath, this._readPath);
-        }
+      // Nor does the object that is there already; data that refers to itself ends here.
+      if (newValue === undefined || (newValue === oldValue && typeof newValue === "object")) {
         continue;
       }
 
@@ -1669,9 +1682,6 @@ export default class SignalModel<T extends object = Record<string, unknown>> ext
             this.registry.invalidateChildren(basePath || "/", this._readPath);
           }
         }
-      } else if (hasSignals) {
-        // The value the data holds already: its signal may not, after a direct change
-        this.registry.set(childPath, newValue);
       }
     }
     if (changed && hasSignals) {

@@ -1724,4 +1724,51 @@ QUnit.module("ComputedSignals", () => {
     assert.strictEqual(binding.getValue(), "k2");
     model.destroy();
   });
+
+  QUnit.test(
+    "getSignal in the function of a computed while an asynchronous write waits",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, b: 1 });
+      model.createComputed("/c", ["/a"], (a) => a * 10 + (model.getSignal("/b").get() as number));
+      const binding = model.bindProperty("/c");
+      binding.attachChange(() => {});
+      binding.initialize();
+      model.setProperty("/b", 2);
+      model.setProperty("/a", 3, undefined, true);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.strictEqual(binding.getValue(), 32);
+      model.destroy();
+    },
+  );
+
+  QUnit.test(
+    "a binding without a handler while a computed comes and goes follows",
+    async (assert) => {
+      const model = new SignalModel<Record<string, unknown>>({ a: 1, c: 5, d: 0 });
+      const binding = model.bindProperty("/c");
+      const handler = (): void => {};
+      binding.attachChange(handler);
+      binding.initialize();
+      binding.detachChange(handler);
+      model.createComputed("/c", ["/a"], (a) => a * 2);
+      binding.attachChange(handler);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(binding.getValue(), 2, "created meanwhile");
+      binding.detachChange(handler);
+      model.removeComputed("/c");
+      binding.attachChange(handler);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(binding.getValue(), 5, "removed meanwhile");
+      // The refresh() of another binding after a direct change
+      const other = model.bindProperty("/d");
+      other.attachChange(() => {});
+      binding.detachChange(handler);
+      (model.getData() as { c: number }).c = 6;
+      other.refresh();
+      binding.attachChange(handler);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(binding.getValue(), 6, "refreshed meanwhile");
+      model.destroy();
+    },
+  );
 });

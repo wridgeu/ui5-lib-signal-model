@@ -121,6 +121,9 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     if (self.bSuspended) {
       return;
     }
+    // A write the binding has not heard of yet is told first, as JSONModel has done by
+    // now: the value is compared with what the binding shows
+    if (cancelFlush(this)) this.checkUpdate();
 
     if (!deepEqual(self.oValue, value)) {
       if (this.oModel.setProperty(self.sPath, value, self.oContext, true)) {
@@ -220,8 +223,12 @@ export default class SignalPropertyBinding extends ClientPropertyBinding {
     if (!this._subscribedPath) {
       this.subscribe();
     }
-    // Not while suspended, as Binding.initialize
-    if (!asInternal(this).bSuspended) this.checkUpdate(true);
+    // Not while suspended, as Binding.initialize. This is the check: an update queued for
+    // the binding would be a second event.
+    if (!asInternal(this).bSuspended) {
+      cancelFlush(this);
+      this.checkUpdate(true);
+    }
     return this;
   }
 

@@ -127,9 +127,12 @@ export default class SignalListBinding extends ClientListBinding {
   private _copyRows(): void {
     if (this._ownRows) return;
     const internal = asInternal(this);
-    internal.oList = deepExtend(Array.isArray(internal.oList) ? [] : {}, internal.oList) as
+    const rows = internal.oList;
+    internal.oList = deepExtend(Array.isArray(rows) ? [] : {}, rows) as
       | unknown[]
       | Record<string, unknown>;
+    // The copy leaves out a hole at the end
+    if (Array.isArray(rows)) (internal.oList as unknown[]).length = rows.length;
     this._ownRows = true;
   }
 
@@ -290,6 +293,18 @@ export default class SignalListBinding extends ClientListBinding {
   _held = false;
   /** The model's count of writes when the binding last heard of them. @internal */
   _seenWrites = 0;
+  /** The model's count of merges when the binding last heard of them. @internal */
+  _seenMerges = 0;
+
+  /**
+   * A merge took place while the model did not hold the binding. It changed rows in place,
+   * where the comparison cannot see it: the next check takes the rows as changed.
+   *
+   * @internal
+   */
+  _missedMerge(): void {
+    this._merged = this._rowChanged = true;
+  }
 
   /** @since 0.1.0 */
   subscribe(): void {
@@ -332,14 +347,18 @@ export default class SignalListBinding extends ClientListBinding {
    * @since 0.1.0
    */
   override initialize(): this {
-    this.update();
     if (!this._subscribedPath) {
       this.subscribe();
     }
-    // Fire initial change so controls (e.g. sap.m.List) populate their aggregation; not
-    // while suspended, as Binding.initialize
+    // Nothing while suspended, as Binding.initialize: resume() compares with the rows
+    // from before
     const internal = asInternal(this);
-    if (!internal.bSuspended) internal._fireChange({ reason: ChangeReason.Change });
+    if (internal.bSuspended) return this;
+    // This is the check: an update queued for the binding would be a second event
+    cancelFlush(this);
+    this.update();
+    // Fire initial change so controls (e.g. sap.m.List) populate their aggregation
+    internal._fireChange({ reason: ChangeReason.Change });
     return this;
   }
 
